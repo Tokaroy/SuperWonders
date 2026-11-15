@@ -707,9 +707,12 @@ void page_files() {
                                    (g->config.romfs.empty() ? std::string() : "\n\nNow: " + g->config.romfs);
     if (rows::action(lt(LtRomFSFolder), romfs.c_str(), romfs_desc.c_str(), true)) browse_open(2);
     const char* const modes[] = {lt(LtUseInPlace), lt(LtCopyIt)};
+    // Both RomFS rows share a translated label, so give the storage mode its own ID scope.
+    ImGui::PushID("romfs-storage-mode");
     rows::choice(lt(LtRomFSFolder), &g->config.romfs_copy, modes, 2, 1,
                  "Copy it: SuperWonders keeps its own copy (about 3.6 GB), so it keeps working if you move or delete "
                  "yours. Use it in place: no copy, but SuperWonders needs your RomFS folder where it is.");
+    ImGui::PopID();
     rows::section(lt(LtSetUp));
     const bool exefs_ok = folder_has(g->config.exefs, "main") && folder_has(g->config.exefs, "sdk");
     const bool romfs_ok = folder_has(g->config.romfs, "Shader");
