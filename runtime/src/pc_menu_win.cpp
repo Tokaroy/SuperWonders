@@ -25,15 +25,26 @@ constexpr int kLanguageTop = 31;
 constexpr int kLanguageBottom = 66;
 constexpr int kLanguageItemHeight = 27;
 constexpr int kResolution[][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
-constexpr const wchar_t* kInternalResolution[][7] = {
+constexpr const wchar_t* kInternalResolution[13][7] = {
     {L"Original / Dynamic", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Native (screen)"},
     {L"Originale / dinamica", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativa (schermo)"},
     {L"Original / Dynamisch", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativ (Bildschirm)"},
     {L"Originale / dynamique", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Native (écran)"},
+    {L"Original / dinámico", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativa (pantalla)"},
+    {L"원본 / 동적", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"네이티브 (화면)"},
+    {L"オリジナル / 動的", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"ネイティブ (画面)"},
+    {L"أصلية / ديناميكية", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"أصلية (الشاشة)"},
+    {L"Исходное / динамическое", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Экранное"},
+    {L"Özgün / Dinamik", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Doğal (ekran)"},
+    {L"Origineel / dynamisch", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Schermresolutie"},
+    {L"原始 / 动态", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"屏幕原生"},
+    {L"原始 / 動態", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"螢幕原生"},
 };
-constexpr const wchar_t* kLanguageNames[] = {L"English", L"Italiano", L"Deutsch", L"Français"};
+constexpr const wchar_t* kLanguageNames[] = {L"English", L"Italiano", L"Deutsch", L"Français", L"Español", L"한국어", L"日本語", L"العربية", L"Русский", L"Türkçe", L"Nederlands", L"简体中文", L"繁體中文"};
 constexpr const wchar_t* kGameLanguageNames[] = {
-    L"English", L"Italiano", L"Deutsch", L"Français", L"Português (Brasil)"};
+    L"English", L"Italiano", L"Deutsch", L"Français", L"Português (Brasil)", L"Español", L"한국어", L"日本語",
+    L"Nederlands", L"Русский", L"Simplified Chinese", L"Traditional Chinese"};
+constexpr int kGameLanguageItemHeight = 20;
 constexpr int kFrameCaps[] = {30, 60, 90, 120, 144};
 
 struct Labels {
@@ -65,7 +76,7 @@ struct Labels {
     const wchar_t* restart_low_vram;
 };
 
-constexpr Labels kLabels[] = {
+constexpr Labels kLabels[13] = {
     {L"Quick Settings", L"F1 or Esc to close", L"Video", L"Audio", L"Controls", L"Overlay", L"Window / output size",
      L"Internal resolution", L"Enable fullscreen", L"Exit fullscreen", L"Always on top: On", L"Always on top: Off",
       L"Game volume", L"Mute audio", L"Unmute audio", L"Game language", L"Restart the game to apply the language.", L"Button layout",
@@ -86,26 +97,58 @@ constexpr Labels kLabels[] = {
       L"Toujours au premier plan : non", L"Volume du jeu", L"Couper le son", L"Rétablir le son", L"Langue du jeu", L"Redémarrez le jeu pour appliquer la langue.", L"Disposition des touches",
      L"A : bas (A / Croix)     B : droite (B / Cercle)", L"A : droite (B / Cercle)     B : bas (A / Croix)",
      L"La résolution interne s'applique après redémarrage.", L"Limite d’images/s", L"Système", L"Seuil de nettoyage mémoire", L"Profil VRAM réduit", L"Redémarrez pour appliquer le profil de textures."},
+    {L"Ajustes rápidos", L"F1 o Esc para cerrar", L"Vídeo", L"Audio", L"Controles", L"Superposición", L"Tamaño de ventana / salida", L"Resolución interna", L"Activar pantalla completa", L"Salir de pantalla completa", L"Siempre visible: sí", L"Siempre visible: no", L"Volumen del juego", L"Silenciar audio", L"Activar sonido", L"Idioma del juego", L"Reinicia el juego para aplicar el idioma.", L"Distribución de botones", L"A: abajo     B: derecha", L"A: derecha     B: abajo", L"La resolución interna se aplica al reiniciar.", L"Límite de FPS", L"Sistema", L"Umbral de limpieza de memoria", L"Perfil de poca VRAM", L"Reinicia para aplicar el perfil de texturas."},
+    {L"빠른 설정", L"F1 또는 Esc로 닫기", L"비디오", L"오디오", L"조작", L"오버레이", L"창 / 출력 크기", L"내부 해상도", L"전체 화면 켜기", L"전체 화면 끄기", L"항상 위: 켜짐", L"항상 위: 꺼짐", L"게임 음량", L"음소거", L"음소거 해제", L"게임 언어", L"언어를 적용하려면 게임을 다시 시작하세요.", L"버튼 배치", L"A: 아래     B: 오른쪽", L"A: 오른쪽     B: 아래", L"내부 해상도는 재시작 후 적용됩니다.", L"프레임 제한", L"시스템", L"메모리 정리 기준", L"저 VRAM 프로필", L"텍스처 프로필 적용을 위해 다시 시작하세요."},
+    {L"クイック設定", L"F1 または Esc で閉じる", L"映像", L"音声", L"操作", L"オーバーレイ", L"ウィンドウ / 出力サイズ", L"内部解像度", L"全画面を有効化", L"全画面を終了", L"常に手前: オン", L"常に手前: オフ", L"ゲーム音量", L"ミュート", L"ミュート解除", L"ゲームの言語", L"言語の変更にはゲームの再起動が必要です。", L"ボタン配置", L"A: 下     B: 右", L"A: 右     B: 下", L"内部解像度は再起動後に適用されます。", L"フレームレート上限", L"システム", L"メモリ解放のしきい値", L"低 VRAM プロファイル", L"テクスチャ設定の適用には再起動が必要です。"},
+    {L"الإعدادات السريعة", L"اضغط F1 أو Esc للإغلاق", L"الفيديو", L"الصوت", L"التحكم", L"عرض الأداء", L"حجم النافذة / الإخراج", L"الدقة الداخلية", L"تفعيل ملء الشاشة", L"إنهاء ملء الشاشة", L"دائماً في المقدمة: نعم", L"دائماً في المقدمة: لا", L"مستوى صوت اللعبة", L"كتم الصوت", L"إلغاء كتم الصوت", L"لغة اللعبة", L"أعد تشغيل اللعبة لتطبيق اللغة.", L"تخطيط الأزرار", L"A: أسفل     B: يمين", L"A: يمين     B: أسفل", L"تُطبق الدقة الداخلية بعد إعادة التشغيل.", L"حد معدل الإطارات", L"النظام", L"حد تنظيف الذاكرة", L"ملف VRAM منخفض", L"أعد التشغيل لتطبيق ملف الأنسجة."},
+    {L"Быстрые настройки", L"F1 или Esc — закрыть", L"Видео", L"Звук", L"Управление", L"Оверлей", L"Размер окна / вывода", L"Внутреннее разрешение", L"Полный экран", L"Выйти из полного экрана", L"Поверх окон: да", L"Поверх окон: нет", L"Громкость игры", L"Без звука", L"Включить звук", L"Язык игры", L"Перезапустите игру, чтобы применить язык.", L"Раскладка кнопок", L"A: снизу     B: справа", L"A: справа     B: снизу", L"Разрешение применится после перезапуска.", L"Ограничение FPS", L"Система", L"Порог очистки памяти", L"Профиль низкой VRAM", L"Перезапустите игру для применения профиля текстур."},
+    {L"Hızlı Ayarlar", L"F1 veya Esc ile kapat", L"Video", L"Ses", L"Kontroller", L"Performans katmanı", L"Pencere / çıktı boyutu", L"Dahili çözünürlük", L"Tam ekranı aç", L"Tam ekrandan çık", L"Her zaman üstte: açık", L"Her zaman üstte: kapalı", L"Oyun sesi", L"Sesi kapat", L"Sesi aç", L"Oyun dili", L"Dili uygulamak için oyunu yeniden başlatın.", L"Düğme düzeni", L"A: altta     B: sağda", L"A: sağda     B: altta", L"Dahili çözünürlük yeniden başlatınca uygulanır.", L"Kare hızı sınırı", L"Sistem", L"Bellek temizleme eşiği", L"Düşük VRAM profili", L"Doku profilini uygulamak için yeniden başlatın."},
+    {L"Snelle instellingen", L"F1 of Esc om te sluiten", L"Beeld", L"Audio", L"Besturing", L"Overlay", L"Venster- / uitvoergrootte", L"Interne resolutie", L"Volledig scherm aan", L"Volledig scherm uit", L"Altijd op voorgrond: aan", L"Altijd op voorgrond: uit", L"Spelvolume", L"Geluid dempen", L"Geluid aan", L"Speltaal", L"Start het spel opnieuw om de taal toe te passen.", L"Knopindeling", L"A: onder     B: rechts", L"A: rechts     B: onder", L"Interne resolutie wordt toegepast na opnieuw starten.", L"FPS-limiet", L"Systeem", L"Geheugenopruimdrempel", L"Laag-VRAM-profiel", L"Start opnieuw om het textuurprofiel toe te passen."},
+    {L"快速设置", L"按 F1 或 Esc 关闭", L"视频", L"音频", L"控制", L"性能叠加层", L"窗口 / 输出大小", L"内部解析度", L"开启全屏", L"退出全屏", L"窗口置顶：开", L"窗口置顶：关", L"游戏音量", L"静音", L"取消静音", L"游戏语言", L"重新启动游戏以应用语言。", L"按键布局", L"A：下方     B：右侧", L"A：右侧     B：下方", L"重新启动游戏后应用内部解析度。", L"帧率上限", L"系统", L"内存清理阈值", L"低显存配置", L"重新启动游戏以应用纹理配置。"},
+    {L"快速設定", L"按 F1 或 Esc 關閉", L"影片", L"音訊", L"控制", L"效能覆蓋層", L"視窗 / 輸出大小", L"內部解析度", L"開啟全螢幕", L"結束全螢幕", L"視窗置頂：開", L"視窗置頂：關", L"遊戲音量", L"靜音", L"取消靜音", L"遊戲語言", L"重新啟動遊戲以套用語言。", L"按鍵配置", L"A：下方     B：右側", L"A：右側     B：下方", L"重新啟動遊戲後套用內部解析度。", L"影格率上限", L"系統", L"記憶體清理閾值", L"低顯示記憶體設定", L"重新啟動遊戲以套用材質設定。"},
 };
 
-constexpr const wchar_t* kOverlayLabels[4][6] = {
+constexpr const wchar_t* kOverlayLabels[13][6] = {
     {L"Metrics overlay", L"FPS", L"1% lows", L"Game speed", L"Frametime graph", L"Overlay position"},
     {L"Overlay metriche", L"FPS", L"Minimi 1%", L"Velocità gioco", L"Grafico frametime", L"Posizione overlay"},
     {L"Metrik-Overlay", L"FPS", L"1%-Tiefstwerte", L"Spieltempo", L"Frametime-Diagramm", L"Overlay-Position"},
     {L"Superposition métriques", L"FPS", L"1 % les plus bas", L"Vitesse du jeu", L"Graphique frametime", L"Position de l’overlay"},
+    {L"Superposición", L"FPS", L"Mínimos del 1 %", L"Velocidad del juego", L"Gráfico de frametime", L"Posición"},
+    {L"성능 오버레이", L"FPS", L"1% 하위 FPS", L"게임 속도", L"프레임 시간 그래프", L"위치"},
+    {L"パフォーマンス表示", L"FPS", L"1% Low", L"ゲーム速度", L"フレーム時間グラフ", L"表示位置"},
+    {L"عرض الأداء", L"FPS", L"أدنى 1٪", L"سرعة اللعبة", L"مخطط زمن الإطار", L"الموضع"},
+    {L"Оверлей производительности", L"FPS", L"1% минимум", L"Скорость игры", L"График времени кадра", L"Положение"},
+    {L"Performans katmanı", L"FPS", L"%1 düşük", L"Oyun hızı", L"Kare süresi grafiği", L"Konum"},
+    {L"Prestatie-overlay", L"FPS", L"1%-laagste", L"Spelsnelheid", L"Framet grafiek", L"Overlaypositie"},
+    {L"性能叠加层", L"FPS", L"1%低帧", L"游戏速度", L"帧时间图表", L"叠加层位置"},
+    {L"效能覆蓋層", L"FPS", L"1%低幀", L"遊戲速度", L"影格時間圖表", L"覆蓋層位置"},
 };
-constexpr const wchar_t* kToggleLabels[4][2] = {
+constexpr const wchar_t* kToggleLabels[13][2] = {
     {L"Off", L"On"}, {L"Disattivo", L"Attivo"}, {L"Aus", L"Ein"}, {L"Désactivé", L"Activé"},
+    {L"Desactivado", L"Activado"}, {L"끔", L"켬"}, {L"オフ", L"オン"}, {L"إيقاف", L"تشغيل"},
+    {L"Выкл.", L"Вкл."}, {L"Kapalı", L"Açık"}, {L"Uit", L"Aan"}, {L"关", L"开"}, {L"關", L"開"},
 };
-constexpr const wchar_t* kOverlayPositions[4][4] = {
+constexpr const wchar_t* kOverlayPositions[13][4] = {
     {L"Top left", L"Top right", L"Bottom left", L"Bottom right"},
     {L"In alto a sinistra", L"In alto a destra", L"In basso a sinistra", L"In basso a destra"},
     {L"Oben links", L"Oben rechts", L"Unten links", L"Unten rechts"},
     {L"En haut à gauche", L"En haut à droite", L"En bas à gauche", L"En bas à droite"},
+    {L"Arriba izquierda", L"Arriba derecha", L"Abajo izquierda", L"Abajo derecha"},
+    {L"Sol üst", L"Sağ üst", L"Sol alt", L"Sağ alt"},
+    {L"左上", L"右上", L"左下", L"右下"},
+    {L"أعلى اليسار", L"أعلى اليمين", L"أسفل اليسار", L"أسفل اليمين"},
+    {L"Сверху слева", L"Сверху справа", L"Снизу слева", L"Снизу справа"},
+    {L"Sol üst", L"Sağ üst", L"Sol alt", L"Sağ alt"},
+    {L"Linksboven", L"Rechtsboven", L"Linksonder", L"Rechtsonder"},
+    {L"左上", L"右上", L"左下", L"右下"},
+    {L"左上", L"右上", L"左下", L"右下"},
 };
-constexpr const wchar_t* kControlHeaders[4][2] = {
+constexpr const wchar_t* kControlHeaders[13][2] = {
     {L"Keyboard", L"Controller"}, {L"Tastiera", L"Controller"}, {L"Tastatur", L"Controller"},
-    {L"Clavier", L"Manette"},
+    {L"Clavier", L"Manette"}, {L"Teclado", L"Mando"}, {L"키보드", L"컨트롤러"},
+    {L"キーボード", L"コントローラー"}, {L"لوحة المفاتيح", L"وحدة التحكم"},
+    {L"Клавиатура", L"Контроллер"}, {L"Klavye", L"Kontrolcü"}, {L"Toetsenbord", L"Controller"},
+    {L"键盘", L"控制器"}, {L"鍵盤", L"控制器"},
 };
 constexpr const wchar_t* kControlActions[kPcControlCount] = {
     L"A", L"B", L"X", L"Y", L"L", L"R", L"ZL", L"ZR", L"Plus", L"Minus", L"L Stick", L"R Stick",
@@ -135,7 +178,7 @@ CaptureDevice g_capture_device = CaptureDevice::None;
 int g_capture_action = -1;
 constexpr UINT kCaptureControllerMessage = WM_APP + 41;
 
-const Labels& labels() { return kLabels[std::clamp(g_state.language, 0, 3)]; }
+const Labels& labels() { return kLabels[std::clamp(g_state.language, 0, 12)]; }
 
 void notify(bool persist) {
     if (g_apply) g_apply(g_state, persist);
@@ -199,7 +242,7 @@ void paint_video(HDC dc) {
     paint_arrow(dc, 183, resolution);
 
     paint_text(dc, text.internal_resolution, RECT{44, 235, 385, 263}, RGB(214, 222, 238), 16);
-    paint_arrow(dc, 270, kInternalResolution[std::clamp(g_state.language, 0, 3)]
+    paint_arrow(dc, 270, kInternalResolution[std::clamp(g_state.language, 0, 12)]
                                            [std::clamp(g_state.internal_resolution, 0, 6)]);
 
     paint_text(dc, text.frame_cap, RECT{44, 300, 385, 328}, RGB(214, 222, 238), 16);
@@ -253,7 +296,7 @@ void paint_controls(HDC dc) {
     rounded(dc, RECT{288, 143, 516, 173}, !standard ? RGB(43, 70, 105) : RGB(35, 43, 61),
             !standard ? RGB(102, 174, 255) : RGB(68, 81, 105), 8);
     paint_text(dc, L"Nintendo", RECT{294, 143, 510, 173}, RGB(238, 243, 252), 13, DT_CENTER);
-    const int language = std::clamp(g_state.language, 0, 3);
+    const int language = std::clamp(g_state.language, 0, 12);
     paint_text(dc, kControlHeaders[language][0], RECT{155, 177, 327, 198}, RGB(177, 194, 218), 12, DT_CENTER);
     paint_text(dc, kControlHeaders[language][1], RECT{331, 177, 515, 198}, RGB(177, 194, 218), 12, DT_CENTER);
     for (size_t i = 0; i < kPcControlCount; ++i) {
@@ -289,7 +332,7 @@ void paint_controls(HDC dc) {
 void paint_overlay_toggle(HDC dc, RECT r, int label_index, bool active) {
     rounded(dc, r, active ? RGB(43, 70, 105) : RGB(35, 43, 61),
             active ? RGB(102, 174, 255) : RGB(68, 81, 105), 9);
-    const int language = std::clamp(g_state.language, 0, 3);
+    const int language = std::clamp(g_state.language, 0, 12);
     paint_text(dc, kOverlayLabels[language][label_index], RECT{r.left + 14, r.top, r.right - 115, r.bottom},
                RGB(230, 235, 245), 15);
     paint_text(dc, kToggleLabels[language][active ? 1 : 0], RECT{r.right - 108, r.top, r.right - 14, r.bottom},
@@ -302,7 +345,7 @@ void paint_overlay(HDC dc) {
     paint_overlay_toggle(dc, RECT{44, 247, 516, 289}, 2, g_state.metric_one_percent_low);
     paint_overlay_toggle(dc, RECT{44, 295, 516, 337}, 3, g_state.metric_game_speed);
     paint_overlay_toggle(dc, RECT{44, 343, 516, 385}, 4, g_state.metric_frametime_graph);
-    const int language = std::clamp(g_state.language, 0, 3);
+    const int language = std::clamp(g_state.language, 0, 12);
     paint_text(dc, kOverlayLabels[language][5], RECT{44, 395, 516, 421}, RGB(214, 222, 238), 15);
     rounded(dc, RECT{44, 426, 516, 470}, RGB(35, 43, 61), RGB(92, 108, 136), 8);
     paint_text(dc, kOverlayPositions[language][std::clamp(g_state.overlay_position, 0, 3)],
@@ -350,7 +393,7 @@ void paint_system(HDC dc) {
     rounded(dc, RECT{44, 397, 516, 443}, g_state.low_vram_profile ? RGB(43, 70, 105) : RGB(35, 43, 61),
             g_state.low_vram_profile ? RGB(102, 174, 255) : RGB(68, 81, 105));
     paint_text(dc, text.low_vram, RECT{58, 397, 394, 443}, RGB(230, 235, 245), 15);
-    paint_text(dc, kToggleLabels[std::clamp(g_state.language, 0, 3)][g_state.low_vram_profile ? 1 : 0],
+    paint_text(dc, kToggleLabels[std::clamp(g_state.language, 0, 12)][g_state.low_vram_profile ? 1 : 0],
                RECT{400, 397, 502, 443}, RGB(145, 207, 255), 14, DT_RIGHT);
     paint_paragraph(dc, L"When ASTC is not supported by the GPU, store decoded ASTC textures as BC3 instead of RGBA8. This can greatly reduce texture memory; image quality may be slightly lower. Restart required.",
                     RECT{48, 455, 510, 520}, RGB(145, 162, 187), 13);
@@ -366,7 +409,7 @@ void paint(HWND h) {
     const Labels& text = labels();
     paint_text(dc, text.title, RECT{32, 26, 365, 68}, RGB(245, 247, 255), 24);
     rounded(dc, RECT{kLanguageLeft, kLanguageTop, kLanguageRight, kLanguageBottom}, RGB(35, 43, 61), RGB(92, 108, 136));
-    paint_text(dc, kLanguageNames[std::clamp(g_state.language, 0, 3)],
+    paint_text(dc, kLanguageNames[std::clamp(g_state.language, 0, 12)],
                RECT{kLanguageLeft + 8, kLanguageTop, kLanguageRight - 28, kLanguageBottom}, RGB(238, 243, 252), 14,
                DT_CENTER);
     paint_text(dc, g_language_dropdown ? L"▴" : L"▾", RECT{kLanguageRight - 28, kLanguageTop,
@@ -396,7 +439,7 @@ void paint(HWND h) {
         }
     }
     if (g_overlay_position_dropdown && g_section == Section::Overlay) {
-        const int language = std::clamp(g_state.language, 0, 3);
+        const int language = std::clamp(g_state.language, 0, 12);
         for (int i = 0; i < 4; ++i) {
             const int top = 472 + i * 27;
             rounded(dc, RECT{44, top, 516, top + 27}, i == g_state.overlay_position ? RGB(52, 84, 126) : RGB(35, 43, 61),
@@ -407,10 +450,10 @@ void paint(HWND h) {
     }
     if (g_game_language_dropdown && g_section == Section::Audio) {
         for (int i = 0; i < int(std::size(kGameLanguageNames)); ++i) {
-            const int top = 386 + i * kLanguageItemHeight;
-            rounded(dc, RECT{44, top, 516, top + kLanguageItemHeight},
+            const int top = 386 + i * kGameLanguageItemHeight;
+            rounded(dc, RECT{44, top, 516, top + kGameLanguageItemHeight},
                     i == g_state.game_language ? RGB(52, 84, 126) : RGB(35, 43, 61), RGB(92, 108, 136), 6);
-            paint_text(dc, kGameLanguageNames[i], RECT{52, top, 508, top + kLanguageItemHeight},
+            paint_text(dc, kGameLanguageNames[i], RECT{52, top, 508, top + kGameLanguageItemHeight},
                        RGB(238, 243, 252), 14, DT_CENTER | DT_VCENTER);
         }
     }
@@ -491,8 +534,8 @@ LRESULT CALLBACK menu_proc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                 return 0;
             }
             if (g_game_language_dropdown && g_section == Section::Audio && x >= 44 && x <= 516 && y >= 386 &&
-                y < 386 + int(std::size(kGameLanguageNames)) * kLanguageItemHeight) {
-                g_state.game_language = (y - 386) / kLanguageItemHeight;
+                y < 386 + int(std::size(kGameLanguageNames)) * kGameLanguageItemHeight) {
+                g_state.game_language = (y - 386) / kGameLanguageItemHeight;
                 g_game_language_dropdown = false;
                 notify(true);
                 return 0;
@@ -643,7 +686,7 @@ LRESULT CALLBACK menu_proc(HWND h, UINT msg, WPARAM w, LPARAM l) {
 void pc_menu_init(HWND owner, const PcMenuState& state, PcMenuApply apply) {
     g_owner = owner;
     g_state = state;
-    g_state.language = std::clamp(g_state.language, 0, 3);
+    g_state.language = std::clamp(g_state.language, 0, 12);
     g_state.game_language = std::clamp(g_state.game_language, 0, int(std::size(kGameLanguageNames)) - 1);
     g_state.controller_preset = std::clamp(g_state.controller_preset, 0, 1);
     g_state.overlay_position = std::clamp(g_state.overlay_position, 0, 3);

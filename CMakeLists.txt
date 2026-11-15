@@ -25,6 +25,9 @@ endif()
 set(NX_GEN_DIR "${NX_GEN_DEFAULT}" CACHE PATH "Recompiled module sources")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Localized source strings are UTF-8 and narrow literals must remain UTF-8 in the executable too.
+    # Setting only the input charset still lets Clang convert unrepresentable scripts to '?' on Windows.
+    add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
     add_compile_options(-Wno-unused-label -Wno-unused-value -Wno-parentheses-equality -Wno-unused-variable
                         -Wno-unused-but-set-variable -Wno-constant-logical-operand -Wno-unused-function)
 endif()
@@ -438,7 +441,7 @@ else()
             target_link_options(${NX_GAME} PRIVATE -static)
         endif()
     else()
-        target_link_libraries(${NX_GAME} PRIVATE ${NX_GAME_MODULES} xinput xaudio2 ole32 psapi)
+        target_link_libraries(${NX_GAME} PRIVATE ${NX_GAME_MODULES} xinput xaudio2 ole32 psapi winhttp)
     endif()
     if(WIN32)
         target_link_libraries(${NX_GAME} PRIVATE SDL3::SDL3-static)

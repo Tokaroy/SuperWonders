@@ -228,6 +228,8 @@ bool enabled() {
     return on;
 }
 
+int menu_language() { return std::clamp(g_settings.language, 0, 12); }
+
 void init(const Host& host, const Settings& s) {
     std::lock_guard lk(g_lock);
     g_host = host;

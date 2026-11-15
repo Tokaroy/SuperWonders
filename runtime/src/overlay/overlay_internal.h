@@ -31,7 +31,7 @@ struct MenuContext {
 };
 void draw_menu(MenuContext& c);
 int menu_tab_count();
-const char* const* menu_language_names();  // 4 entries
+const char* const* menu_language_names();  // 10 entries
 
 // overlay.cpp: apply and persist after a change made in the menu
 void settings_changed(bool persist);

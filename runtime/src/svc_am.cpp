@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <iterator>
 
 #include "ipc.h"
 #include "platform.h"
@@ -40,7 +41,7 @@ void set_native_render_width(uint32_t width) {
 
 void set_game_language(int language) {
     if (language < 0) language = 0;
-    if (language > 4) language = 4;
+    if (language > 11) language = 11;
     g_game_language.store(language, std::memory_order_relaxed);
 }
 
@@ -169,9 +170,10 @@ std::shared_ptr<Service> application_functions() {
         s.cmds[20] = [](IpcCtx& c) { c.push<uint64_t>(0); return 0u; };  // EnsureSaveData
         s.cmds[21] = [](IpcCtx& c) {                                      // GetDesiredLanguage
             uint64_t code = 0;
-            static constexpr const char* codes[] = {"en-US", "it", "de", "fr", "pt-BR"};
+            // This order matches the game-language selectors and their persisted IDs.
+            static constexpr const char* codes[] = {"en-US", "it", "de", "fr", "pt-BR", "es", "ko", "ja", "nl", "ru", "zh-CN", "zh-TW"};
             const int language = g_game_language.load(std::memory_order_relaxed);
-            const char* selected = codes[language >= 0 && language < 5 ? language : 0];
+            const char* selected = codes[language >= 0 && language < int(std::size(codes)) ? language : 0];
             std::memcpy(&code, selected, std::strlen(selected));
             static int logged_language = -1;
             if (logged_language != language) {
