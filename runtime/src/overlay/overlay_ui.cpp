@@ -9,6 +9,7 @@
 #include <deque>
 #include <mutex>
 #include <string>
+#include <iterator>
 
 #include "imgui_internal.h"  // ImGuiStorage of the current window
 
@@ -33,10 +34,28 @@ const unsigned char kTitleFont[] = {
 #embed "../../../third_party/fonts/Nunito/Nunito-ExtraBold.ttf"
 };
 #endif
+#if __has_embed("../../../third_party/fonts/NotoFallback/NotoSansJP-menu.ttf")
+#define NX_NOTO_MENU_JP 1
+const unsigned char kNotoMenuJP[] = {
+#embed "../../../third_party/fonts/NotoFallback/NotoSansJP-menu.ttf"
+};
+#endif
+#if __has_embed("../../../third_party/fonts/NotoFallback/NotoSansKR-menu.ttf")
+#define NX_NOTO_MENU_KR 1
+const unsigned char kNotoMenuKR[] = {
+#embed "../../../third_party/fonts/NotoFallback/NotoSansKR-menu.ttf"
+};
+#endif
+#if __has_embed("../../../third_party/fonts/NotoFallback/NotoSansArabic-menu.ttf")
+#define NX_NOTO_MENU_ARABIC 1
+const unsigned char kNotoMenuArabic[] = {
+#embed "../../../third_party/fonts/NotoFallback/NotoSansArabic-menu.ttf"
+};
+#endif
 #pragma clang diagnostic pop
 #endif
 
-// Fonts with the menu languages' letters, if the embedded ones are missing (ImGui's own font has ASCII only).
+// Base-font fallbacks (the in-game menu also merges script glyphs from OS fonts below).
 const char* const kSystemFonts[] = {
 #if defined(_WIN32)
     "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf",
@@ -44,6 +63,10 @@ const char* const kSystemFonts[] = {
     "/System/Library/Fonts/Supplemental/Arial.ttf",
 #else
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJKkr-Regular.otf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 #endif
 };
@@ -55,8 +78,31 @@ constexpr float kBody1080 = 29.0f;  // the menu rows at 1080 p (Savage Wind's si
 ImFont* g_body = nullptr;
 ImFont* g_title = nullptr;
 
-// Latin-1 plus the punctuation the four menu languages use (’ – — … •) and a few symbols.
+// Latin-1 plus menu punctuation. Script glyphs used by the in-game menu and launcher are merged below.
 const ImWchar kRanges[] = {0x0020, 0x00FF, 0x2013, 0x2014, 0x2018, 0x201E, 0x2022, 0x2026, 0x2190, 0x2193, 0};
+const char kLocalizedGlyphs[] = "ÉÖÜßàáäçèéêíñóöùúüğışАБВГЗИКМОПРСУЭЯабвгдежзийклмнопрстуфхцчшыьэюяءأإئابةتجحخدذرزسشصضطظعغفقكلمنهوىيًُ٪—’、。いがきさしじすたでにのはまるれをァアィイウエォオキクグケゲコサシジスズタチッテトドナニネバパフブプボマミムメモャュラリルレロンー上下了位低作値像全内再出前力動右同声変定左常度後必性手振操放方日映時更期本用画異的示終置表要解言設語起速適部配量閉間限面音간거게국그기내너네뉴는능니다닫도동됩드등디또래량러레려력로롤료른를리링마메면명모방배버보본부브비빠상선설성세소속스시십싱아안앨어언업에오요용원위을음이일임자작재저적전정제조종준진쪽창처체출치컨케크키터텍템트튼티표프플필하한항해화후PlayGme fisStngModUpQurWAbYExFRCh.cOBkVHDvwT'Izq-KZLJjÀ파데폴더택현서사복열새고침완코빌야합되지않뒤페먼홈라법취新概ダ選択こ場所使うピセデ開く準備完ビてだ未戻ペ始先ョホそ他法ثФНДÇİ";
+
+const char kAdditionalLocalizedGlyphs[] = "简体繁體快速设置视频音频控制性能叠加层窗口输出大小内部解析度全屏窗口置顶游戏音量静音游戏语言重新启动游戏以应用语言按键布局下方右侧帧率上限系统内存清理阈值低显存配置纹理显示画面帧同步升频锐化抗锯齿各向异性过滤垂直同步震动退出菜单语言帧时间图表位置键盘控制器原始动态屏幕原生快速設定影片音訊效能覆蓋層視窗輸出大小內部解析度全螢幕遊戲音量靜音遊戲語言重新啟動遊戲以套用語言按鍵配置影格率上限系統記憶體清理閾值低顯示記憶體設定材質顯示畫面升頻反鋸齒過濾垂直同步震動結束選單語言影格時間圖表鍵盤控制器原始動態螢幕原生";
+const char kLauncherLocalizedGlyphs[] = "开始文件模组更新退出";
+
+const char* const kScriptFonts[] = {
+#if defined(_WIN32)
+    "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/msgothic.ttc", "C:/Windows/Fonts/YuGothR.ttc", "C:/Windows/Fonts/malgun.ttf",
+    "C:/Windows/Fonts/gulim.ttc", "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simsun.ttc",
+    "C:/Windows/Fonts/mingliu.ttc",
+#elif defined(__APPLE__)
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+#else
+    "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJKkr-Regular.otf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+#endif
+};
 
 struct Notice {
     std::string text;
@@ -167,6 +213,63 @@ void load_fonts() {
         g_body = io.Fonts->AddFontDefault(&c);
     }
     if (!g_title) g_title = g_body;
+    ImFontGlyphRangesBuilder glyph_builder;
+    glyph_builder.AddText(kLocalizedGlyphs);
+    glyph_builder.AddText(kAdditionalLocalizedGlyphs);
+    glyph_builder.AddText(kLauncherLocalizedGlyphs);
+    // ImGui keeps this pointer in the font config and consumes it later, when the
+    // Vulkan backend builds the atlas on its first NewFrame. Keep it alive beyond
+    // this function; a local vector here leaves every merged fallback with a
+    // dangling glyph-range pointer.
+    static ImVector<ImWchar> localized_ranges;
+    localized_ranges.clear();
+    glyph_builder.BuildRanges(&localized_ranges);
+#if defined(NX_NOTO_MENU_JP) || defined(NX_NOTO_MENU_KR) || defined(NX_NOTO_MENU_ARABIC)
+    ImFontConfig bundled;
+    bundled.MergeMode = true;
+    bundled.FontDataOwnedByAtlas = false;  // embedded static data; ImGui copies it into its atlas
+    bundled.OversampleH = 2;
+#ifdef NX_NOTO_MENU_JP
+    bundled.DstFont = g_body;
+    io.Fonts->AddFontFromMemoryTTF((void*)kNotoMenuJP, int(sizeof kNotoMenuJP), kBodyBake, &bundled,
+                                   localized_ranges.Data);
+    bundled.DstFont = g_title;
+    io.Fonts->AddFontFromMemoryTTF((void*)kNotoMenuJP, int(sizeof kNotoMenuJP), kTitleBake, &bundled,
+                                   localized_ranges.Data);
+    nx::log("overlay: embedded Noto Sans JP glyph fallback");
+#endif
+#ifdef NX_NOTO_MENU_KR
+    bundled.DstFont = g_body;
+    io.Fonts->AddFontFromMemoryTTF((void*)kNotoMenuKR, int(sizeof kNotoMenuKR), kBodyBake, &bundled,
+                                   localized_ranges.Data);
+    bundled.DstFont = g_title;
+    io.Fonts->AddFontFromMemoryTTF((void*)kNotoMenuKR, int(sizeof kNotoMenuKR), kTitleBake, &bundled,
+                                   localized_ranges.Data);
+    nx::log("overlay: embedded Noto Sans KR glyph fallback");
+#endif
+#ifdef NX_NOTO_MENU_ARABIC
+    bundled.DstFont = g_body;
+    io.Fonts->AddFontFromMemoryTTF((void*)kNotoMenuArabic, int(sizeof kNotoMenuArabic), kBodyBake, &bundled,
+                                   localized_ranges.Data);
+    bundled.DstFont = g_title;
+    io.Fonts->AddFontFromMemoryTTF((void*)kNotoMenuArabic, int(sizeof kNotoMenuArabic), kTitleBake, &bundled,
+                                   localized_ranges.Data);
+    nx::log("overlay: embedded Noto Sans Arabic glyph fallback");
+#endif
+#endif
+    for (const char* path : kScriptFonts) {
+        if (FILE* f = std::fopen(path, "rb")) {
+            std::fclose(f);
+            ImFontConfig fallback;
+            fallback.MergeMode = true;
+            fallback.FontNo = 0;  // some CJK system fonts are collections
+            fallback.OversampleH = 2;
+            fallback.DstFont = g_body;
+            io.Fonts->AddFontFromFileTTF(path, kBodyBake, &fallback, localized_ranges.Data);
+            fallback.DstFont = g_title;
+            io.Fonts->AddFontFromFileTTF(path, kTitleBake, &fallback, localized_ranges.Data);
+        }
+    }
     io.FontDefault = g_body;
 }
 

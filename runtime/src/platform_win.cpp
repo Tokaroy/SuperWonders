@@ -356,6 +356,7 @@ static void save_pc_settings() {
          << "\ninternal_resolution=" << g_pc_settings.internal_resolution << "\nmuted=" << g_pc_settings.muted << "\nfullscreen=" << g_pc_settings.fullscreen
          << "\nalways_on_top=" << g_pc_settings.always_on_top << "\nlanguage=" << g_pc_settings.language
          << "\ngame_language=" << g_pc_settings.game_language
+         << "\ngame_language_version=2"
          << "\nmemory_limit_gb=" << g_pc_settings.memory_limit_gb
          << "\nlow_vram_profile=" << g_pc_settings.low_vram_profile
          << "\ncontroller_preset=" << g_pc_settings.controller_preset
@@ -377,6 +378,7 @@ static void save_pc_settings() {
 static void load_pc_settings() {
     std::ifstream file(data_root() + "/pc-settings.ini");
     std::string line;
+    int game_language_version = 0;
     while (std::getline(file, line)) {
         int value = 0;
         if (std::sscanf(line.c_str(), "width=%d", &value) == 1 && value >= 640 && value <= 7680) g_pc_settings.width = value;
@@ -386,9 +388,11 @@ static void load_pc_settings() {
         else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) g_pc_settings.muted = value != 0;
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) g_pc_settings.fullscreen = value != 0;
         else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) g_pc_settings.always_on_top = value != 0;
-        else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) g_pc_settings.language = std::clamp(value, 0, 3);
+        else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) g_pc_settings.language = std::clamp(value, 0, 12);
         else if (std::sscanf(line.c_str(), "game_language=%d", &value) == 1)
-            g_pc_settings.game_language = std::clamp(value, 0, 4);
+            g_pc_settings.game_language = std::clamp(value, 0, 11);
+        else if (std::sscanf(line.c_str(), "game_language_version=%d", &value) == 1)
+            game_language_version = value;
         else if (std::sscanf(line.c_str(), "memory_limit_gb=%d", &value) == 1) g_pc_settings.memory_limit_gb = std::clamp(value, 2, 32);
         else if (std::sscanf(line.c_str(), "low_vram_profile=%d", &value) == 1) g_pc_settings.low_vram_profile = value != 0;
         else if (std::sscanf(line.c_str(), "controller_preset=%d", &value) == 1)
@@ -427,6 +431,8 @@ static void load_pc_settings() {
                 g_pc_settings.controller_bindings[size_t(index)] = binding;
         }
     }
+    if (game_language_version < 2 && (g_pc_settings.game_language == 8 || g_pc_settings.game_language == 10))
+        g_pc_settings.game_language = 0;
     nx::set_internal_resolution_preset(g_pc_settings.internal_resolution);
     nx::set_game_language(g_pc_settings.game_language);
     apply_input_bindings(g_pc_settings);
@@ -644,8 +650,8 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings.height = std::clamp(g_pc_settings.height, 360, 4320);
     g_pc_settings.volume = std::clamp(g_pc_settings.volume, 0, 100);
     g_pc_settings.internal_resolution = std::clamp(g_pc_settings.internal_resolution, 0, 6);
-    g_pc_settings.language = std::clamp(g_pc_settings.language, 0, 3);
-    g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 4);
+    g_pc_settings.language = std::clamp(g_pc_settings.language, 0, 12);
+    g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 11);
     g_pc_settings.memory_limit_gb = std::clamp(g_pc_settings.memory_limit_gb, 2, 32);
     g_pc_settings.controller_preset = std::clamp(g_pc_settings.controller_preset, 0, 1);
     g_pc_settings.overlay_position = std::clamp(g_pc_settings.overlay_position, 0, 3);
@@ -698,16 +704,10 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         apply_pc_menu(a->state, a->persist);
         return 0;
     }
-    if (overlay::enabled() && overlay::is_open()) {
+    // The launcher is shown as an overlay screen while the F1 settings menu is closed. Mouse input still belongs
+    // to that screen; checking is_open() here dropped every click until the in-game menu had been opened.
+    if (overlay::enabled() && overlay::wants_mouse()) {
         switch (msg) {
-            case WM_KEYDOWN:
-            case WM_KEYUP:
-                if (w == VK_F1 || w == VK_F11) break;  // handled below
-                if (msg == WM_KEYUP || !(l & (1ll << 30))) overlay::key_event(int(w), overlay_key(w), msg == WM_KEYDOWN);
-                return 0;
-            case WM_CHAR:
-                overlay::text_input(uint32_t(w));
-                return 0;
             case WM_MOUSEMOVE:
                 overlay::mouse_move(float(GET_X_LPARAM(l)), float(GET_Y_LPARAM(l)));
                 return 0;
@@ -719,6 +719,18 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                 return 0;
             case WM_MOUSEWHEEL:
                 overlay::mouse_wheel(float(GET_WHEEL_DELTA_WPARAM(w)) / float(WHEEL_DELTA));
+                return 0;
+        }
+    }
+    if (overlay::enabled() && overlay::is_open()) {
+        switch (msg) {
+            case WM_KEYDOWN:
+            case WM_KEYUP:
+                if (w == VK_F1 || w == VK_F11) break;  // handled below
+                if (msg == WM_KEYUP || !(l & (1ll << 30))) overlay::key_event(int(w), overlay_key(w), msg == WM_KEYDOWN);
+                return 0;
+            case WM_CHAR:
+                overlay::text_input(uint32_t(w));
                 return 0;
         }
     }

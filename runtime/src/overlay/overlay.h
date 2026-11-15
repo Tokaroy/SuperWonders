@@ -28,6 +28,7 @@ struct Host {
 };
 
 bool enabled();  // NX_IMGUI_MENU, default on
+int menu_language();  // selected launcher / in-game menu language, 0..12
 void init(const Host& host, const Settings& s);  // before the first frame
 void sync(const Settings& s);                    // the platform changed settings itself (F11, window resize)
 
