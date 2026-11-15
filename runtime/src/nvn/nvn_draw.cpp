@@ -40,106 +40,9 @@ namespace {
 
 bool g_rendering = false;
 bool g_render_pass = false;
-bool g_pass_placeholder_color = false;  // Intel depth-only compatibility target, if created for this pass
 bool g_vertex_pending = false;  // a narrow pass-end barrier since the last one that covers vertex stages (G4)
 uint64_t g_pass_serial = 0, g_vertex_visible_at = 0;  // pass ends so far; the serial a full barrier covered
 uint64_t g_vertex_barriers = 0;
-
-bool intel_placeholder_color_on() {
-    static const bool on = [] {
-        const char* e = std::getenv("NX_INTEL_PLACEHOLDER_COLOR");
-        VkPhysicalDeviceProperties props{};
-        p_vkGetPhysicalDeviceProperties(vk_physical(), &props);
-        const bool enabled = e ? e[0] != '0' : props.vendorID == 0x8086;
-        if (enabled)
-            log("nvn/vk: Intel depth-only pass workaround enabled%s",
-                e ? " (NX_INTEL_PLACEHOLDER_COLOR)" : " (Intel GPU default)");
-        return enabled;
-    }();
-    return on;
-}
-
-struct IntelPlaceholderColor {
-    VkImage image = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkImageView view = VK_NULL_HANDLE;
-    uint32_t width = 0, height = 0;
-    uint64_t allocation_size = 0;
-};
-
-VkImageView intel_placeholder_color_view(VkCommandBuffer cb, uint32_t width, uint32_t height) {
-    static IntelPlaceholderColor target;
-    if (target.view && target.width >= width && target.height >= height) return target.view;
-    width = std::max(width, target.width);
-    height = std::max(height, target.height);
-
-    VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    ci.imageType = VK_IMAGE_TYPE_2D;
-    ci.format = VK_FORMAT_R8_UNORM;
-    ci.extent = {width, height, 1};
-    ci.mipLevels = ci.arrayLayers = 1;
-    ci.samples = VK_SAMPLE_COUNT_1_BIT;
-    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkImage image = VK_NULL_HANDLE;
-    if (p_vkCreateImage(vk_device(), &ci, nullptr, &image) != VK_SUCCESS) {
-        log("nvn/vk: Intel placeholder color image creation failed");
-        return VK_NULL_HANDLE;
-    }
-
-    VkMemoryRequirements req{};
-    p_vkGetImageMemoryRequirements(vk_device(), image, &req);
-    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    ai.allocationSize = req.size;
-    ai.memoryTypeIndex = memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    if (p_vkAllocateMemory(vk_device(), &ai, nullptr, &memory) != VK_SUCCESS ||
-        p_vkBindImageMemory(vk_device(), image, memory, 0) != VK_SUCCESS) {
-        if (memory) p_vkFreeMemory(vk_device(), memory, nullptr);
-        p_vkDestroyImage(vk_device(), image, nullptr);
-        log("nvn/vk: Intel placeholder color memory allocation failed");
-        return VK_NULL_HANDLE;
-    }
-    gpu_image_memory_allocated(req.size);
-
-    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    vi.image = image;
-    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vi.format = VK_FORMAT_R8_UNORM;
-    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkImageView view = VK_NULL_HANDLE;
-    if (p_vkCreateImageView(vk_device(), &vi, nullptr, &view) != VK_SUCCESS) {
-        p_vkFreeMemory(vk_device(), memory, nullptr);
-        gpu_image_memory_freed(req.size);
-        p_vkDestroyImage(vk_device(), image, nullptr);
-        log("nvn/vk: Intel placeholder color view creation failed");
-        return VK_NULL_HANDLE;
-    }
-
-    // A larger target replaces the previous one only after its earlier submissions and cached framebuffers retire.
-    if (target.image) {
-        p_vkDeviceWaitIdle(vk_device());
-        forget_framebuffers(target.view);
-        p_vkDestroyImageView(vk_device(), target.view, nullptr);
-        p_vkDestroyImage(vk_device(), target.image, nullptr);
-        p_vkFreeMemory(vk_device(), target.memory, nullptr);
-        gpu_image_memory_freed(target.allocation_size);
-    }
-    target = {image, memory, view, width, height, req.size};
-
-    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = image;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    p_vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-                           0, nullptr, 0, nullptr, 1, &barrier);
-    log("nvn/vk: Intel placeholder color target ready (%ux%u, R8_UNORM)", width, height);
-    return view;
-}
 
 // Off by default (NX_PASS_BARRIER_NARROW=1 turns it on): the first S23 run with it showed a black band over the course
 // background in 2 of 28 frames (phone_n6def, 15000 and 16200), a timing-dependent hazard of the DEBUG-2 #71 class.
@@ -253,7 +156,6 @@ void begin_rendering(VkCommandBuffer cb, const Targets& t) {
     VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     VkExtent2D extent{UINT32_MAX, UINT32_MAX};
     VkFormat formats[8]{};  // the views' (render pass objects)
-    g_pass_placeholder_color = false;
     for (uint32_t k = 0; k < t.color_count; k++) {
         colors[k].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         GpuImage* img = t.colors[k] ? image_of(t.colors[k]) : nullptr;
@@ -299,34 +201,20 @@ void begin_rendering(VkCommandBuffer cb, const Targets& t) {
         dimg = nullptr;
     }
     if (extent.width == UINT32_MAX) extent = {1, 1};
-    uint32_t color_count = t.color_count;
-    if (!color_count && dimg && intel_placeholder_color_on()) {
-        VkImageView view = intel_placeholder_color_view(cb, extent.width, extent.height);
-        if (view) {
-            colors[0] = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-            colors[0].imageView = view;
-            colors[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            colors[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-            colors[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-            formats[0] = VK_FORMAT_R8_UNORM;
-            color_count = 1;
-            g_pass_placeholder_color = true;
-        }
-    }
     VkRenderingAttachmentInfo stencil = depth;  // same view, its own loadOp
     uint32_t cleared = clears_apply(t, colors, depth, stencil);  // pending clears of these targets: loadOp CLEAR
     VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
     ri.renderArea = {{0, 0}, extent};
     ri.layerCount = 1;
-    ri.colorAttachmentCount = color_count;
-    ri.pColorAttachments = color_count ? colors : nullptr;
+    ri.colorAttachmentCount = t.color_count;
+    ri.pColorAttachments = colors;
     if (dimg) {
         if (dimg->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) ri.pDepthAttachment = &depth;
         if (dimg->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) ri.pStencilAttachment = &stencil;
     }
     g_render_pass = render_pass_objects();
     if (g_render_pass)
-        begin_render_pass(cb, color_count, formats, colors, dimg ? dimg->format : VK_FORMAT_UNDEFINED, depth, stencil,
+        begin_render_pass(cb, t.color_count, formats, colors, dimg ? dimg->format : VK_FORMAT_UNDEFINED, depth, stencil,
                           extent);
     else
         p_vkCmdBeginRendering(cb, &ri);
@@ -523,10 +411,6 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     }
     GpuImage* dimg = tt.depth ? image_of(tt.depth) : nullptr;
     key.depth_format = dimg && dimg->aspect != VK_IMAGE_ASPECT_COLOR_BIT ? dimg->format : VK_FORMAT_UNDEFINED;
-    if (g_pass_placeholder_color) {
-        key.color_count = 1;
-        key.color_formats[0] = VK_FORMAT_R8_UNORM;
-    }
     // A pipeline not compiled yet may be compiled on a worker while this draw is skipped, when the next frame draws it
     // again: every target of the pass was also rendered in the previous frame (or this one). A target rendered for
     // the first time, or once now and then (a light probe, a capture), waits for its pipeline (nvn_pipeline_async.h).
