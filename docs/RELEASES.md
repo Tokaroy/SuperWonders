@@ -31,8 +31,8 @@ Mods page lists them, turns each on or off, and opens the folder.
 
 ## What SuperWonders Update checks
 
-It looks at the GitHub releases of the repository in the release's `update.ini` (`repo=owner/name`; empty, the
-default, means no checks at all). Before it changes anything:
+It looks at the GitHub releases of the repository in the release's `update.ini` (`repo=owner/name`; an empty value means no checks). Official packaging defaults to
+`vfjoo888/SuperWonders`. Before it changes anything:
 
 - **Always:** the file must have GitHub's SHA-256 (GitHub records one for every file uploaded to a release), and the
   download must match it. Every file in it must match the release's own list (`superwonders-manifest.txt`).
