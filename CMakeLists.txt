@@ -445,6 +445,12 @@ else()
     endif()
     if(WIN32)
         target_link_libraries(${NX_GAME} PRIVATE SDL3::SDL3-static)
+        if(NX_GAME_LIBRARY AND NX_GAME STREQUAL "wonder")
+            add_custom_command(TARGET ${NX_GAME} POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "$<TARGET_FILE:${NX_GAME}>" "$<TARGET_FILE_DIR:${NX_GAME}>/wonder-launcher.exe"
+                VERBATIM)
+        endif()
         if(NX_GAME STREQUAL "wonder")
             file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/assets/wonder_app.ico" WONDER_APP_ICON_PATH)
             configure_file(assets/wonder_app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/wonder_app.rc" @ONLY)

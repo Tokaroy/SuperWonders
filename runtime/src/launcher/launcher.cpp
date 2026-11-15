@@ -977,6 +977,16 @@ bool wanted(const std::vector<std::string>& args, bool& config_mode) {
     auto has = [&](const char* a) { return std::find(args.begin(), args.end(), a) != args.end(); };
     config_mode = has("--config");
     if (has("--play")) return false;
+#if defined(_WIN32)
+    // Release packages contain two copies of the runtime with distinct entry points.
+    std::wstring path(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, path.data(), DWORD(path.size()));
+    if (length && length < path.size()) {
+        path.resize(length);
+        const auto name = fs::path(path).filename().wstring();
+        if (_wcsicmp(name.c_str(), L"wonder.exe") == 0 && !config_mode) return false;
+    }
+#endif
     auto env_on = [](const char* n) {
         const char* e = std::getenv(n);
         return e && *e && std::strcmp(e, "0") != 0;
@@ -991,7 +1001,28 @@ bool wanted(const std::vector<std::string>& args, bool& config_mode) {
 void run() {
     if (!overlay::enabled()) return;
     bool config_mode = false;
-    if (!wanted(plat::program_args(), config_mode)) return;
+    if (!wanted(plat::program_args(), config_mode)) {
+#if defined(_WIN32)
+        // Direct game launch should explain missing setup before booting the guest.
+        const char* headless = std::getenv("NX_HEADLESS");
+        std::wstring path(32768, L'\0');
+        const DWORD length = GetModuleFileNameW(nullptr, path.data(), DWORD(path.size()));
+        if ((!headless || !*headless || std::strcmp(headless, "0") == 0) && length && length < path.size()) {
+            path.resize(length);
+            if (_wcsicmp(fs::path(path).filename().c_str(), L"wonder.exe") == 0) {
+                const Status status = check_status(find_kit());
+                if (status.ready != Ready::Yes) {
+                    log("game: cannot start: %s", status.why.c_str());
+                    const std::string message = status.why +
+                        "\n\nOpen wonder-launcher.exe, select your game files and complete Set up game files.";
+                    MessageBoxA(nullptr, message.c_str(), "SuperWonders - Game setup required", MB_OK | MB_ICONINFORMATION);
+                    plat::exit_process(1);
+                }
+            }
+        }
+#endif
+        return;
+    }
     static State state;
     g = &state;
     g->kit = find_kit();
@@ -1049,7 +1080,32 @@ void run() {
         }
         if (g->play && !g->job.running) {
             refresh_status();
-            if (g->status.ready == Ready::Yes) break;
+            if (g->status.ready == Ready::Yes) {
+#if defined(_WIN32)
+                std::wstring self(32768, L'\0');
+                DWORD n = GetModuleFileNameW(nullptr, self.data(), DWORD(self.size()));
+                if (n && n < self.size()) {
+                    self.resize(n);
+                    if (_wcsicmp(fs::path(self).filename().c_str(), L"wonder-launcher.exe") == 0) {
+                        const std::wstring game = (fs::path(self).parent_path() / L"wonder.exe").wstring();
+                        std::wstring command = L"\"" + game + L"\" --play";
+                        STARTUPINFOW si{};
+                        si.cb = sizeof(si);
+                        PROCESS_INFORMATION pi{};
+                        if (CreateProcessW(game.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+                            CloseHandle(pi.hThread);
+                            CloseHandle(pi.hProcess);
+                            plat::exit_process(0);
+                        }
+                        log("launcher: could not start wonder.exe (Windows error %lu)", GetLastError());
+                        ui::notify("Could not start wonder.exe. Check that it is in the same folder as the launcher.");
+                        g->play = false;
+                        continue;
+                    }
+                }
+#endif
+                break;
+            }
             g->play = false;
         }
         const uint64_t spent = plat::monotonic_ns() - t0;

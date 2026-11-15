@@ -608,7 +608,7 @@ void worker(bool apply) {
         }
 #endif
 #if defined(_WIN32)
-        start_detached({str(prog() / "wonder.exe"), "--config"});
+        start_detached({str(prog() / "wonder-launcher.exe"), "--config"});
 #else
         start_detached({str(prog() / "wonder"), "--config"});
 #endif
