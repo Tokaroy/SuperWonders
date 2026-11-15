@@ -387,7 +387,8 @@ static void load_pc_settings() {
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) g_pc_settings.fullscreen = value != 0;
         else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) g_pc_settings.always_on_top = value != 0;
         else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) g_pc_settings.language = std::clamp(value, 0, 3);
-        else if (std::sscanf(line.c_str(), "game_language=%d", &value) == 1) g_pc_settings.game_language = std::clamp(value, 0, 3);
+        else if (std::sscanf(line.c_str(), "game_language=%d", &value) == 1)
+            g_pc_settings.game_language = std::clamp(value, 0, 4);
         else if (std::sscanf(line.c_str(), "memory_limit_gb=%d", &value) == 1) g_pc_settings.memory_limit_gb = std::clamp(value, 2, 32);
         else if (std::sscanf(line.c_str(), "low_vram_profile=%d", &value) == 1) g_pc_settings.low_vram_profile = value != 0;
         else if (std::sscanf(line.c_str(), "controller_preset=%d", &value) == 1)
@@ -644,7 +645,7 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings.volume = std::clamp(g_pc_settings.volume, 0, 100);
     g_pc_settings.internal_resolution = std::clamp(g_pc_settings.internal_resolution, 0, 6);
     g_pc_settings.language = std::clamp(g_pc_settings.language, 0, 3);
-    g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 3);
+    g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 4);
     g_pc_settings.memory_limit_gb = std::clamp(g_pc_settings.memory_limit_gb, 2, 32);
     g_pc_settings.controller_preset = std::clamp(g_pc_settings.controller_preset, 0, 1);
     g_pc_settings.overlay_position = std::clamp(g_pc_settings.overlay_position, 0, 3);

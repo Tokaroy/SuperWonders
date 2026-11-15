@@ -32,6 +32,8 @@ constexpr const wchar_t* kInternalResolution[][7] = {
     {L"Originale / dynamique", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Native (écran)"},
 };
 constexpr const wchar_t* kLanguageNames[] = {L"English", L"Italiano", L"Deutsch", L"Français"};
+constexpr const wchar_t* kGameLanguageNames[] = {
+    L"English", L"Italiano", L"Deutsch", L"Français", L"Português (Brasil)"};
 constexpr int kFrameCaps[] = {30, 60, 90, 120, 144};
 
 struct Labels {
@@ -235,7 +237,8 @@ void paint_audio(HDC dc) {
 
     rounded(dc, RECT{44, 340, 516, 384}, RGB(35, 43, 61), RGB(68, 81, 105));
     paint_text(dc, text.game_language, RECT{58, 340, 285, 384}, RGB(230, 235, 245), 14);
-    paint_text(dc, kLanguageNames[std::clamp(g_state.game_language, 0, 3)], RECT{298, 340, 478, 384},
+    paint_text(dc, kGameLanguageNames[std::clamp(g_state.game_language, 0, int(std::size(kGameLanguageNames)) - 1)],
+               RECT{298, 340, 478, 384},
                RGB(238, 243, 252), 14, DT_RIGHT | DT_VCENTER);
     paint_text(dc, g_game_language_dropdown ? L"▴" : L"▾", RECT{480, 340, 502, 384},
                RGB(238, 243, 252), 14, DT_CENTER | DT_VCENTER);
@@ -403,11 +406,11 @@ void paint(HWND h) {
         }
     }
     if (g_game_language_dropdown && g_section == Section::Audio) {
-        for (int i = 0; i < int(std::size(kLanguageNames)); ++i) {
+        for (int i = 0; i < int(std::size(kGameLanguageNames)); ++i) {
             const int top = 386 + i * kLanguageItemHeight;
             rounded(dc, RECT{44, top, 516, top + kLanguageItemHeight},
                     i == g_state.game_language ? RGB(52, 84, 126) : RGB(35, 43, 61), RGB(92, 108, 136), 6);
-            paint_text(dc, kLanguageNames[i], RECT{52, top, 508, top + kLanguageItemHeight},
+            paint_text(dc, kGameLanguageNames[i], RECT{52, top, 508, top + kLanguageItemHeight},
                        RGB(238, 243, 252), 14, DT_CENTER | DT_VCENTER);
         }
     }
@@ -487,7 +490,8 @@ LRESULT CALLBACK menu_proc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                 notify(true);
                 return 0;
             }
-            if (g_game_language_dropdown && g_section == Section::Audio && x >= 44 && x <= 516 && y >= 386 && y < 386 + int(std::size(kLanguageNames)) * kLanguageItemHeight) {
+            if (g_game_language_dropdown && g_section == Section::Audio && x >= 44 && x <= 516 && y >= 386 &&
+                y < 386 + int(std::size(kGameLanguageNames)) * kLanguageItemHeight) {
                 g_state.game_language = (y - 386) / kLanguageItemHeight;
                 g_game_language_dropdown = false;
                 notify(true);
@@ -640,6 +644,7 @@ void pc_menu_init(HWND owner, const PcMenuState& state, PcMenuApply apply) {
     g_owner = owner;
     g_state = state;
     g_state.language = std::clamp(g_state.language, 0, 3);
+    g_state.game_language = std::clamp(g_state.game_language, 0, int(std::size(kGameLanguageNames)) - 1);
     g_state.controller_preset = std::clamp(g_state.controller_preset, 0, 1);
     g_state.overlay_position = std::clamp(g_state.overlay_position, 0, 3);
     g_controller_preset.store(g_state.controller_preset, std::memory_order_relaxed);

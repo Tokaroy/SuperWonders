@@ -37,7 +37,7 @@ struct PcMenuState {
     int internal_resolution = 0;
     int volume = 100;
     int language = 0;  // English, Italian, German, French
-    int game_language = 0;  // Language returned to the game at startup
+    int game_language = 0;  // Language returned to the game at startup: en-US, it, de, fr, pt-BR
     int memory_limit_gb = 8;  // Process private-commit guard; not a dedicated VRAM budget
     int controller_preset = 0;  // Xbox / DualSense, Nintendo
     bool muted = false;

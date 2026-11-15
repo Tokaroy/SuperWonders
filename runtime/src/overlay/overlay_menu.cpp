@@ -5,6 +5,7 @@
 // (option_rows.cpp). Descriptions are English for now.
 #include <algorithm>
 #include <cstdio>
+#include <iterator>
 
 #include "imgui.h"
 #include "imgui_internal.h"  // NavCursorVisible
@@ -53,6 +54,7 @@ constexpr Labels kLabels[] = {
      "Profil VRAM réduit", "Redémarrez pour appliquer le profil de textures."},
 };
 constexpr const char* kLanguageNames[] = {"English", "Italiano", "Deutsch", "Français"};
+constexpr const char* kGameLanguageNames[] = {"English", "Italiano", "Deutsch", "Français", "Português (Brasil)"};
 constexpr const char* kInternal[4][7] = {
     {"Original / Dynamic", "1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160", "Native (screen)"},
     {"Originale / dinamica", "1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160", "Nativa (schermo)"},
@@ -193,7 +195,8 @@ void audio(MenuContext& c, const Labels& l) {
     if (rows::integer(l.volume, &s.volume, 0, 100, 5, kDefaults.volume, "%d%%", desc::volume)) settings_changed(true);
     if (rows::toggle(l.mute, &s.muted, kDefaults.muted, desc::mute)) settings_changed(true);
     rows::section(l.game_language);
-    if (rows::choice(l.game_language, &s.game_language, kLanguageNames, 4, kDefaults.game_language, desc::game_language))
+    if (rows::choice(l.game_language, &s.game_language, kGameLanguageNames, int(std::size(kGameLanguageNames)),
+                     kDefaults.game_language, desc::game_language))
         settings_changed(true), ui::notify(l.game_language_restart);
     rows::page_note(l.game_language_restart);
     rows::end();
