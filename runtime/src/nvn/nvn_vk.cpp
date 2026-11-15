@@ -704,9 +704,9 @@ void present_headless(uint64_t texture) {
     GpuImage* src = image_of(texture);  // made here if new, as before (the targets rendered into it share it, #44)
     static uint64_t presents = 0;
     presents++;
-    if (presents % (presents < 300 ? 60 : 300) == 0) draw_log_stats();
+    if (std::getenv("NX_DRAW_STATS") && presents % (presents < 300 ? 60 : 300) == 0) draw_log_stats();
     if (presents % 60 == 0) log_timing(60), gpu_profile_log(60);
-    if (presents % 300 == 0) zero_draws_log();
+    if (std::getenv("NX_DRAW_STATS") && presents % 300 == 0) zero_draws_log();
     if (!frame_dump_due(presents)) return;
     if (src && src->layout != VK_IMAGE_LAYOUT_UNDEFINED && begin()) {
         GpuImage* shown = src;  // NX_PRESENT_TEST: what the present pass would put on a display (nvn_present.cpp)
@@ -894,9 +894,9 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
     overlay::record(g_cb, index, g_sc_images, g_sc_format, g_sc_extent);  // the F1 menu and metrics (overlay/)
     static uint64_t presents = 0;
     presents++;
-    if (presents % (presents < 300 ? 60 : 300) == 0) draw_log_stats();
+    if (std::getenv("NX_DRAW_STATS") && presents % (presents < 300 ? 60 : 300) == 0) draw_log_stats();
     if (presents % 60 == 0) log_timing(60), gpu_profile_log(60);
-    if (presents % 300 == 0) zero_draws_log();
+    if (std::getenv("NX_DRAW_STATS") && presents % 300 == 0) zero_draws_log();
     frame_sig_flush(presents);
     const bool due = frame_dump_due(presents);
     GpuImage* shown = src;  // NX_DUMP_FSR: the image as presented (after FXAA and FSR 1)
