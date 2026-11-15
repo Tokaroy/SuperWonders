@@ -36,7 +36,7 @@ bool load_settings(const std::string& path, Settings& s) {
         if (std::sscanf(l, "width=%d", &v) == 1 && v >= 640 && v <= 7680) s.width = v;
         else if (std::sscanf(l, "height=%d", &v) == 1 && v >= 360 && v <= 4320) s.height = v;
         else if (std::sscanf(l, "internal_resolution=%d", &v) == 1) s.internal_resolution = std::clamp(v, 0, 6);
-        else if (std::sscanf(l, "volume=%d", &v) == 1) s.volume = std::clamp(v, 0, 100);
+        else if (std::sscanf(l, "volume=%d", &v) == 1) s.volume = std::clamp(v, 0, 200);
         else if (std::sscanf(l, "muted=%d", &v) == 1) s.muted = v != 0;
         else if (std::sscanf(l, "fullscreen=%d", &v) == 1) s.fullscreen = v != 0;
         else if (std::sscanf(l, "always_on_top=%d", &v) == 1) s.always_on_top = v != 0;
