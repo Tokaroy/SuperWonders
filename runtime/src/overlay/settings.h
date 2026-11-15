@@ -29,7 +29,7 @@ struct Settings {
     int internal_resolution = 0;  // svc_am.cpp presets: 0 original/dynamic, 720p, 900p, 1080p, 1440p, 2160p, 6 native
     int volume = 100;
     int language = 0;       // menu language: English, Italian, German, French
-    int game_language = 0;  // language reported to the game at startup
+    int game_language = 0;  // en-US, it, de, fr, pt-BR
     int memory_limit_gb = 8;
     int controller_preset = 1;  // 1 Nintendo positions (the default, as on the Switch: A on the right), 0 Xbox / DualSense
     bool muted = false, fullscreen = false, always_on_top = false;

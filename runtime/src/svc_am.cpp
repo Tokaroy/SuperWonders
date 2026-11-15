@@ -40,7 +40,7 @@ void set_native_render_width(uint32_t width) {
 
 void set_game_language(int language) {
     if (language < 0) language = 0;
-    if (language > 3) language = 3;
+    if (language > 4) language = 4;
     g_game_language.store(language, std::memory_order_relaxed);
 }
 
@@ -169,9 +169,9 @@ std::shared_ptr<Service> application_functions() {
         s.cmds[20] = [](IpcCtx& c) { c.push<uint64_t>(0); return 0u; };  // EnsureSaveData
         s.cmds[21] = [](IpcCtx& c) {                                      // GetDesiredLanguage
             uint64_t code = 0;
-            static constexpr const char* codes[] = {"en-US", "it", "de", "fr"};
+            static constexpr const char* codes[] = {"en-US", "it", "de", "fr", "pt-BR"};
             const int language = g_game_language.load(std::memory_order_relaxed);
-            const char* selected = codes[language >= 0 && language < 4 ? language : 0];
+            const char* selected = codes[language >= 0 && language < 5 ? language : 0];
             std::memcpy(&code, selected, std::strlen(selected));
             static int logged_language = -1;
             if (logged_language != language) {
