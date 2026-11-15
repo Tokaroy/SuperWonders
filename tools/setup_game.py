@@ -72,10 +72,30 @@ def romfs_fingerprint(romfs):
 
 
 def system_font():
-    for p in ([os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", f) for f in ("arial.ttf", "segoeui.ttf")]
-              if WIN else ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                           "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-                           "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/noto/NotoSans-Regular.ttf"]):
+    if WIN:
+        paths = [os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", f)
+                 for f in ("arial.ttf", "segoeui.ttf")]
+    else:
+        # Common locations on Debian/Ubuntu, Fedora, and Arch/openSUSE. Fedora packages DejaVu Sans under
+        # fonts/dejavu-sans-fonts rather than fonts/truetype/dejavu.
+        paths = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                 "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+                 "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                 "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                 "/usr/share/fonts/noto/NotoSans-Regular.ttf"]
+        # Ask Fontconfig as distributions vary in their font package paths. Pass arguments directly (no shell), and
+        # ignore Fontconfig errors so the known-path fallbacks remain usable on minimal systems.
+        fc_match = shutil.which("fc-match")
+        if fc_match:
+            try:
+                result = subprocess.run([fc_match, "--format=%{file}", "DejaVu Sans"],
+                                        capture_output=True, text=True, timeout=5, check=False)
+                match = result.stdout.strip()
+                if result.returncode == 0 and match:
+                    paths.insert(0, match)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    for p in paths:
         if os.path.isfile(p):
             return p
     return None

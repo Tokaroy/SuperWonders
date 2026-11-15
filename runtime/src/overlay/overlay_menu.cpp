@@ -222,6 +222,358 @@ constexpr const char* low_vram = "For graphics cards with little video memory: d
 constexpr const char* quit = "Close the game. Progress since the game last saved is lost. Select twice to confirm.";
 }  // namespace desc
 
+
+const char* translated_desc(const char* text, int lang) {
+    if (lang == 2) {
+        if (text == desc::language) return "Sprache dieses Menüs.";
+        if (text == desc::window_size) return "Fenstergröße in Pixeln. Im Vollbild nicht verfügbar.";
+        if (text == desc::internal) return "Interne Auflösung. Höhere Werte belasten die GPU stärker. Neustart erforderlich.";
+        if (text == desc::vsync) return "Synchronisiert Bilder mit dem Bildschirm. Ohne Synchronisation kann Tearing auftreten.";
+        if (text == desc::frame_cap) return "Maximale Bildrate. Hohe Werte benötigen einen geeigneten PC und Monitor.";
+        if (text == desc::fullscreen) return "Vollbild ein- oder ausschalten. Auch mit F11.";
+        if (text == desc::topmost) return "Fenster im Vordergrund halten. Unter Wayland nicht verfügbar.";
+        if (text == desc::volume) return "Lautstärke des Spiels.";
+        if (text == desc::mute) return "Spiel stummschalten.";
+        if (text == desc::game_language) return "Spielsprache auswählen. Neustart erforderlich.";
+        if (text == desc::preset) return "Position der A-Taste auf dem Controller.";
+        if (text == desc::rumble) return "Vibrationsstärke. 0 % deaktiviert die Vibration.";
+        if (text == desc::key) return "Auswählen und Taste drücken. Esc bricht ab.";
+        if (text == desc::pad) return "Controller-Taste für diese Aktion auswählen.";
+        if (text == desc::metrics) return "Leistungsanzeige einblenden.";
+        if (text == desc::fps) return "Bilder pro Sekunde der letzten 60 Bilder.";
+        if (text == desc::low) return "Bildrate der langsamsten 1 % der letzten 300 Bilder.";
+        if (text == desc::speed) return "Spielgeschwindigkeit: 100 % entspricht normaler Geschwindigkeit.";
+        if (text == desc::graph) return "Dauer der letzten 300 Bilder von 0 bis 50 ms.";
+        if (text == desc::position) return "Position der Leistungsanzeige.";
+        if (text == desc::memory) return "Ab diesem Wert gibt Vulkan ungenutzte Bilder frei. Kein direktes VRAM-Limit.";
+        if (text == desc::upscaler) return "Verfahren zur Bildvergrößerung. FSR 1 hält Kanten scharf.";
+        if (text == desc::antialiasing) return "Glättet Kanten. FXAA kann feine Details leicht verwischen.";
+        if (text == desc::anisotropy) return "Schärft Texturen aus schrägen Blickwinkeln. Neustart erforderlich.";
+        if (text == desc::sharpness) return "FSR-1-Schärfe einstellen.";
+        if (text == desc::low_vram) return "Komprimiert dekodierte Texturen, um VRAM zu sparen. Neustart erforderlich.";
+        if (text == desc::quit) return "Spiel beenden. Ungespeicherter Fortschritt geht verloren. Zweimal auswählen.";
+    }
+    if (lang == 3) {
+        if (text == desc::language) return "Langue de ce menu.";
+        if (text == desc::window_size) return "Taille de la fenêtre en pixels. Indisponible en plein écran.";
+        if (text == desc::internal) return "Résolution interne. Une valeur élevée sollicite davantage le GPU. Redémarrage nécessaire.";
+        if (text == desc::vsync) return "Synchronise les images avec l’écran. Sans synchronisation, des déchirures peuvent apparaître.";
+        if (text == desc::frame_cap) return "Nombre maximal d’images par seconde. Une valeur élevée exige un PC et un écran adaptés.";
+        if (text == desc::fullscreen) return "Activer le plein écran. F11 permet aussi de le changer.";
+        if (text == desc::topmost) return "Garder la fenêtre au premier plan. Indisponible sous Wayland.";
+        if (text == desc::volume) return "Volume du jeu.";
+        if (text == desc::mute) return "Couper le son sans changer le volume.";
+        if (text == desc::game_language) return "Choisir la langue du jeu. Redémarrage nécessaire.";
+        if (text == desc::preset) return "Position du bouton A sur la manette.";
+        if (text == desc::rumble) return "Intensité des vibrations. À 0 %, elles sont désactivées.";
+        if (text == desc::key) return "Sélectionnez puis appuyez sur une touche. Échap annule.";
+        if (text == desc::pad) return "Choisir le bouton de manette pour cette action.";
+        if (text == desc::metrics) return "Afficher les performances à l’écran.";
+        if (text == desc::fps) return "Images par seconde sur les 60 dernières images.";
+        if (text == desc::low) return "Fréquence des 1 % d’images les plus lentes parmi les 300 dernières.";
+        if (text == desc::speed) return "Vitesse du jeu : 100 % correspond à la vitesse normale.";
+        if (text == desc::graph) return "Durée des 300 dernières images, de 0 à 50 ms.";
+        if (text == desc::position) return "Position du panneau de performances.";
+        if (text == desc::memory) return "Au-delà de ce seuil, Vulkan libère les images inutilisées. Ce n’est pas une limite directe de VRAM.";
+        if (text == desc::upscaler) return "Méthode d’agrandissement. FSR 1 préserve la netteté des contours.";
+        if (text == desc::antialiasing) return "Lisse les contours. FXAA peut adoucir légèrement les détails.";
+        if (text == desc::anisotropy) return "Améliore la netteté des textures vues en biais. Redémarrage nécessaire.";
+        if (text == desc::sharpness) return "Régler la netteté de FSR 1.";
+        if (text == desc::low_vram) return "Compresse les textures décodées pour économiser la VRAM. Redémarrage nécessaire.";
+        if (text == desc::quit) return "Quitter le jeu. La progression non sauvegardée sera perdue. Sélectionnez deux fois.";
+    }
+    if (lang == 4) {
+        if (text == desc::language) return "Idioma de este menú.";
+        if (text == desc::window_size) return "Tamaño de la ventana en píxeles. No disponible en pantalla completa.";
+        if (text == desc::internal) return "Resolución interna. Los valores altos requieren más potencia gráfica. Requiere reiniciar.";
+        if (text == desc::vsync) return "Sincroniza los fotogramas con la pantalla. Sin sincronización puede aparecer tearing.";
+        if (text == desc::frame_cap) return "Límite de fotogramas por segundo. Los valores altos requieren un PC y monitor adecuados.";
+        if (text == desc::fullscreen) return "Activa la pantalla completa. También se cambia con F11.";
+        if (text == desc::topmost) return "Mantiene la ventana encima de otras. No disponible en Wayland.";
+        if (text == desc::volume) return "Volumen del juego.";
+        if (text == desc::mute) return "Silencia el juego sin cambiar el volumen.";
+        if (text == desc::game_language) return "Elige el idioma del juego. Requiere reiniciar.";
+        if (text == desc::preset) return "Posición del botón A en el mando.";
+        if (text == desc::rumble) return "Intensidad de la vibración. Con 0 % se desactiva.";
+        if (text == desc::key) return "Selecciona y pulsa una tecla. Esc cancela.";
+        if (text == desc::pad) return "Elige el botón del mando para esta acción.";
+        if (text == desc::metrics) return "Muestra un panel de rendimiento.";
+        if (text == desc::fps) return "Fotogramas por segundo de los últimos 60 fotogramas.";
+        if (text == desc::low) return "Frecuencia del 1 % de los fotogramas más lentos de los últimos 300.";
+        if (text == desc::speed) return "Velocidad del juego: 100 % es la velocidad normal.";
+        if (text == desc::graph) return "Duración de los últimos 300 fotogramas, de 0 a 50 ms.";
+        if (text == desc::position) return "Posición del panel de rendimiento.";
+        if (text == desc::memory) return "Al superar este umbral Vulkan libera imágenes sin usar. No es un límite directo de VRAM.";
+        if (text == desc::upscaler) return "Método para ampliar la imagen. FSR 1 conserva los bordes nítidos.";
+        if (text == desc::antialiasing) return "Suaviza bordes dentados. FXAA puede suavizar detalles finos.";
+        if (text == desc::anisotropy) return "Mejora las texturas vistas en ángulo. Requiere reiniciar.";
+        if (text == desc::sharpness) return "Ajusta la nitidez de FSR 1.";
+        if (text == desc::low_vram) return "Comprime texturas decodificadas para ahorrar VRAM. Requiere reiniciar.";
+        if (text == desc::quit) return "Cierra el juego. Se perderá el progreso no guardado. Selecciona dos veces.";
+    }
+    if (lang == 5) {
+        if (text == desc::language) return "이 메뉴의 언어입니다.";
+        if (text == desc::window_size) return "창 크기입니다. 전체 화면에서는 사용할 수 없습니다.";
+        if (text == desc::internal) return "내부 해상도입니다. 높을수록 GPU 부하가 증가합니다. 재시작 후 적용됩니다.";
+        if (text == desc::vsync) return "화면과 프레임을 동기화합니다. 끄면 화면이 찢어질 수 있습니다.";
+        if (text == desc::frame_cap) return "최대 프레임 속도입니다. 높은 값에는 충분한 PC와 모니터가 필요합니다.";
+        if (text == desc::fullscreen) return "전체 화면으로 전환합니다. F11도 사용할 수 있습니다.";
+        if (text == desc::topmost) return "창을 항상 위에 표시합니다. Wayland에서는 사용할 수 없습니다.";
+        if (text == desc::volume) return "게임 음량입니다.";
+        if (text == desc::mute) return "음량을 바꾸지 않고 소리를 끕니다.";
+        if (text == desc::game_language) return "게임 언어를 선택합니다. 재시작 후 적용됩니다.";
+        if (text == desc::preset) return "컨트롤러의 A 버튼 위치를 선택합니다.";
+        if (text == desc::rumble) return "진동 강도입니다. 0%는 진동을 끕니다.";
+        if (text == desc::key) return "선택한 후 키를 누릅니다. Esc로 취소합니다.";
+        if (text == desc::pad) return "이 동작에 사용할 컨트롤러 버튼을 선택합니다.";
+        if (text == desc::metrics) return "화면에 성능 패널을 표시합니다.";
+        if (text == desc::fps) return "최근 60프레임의 초당 프레임 수입니다.";
+        if (text == desc::low) return "최근 300프레임 중 가장 느린 1%의 프레임 속도입니다.";
+        if (text == desc::speed) return "게임 속도입니다. 100%가 정상 속도입니다.";
+        if (text == desc::graph) return "최근 300프레임의 시간입니다. 범위는 0~50ms입니다.";
+        if (text == desc::position) return "성능 패널의 위치입니다.";
+        if (text == desc::memory) return "이 기준을 넘으면 Vulkan이 사용하지 않는 이미지를 해제합니다. 직접적인 VRAM 제한은 아닙니다.";
+        if (text == desc::upscaler) return "이미지 확대 방식을 선택합니다. FSR 1은 가장자리를 선명하게 유지합니다.";
+        if (text == desc::antialiasing) return "계단 현상을 줄입니다. FXAA는 세부 묘사를 약간 흐리게 할 수 있습니다.";
+        if (text == desc::anisotropy) return "비스듬히 보이는 텍스처를 선명하게 합니다. 재시작 후 적용됩니다.";
+        if (text == desc::sharpness) return "FSR 1 선명도를 조절합니다.";
+        if (text == desc::low_vram) return "디코딩된 텍스처를 압축해 VRAM을 절약합니다. 재시작 후 적용됩니다.";
+        if (text == desc::quit) return "게임을 종료합니다. 저장하지 않은 진행 상황은 사라집니다. 두 번 선택하세요.";
+    }
+    if (lang == 6) {
+        if (text == desc::language) return "このメニューの言語です。";
+        if (text == desc::window_size) return "ウィンドウのサイズです。全画面では変更できません。";
+        if (text == desc::internal) return "内部解像度です。高いほど GPU の負荷が増えます。再起動後に適用されます。";
+        if (text == desc::vsync) return "画面とフレームを同期します。無効にすると画面が乱れることがあります。";
+        if (text == desc::frame_cap) return "最大フレームレートです。高い設定には対応する PC とモニターが必要です。";
+        if (text == desc::fullscreen) return "全画面表示を切り替えます。F11 でも切り替えられます。";
+        if (text == desc::topmost) return "ウィンドウを最前面に表示します。Wayland では利用できません。";
+        if (text == desc::volume) return "ゲームの音量です。";
+        if (text == desc::mute) return "音量を変えずに音を消します。";
+        if (text == desc::game_language) return "ゲームの言語を選択します。再起動後に適用されます。";
+        if (text == desc::preset) return "コントローラーの A ボタンの位置です。";
+        if (text == desc::rumble) return "振動の強さです。0% で無効になります。";
+        if (text == desc::key) return "選択してキーを押します。Esc でキャンセルします。";
+        if (text == desc::pad) return "この操作に使うコントローラーボタンを選択します。";
+        if (text == desc::metrics) return "画面にパフォーマンスを表示します。";
+        if (text == desc::fps) return "直近 60 フレームの毎秒フレーム数です。";
+        if (text == desc::low) return "直近 300 フレームのうち最も遅い 1% のフレームレートです。";
+        if (text == desc::speed) return "ゲーム速度です。100% が通常速度です。";
+        if (text == desc::graph) return "直近 300 フレームの時間を 0〜50ms で表示します。";
+        if (text == desc::position) return "パフォーマンス表示の位置です。";
+        if (text == desc::memory) return "この値を超えると Vulkan が未使用の画像を解放します。VRAM の直接的な上限ではありません。";
+        if (text == desc::upscaler) return "画像の拡大方法です。FSR 1 は輪郭を鮮明に保ちます。";
+        if (text == desc::antialiasing) return "輪郭のギザギザを軽減します。FXAA は細部を少しぼかす場合があります。";
+        if (text == desc::anisotropy) return "斜めから見たテクスチャを鮮明にします。再起動後に適用されます。";
+        if (text == desc::sharpness) return "FSR 1 の鮮明さを調整します。";
+        if (text == desc::low_vram) return "デコード済みテクスチャを圧縮して VRAM を節約します。再起動後に適用されます。";
+        if (text == desc::quit) return "ゲームを終了します。未保存の進行状況は失われます。2 回選択してください。";
+    }
+    if (lang == 8) {
+        if (text == desc::language) return "Язык этого меню.";
+        if (text == desc::window_size) return "Размер окна в пикселях. Недоступно в полноэкранном режиме.";
+        if (text == desc::internal) return "Внутреннее разрешение. Высокие значения нагружают GPU. Требуется перезапуск.";
+        if (text == desc::vsync) return "Синхронизация кадров с экраном. При отключении возможны разрывы изображения.";
+        if (text == desc::frame_cap) return "Максимальная частота кадров. Высоким значениям нужны подходящие ПК и монитор.";
+        if (text == desc::fullscreen) return "Переключить полноэкранный режим. Также доступна клавиша F11.";
+        if (text == desc::topmost) return "Поверх других окон. Недоступно в Wayland.";
+        if (text == desc::volume) return "Громкость игры.";
+        if (text == desc::mute) return "Выключить звук без изменения громкости.";
+        if (text == desc::game_language) return "Выберите язык игры. Требуется перезапуск.";
+        if (text == desc::preset) return "Положение кнопки A на контроллере.";
+        if (text == desc::rumble) return "Сила вибрации. 0% отключает вибрацию.";
+        if (text == desc::key) return "Выберите и нажмите клавишу. Esc отменяет выбор.";
+        if (text == desc::pad) return "Выберите кнопку контроллера для действия.";
+        if (text == desc::metrics) return "Показать панель производительности.";
+        if (text == desc::fps) return "Кадры в секунду за последние 60 кадров.";
+        if (text == desc::low) return "Частота 1% самых медленных из последних 300 кадров.";
+        if (text == desc::speed) return "Скорость игры: 100% — нормальная скорость.";
+        if (text == desc::graph) return "Время последних 300 кадров от 0 до 50 мс.";
+        if (text == desc::position) return "Положение панели производительности.";
+        if (text == desc::memory) return "При превышении Vulkan освобождает неиспользуемые изображения. Это не прямой лимит VRAM.";
+        if (text == desc::upscaler) return "Способ увеличения изображения. FSR 1 сохраняет чёткость краёв.";
+        if (text == desc::antialiasing) return "Сглаживает края. FXAA может слегка размывать детали.";
+        if (text == desc::anisotropy) return "Повышает чёткость текстур под углом. Требуется перезапуск.";
+        if (text == desc::sharpness) return "Настройка резкости FSR 1.";
+        if (text == desc::low_vram) return "Сжимает декодированные текстуры для экономии VRAM. Требуется перезапуск.";
+        if (text == desc::quit) return "Выйти из игры. Несохранённый прогресс будет потерян. Выберите дважды.";
+    }
+    if (lang == 10) {
+        if (text == desc::language) return "Taal van dit menu.";
+        if (text == desc::window_size) return "Venstergrootte in pixels. Niet beschikbaar in volledig scherm.";
+        if (text == desc::internal) return "Interne resolutie. Hogere waarden belasten de GPU meer. Herstart vereist.";
+        if (text == desc::vsync) return "Synchroniseert beelden met het scherm. Zonder synchronisatie kan tearing optreden.";
+        if (text == desc::frame_cap) return "Maximale beeldsnelheid. Hogere waarden vereisen een geschikte pc en monitor.";
+        if (text == desc::fullscreen) return "Schakelt volledig scherm in. Gebruik ook F11.";
+        if (text == desc::topmost) return "Houdt het venster boven andere vensters. Niet beschikbaar op Wayland.";
+        if (text == desc::volume) return "Volume van het spel.";
+        if (text == desc::mute) return "Dempt het spel zonder het volume te wijzigen.";
+        if (text == desc::game_language) return "Kies de speltaal. Herstart vereist.";
+        if (text == desc::preset) return "Positie van de A-knop op de controller.";
+        if (text == desc::rumble) return "Trilsterkte. 0% schakelt trillingen uit.";
+        if (text == desc::key) return "Selecteer en druk op een toets. Esc annuleert.";
+        if (text == desc::pad) return "Kies de controllerknop voor deze actie.";
+        if (text == desc::metrics) return "Toont een prestatiepaneel.";
+        if (text == desc::fps) return "Beelden per seconde over de laatste 60 beelden.";
+        if (text == desc::low) return "Beeldsnelheid van de traagste 1% van de laatste 300 beelden.";
+        if (text == desc::speed) return "Spelsnelheid: 100% is normale snelheid.";
+        if (text == desc::graph) return "Tijd van de laatste 300 beelden, van 0 tot 50 ms.";
+        if (text == desc::position) return "Positie van het prestatiepaneel.";
+        if (text == desc::memory) return "Boven deze grens geeft Vulkan ongebruikte afbeeldingen vrij. Dit is geen directe VRAM-limiet.";
+        if (text == desc::upscaler) return "Methode om de afbeelding te vergroten. FSR 1 houdt randen scherp.";
+        if (text == desc::antialiasing) return "Maakt randen glad. FXAA kan details iets verzachten.";
+        if (text == desc::anisotropy) return "Maakt schuin bekeken texturen scherper. Herstart vereist.";
+        if (text == desc::sharpness) return "Past de scherpte van FSR 1 aan.";
+        if (text == desc::low_vram) return "Comprimeert gedecodeerde texturen om VRAM te besparen. Herstart vereist.";
+        if (text == desc::quit) return "Sluit het spel. Niet-opgeslagen voortgang gaat verloren. Selecteer twee keer.";
+    }
+    if (lang == 11) {
+        if (text == desc::language) return "此菜单的语言。";
+        if (text == desc::window_size) return "窗口的像素大小。全屏时不可用。";
+        if (text == desc::internal) return "内部渲染分辨率。较高数值需要更多显卡性能。重启后生效。";
+        if (text == desc::vsync) return "将帧与屏幕同步。关闭后可能出现画面撕裂。";
+        if (text == desc::frame_cap) return "最大帧率。较高数值需要性能足够的电脑和显示器。";
+        if (text == desc::fullscreen) return "切换全屏。也可以按 F11。";
+        if (text == desc::topmost) return "窗口置顶。Wayland 下不可用。";
+        if (text == desc::volume) return "游戏音量。";
+        if (text == desc::mute) return "不改变音量即可静音。";
+        if (text == desc::game_language) return "选择游戏语言。重启后生效。";
+        if (text == desc::preset) return "手柄 A 键的位置。";
+        if (text == desc::rumble) return "振动强度。0% 表示关闭。";
+        if (text == desc::key) return "选择后按下按键。Esc 取消。";
+        if (text == desc::pad) return "选择此操作的手柄按键。";
+        if (text == desc::metrics) return "显示性能面板。";
+        if (text == desc::fps) return "最近 60 帧的每秒帧数。";
+        if (text == desc::low) return "最近 300 帧中最慢 1% 的帧率。";
+        if (text == desc::speed) return "游戏速度：100% 为正常速度。";
+        if (text == desc::graph) return "最近 300 帧的耗时，范围为 0 至 50 毫秒。";
+        if (text == desc::position) return "性能面板的位置。";
+        if (text == desc::memory) return "超过阈值时 Vulkan 会释放未使用的图像。这不是直接的显存上限。";
+        if (text == desc::upscaler) return "图像放大方式。FSR 1 可保持边缘清晰。";
+        if (text == desc::antialiasing) return "平滑锯齿。FXAA 可能稍微模糊细节。";
+        if (text == desc::anisotropy) return "提高斜向纹理清晰度。重启后生效。";
+        if (text == desc::sharpness) return "调整 FSR 1 锐度。";
+        if (text == desc::low_vram) return "压缩解码后的纹理以节省显存。重启后生效。";
+        if (text == desc::quit) return "退出游戏。未保存的进度将丢失。请选择两次确认。";
+    }
+    if (lang == 12) {
+        if (text == desc::language) return "此選單的語言。";
+        if (text == desc::window_size) return "視窗的像素大小。全螢幕時無法使用。";
+        if (text == desc::internal) return "內部算繪解析度。較高數值需要更多顯示卡效能。重新啟動後生效。";
+        if (text == desc::vsync) return "將影格與螢幕同步。關閉後可能出現畫面撕裂。";
+        if (text == desc::frame_cap) return "最大影格率。較高數值需要效能足夠的電腦與螢幕。";
+        if (text == desc::fullscreen) return "切換全螢幕。也可以按 F11。";
+        if (text == desc::topmost) return "視窗置頂。Wayland 下無法使用。";
+        if (text == desc::volume) return "遊戲音量。";
+        if (text == desc::mute) return "不改變音量即可靜音。";
+        if (text == desc::game_language) return "選擇遊戲語言。重新啟動後生效。";
+        if (text == desc::preset) return "控制器 A 鍵的位置。";
+        if (text == desc::rumble) return "震動強度。0% 表示關閉。";
+        if (text == desc::key) return "選擇後按下按鍵。Esc 取消。";
+        if (text == desc::pad) return "選擇此操作的控制器按鍵。";
+        if (text == desc::metrics) return "顯示效能面板。";
+        if (text == desc::fps) return "最近 60 個影格的每秒影格數。";
+        if (text == desc::low) return "最近 300 個影格中最慢 1% 的影格率。";
+        if (text == desc::speed) return "遊戲速度：100% 為正常速度。";
+        if (text == desc::graph) return "最近 300 個影格的耗時，範圍為 0 至 50 毫秒。";
+        if (text == desc::position) return "效能面板的位置。";
+        if (text == desc::memory) return "超過門檻時 Vulkan 會釋放未使用的影像。這不是直接的顯示記憶體上限。";
+        if (text == desc::upscaler) return "影像放大方式。FSR 1 可保持邊緣清晰。";
+        if (text == desc::antialiasing) return "平滑鋸齒。FXAA 可能稍微模糊細節。";
+        if (text == desc::anisotropy) return "提高斜向材質清晰度。重新啟動後生效。";
+        if (text == desc::sharpness) return "調整 FSR 1 銳利度。";
+        if (text == desc::low_vram) return "壓縮解碼後的材質以節省顯示記憶體。重新啟動後生效。";
+        if (text == desc::quit) return "結束遊戲。未儲存的進度將遺失。請選擇兩次確認。";
+    }
+    if (lang == 7) {
+        if (text == desc::language) return "لغة هذه القائمة.";
+        if (text == desc::window_size) return "حجم النافذة بالبكسل. غير متاح في وضع ملء الشاشة.";
+        if (text == desc::internal) return "دقة العرض الداخلية. القيم الأعلى تحتاج إلى قوة رسومية أكبر. تسري بعد إعادة التشغيل.";
+        if (text == desc::vsync) return "مزامنة الإطارات مع الشاشة. قد يظهر تمزق الصورة عند إيقافها.";
+        if (text == desc::frame_cap) return "الحد الأقصى للإطارات في الثانية. القيم الأعلى تحتاج إلى جهاز وشاشة مناسبين.";
+        if (text == desc::fullscreen) return "تبديل ملء الشاشة. يمكن استخدام F11 أيضاً.";
+        if (text == desc::topmost) return "إبقاء النافذة في المقدمة. غير متاح على Wayland.";
+        if (text == desc::volume) return "مستوى صوت اللعبة.";
+        if (text == desc::mute) return "كتم صوت اللعبة دون تغيير مستوى الصوت.";
+        if (text == desc::game_language) return "اختر لغة اللعبة. تسري بعد إعادة التشغيل.";
+        if (text == desc::preset) return "موضع زر A على وحدة التحكم.";
+        if (text == desc::rumble) return "شدة اهتزاز وحدة التحكم. 0% يعطل الاهتزاز.";
+        if (text == desc::key) return "اختر ثم اضغط مفتاحاً. اضغط Esc للإلغاء.";
+        if (text == desc::pad) return "اختر زر وحدة التحكم لهذا الإجراء.";
+        if (text == desc::metrics) return "عرض لوحة الأداء على الشاشة.";
+        if (text == desc::fps) return "الإطارات في الثانية خلال آخر 60 إطاراً.";
+        if (text == desc::low) return "معدل أبطأ 1% من آخر 300 إطار.";
+        if (text == desc::speed) return "سرعة اللعبة: 100% هي السرعة الطبيعية.";
+        if (text == desc::graph) return "مدة آخر 300 إطار من 0 إلى 50 مللي ثانية.";
+        if (text == desc::position) return "موضع لوحة الأداء.";
+        if (text == desc::memory) return "عند تجاوز الحد يحرر Vulkan الصور غير المستخدمة. هذا ليس حداً مباشراً لذاكرة الفيديو.";
+        if (text == desc::upscaler) return "طريقة تكبير الصورة. يحافظ FSR 1 على وضوح الحواف.";
+        if (text == desc::antialiasing) return "ينعم الحواف المتعرجة. قد يقلل FXAA وضوح التفاصيل قليلاً.";
+        if (text == desc::anisotropy) return "يحسن وضوح الخامات المائلة. يسري بعد إعادة التشغيل.";
+        if (text == desc::sharpness) return "ضبط حدة FSR 1.";
+        if (text == desc::low_vram) return "ضغط الخامات المفككة لتوفير ذاكرة الفيديو. يسري بعد إعادة التشغيل.";
+        if (text == desc::quit) return "إغلاق اللعبة. سيضيع التقدم غير المحفوظ. اختر مرتين للتأكيد.";
+    }
+    if (lang == 9) {
+        if (text == desc::language) return "Bu menünün dili.";
+        if (text == desc::window_size) return "Pencere boyutu piksel cinsindendir. Tam ekranda kullanılamaz.";
+        if (text == desc::internal) return "Dahili çözünürlük. Daha yüksek değerler GPU yükünü artırır. Yeniden başlatınca uygulanır.";
+        if (text == desc::vsync) return "Kareleri ekranla eşzamanlar. Kapalıyken görüntü yırtılması oluşabilir.";
+        if (text == desc::frame_cap) return "En yüksek kare hızı. Yüksek değerler uygun bir bilgisayar ve ekran gerektirir.";
+        if (text == desc::fullscreen) return "Tam ekranı değiştirir. F11 de kullanılabilir.";
+        if (text == desc::topmost) return "Pencereyi diğerlerinin üstünde tutar. Wayland üzerinde kullanılamaz.";
+        if (text == desc::volume) return "Oyunun ses düzeyi.";
+        if (text == desc::mute) return "Ses düzeyini değiştirmeden oyunu sessize alır.";
+        if (text == desc::game_language) return "Oyun dilini seçin. Yeniden başlatınca uygulanır.";
+        if (text == desc::preset) return "Kontrolcüdeki A düğmesinin konumu.";
+        if (text == desc::rumble) return "Titreşim gücü. %0 titreşimi kapatır.";
+        if (text == desc::key) return "Seçip bir tuşa basın. Esc iptal eder.";
+        if (text == desc::pad) return "Bu işlem için kontrolcü düğmesini seçin.";
+        if (text == desc::metrics) return "Ekranda performans panelini gösterir.";
+        if (text == desc::fps) return "Son 60 karede saniye başına kare sayısı.";
+        if (text == desc::low) return "Son 300 karenin en yavaş %1 bölümünün kare hızı.";
+        if (text == desc::speed) return "Oyun hızı: %100 normal hızdır.";
+        if (text == desc::graph) return "Son 300 karenin süresi, 0 ile 50 ms arasında.";
+        if (text == desc::position) return "Performans panelinin konumu.";
+        if (text == desc::memory) return "Bu eşik aşılınca Vulkan kullanılmayan görüntüleri serbest bırakır. Doğrudan VRAM sınırı değildir.";
+        if (text == desc::upscaler) return "Görüntüyü büyütme yöntemi. FSR 1 kenarları keskin tutar.";
+        if (text == desc::antialiasing) return "Tırtıklı kenarları yumuşatır. FXAA ince ayrıntıları biraz yumuşatabilir.";
+        if (text == desc::anisotropy) return "Açıyla görülen dokuları keskinleştirir. Yeniden başlatınca uygulanır.";
+        if (text == desc::sharpness) return "FSR 1 keskinliğini ayarlar.";
+        if (text == desc::low_vram) return "VRAM tasarrufu için çözümlenmiş dokuları sıkıştırır. Yeniden başlatınca uygulanır.";
+        if (text == desc::quit) return "Oyunu kapatır. Kaydedilmemiş ilerleme kaybolur. Onaylamak için iki kez seçin.";
+    }
+    if (lang != 1) return text;
+    if (text == desc::language) return "Lingua di questo menu.";
+    if (text == desc::window_size) return "Dimensioni della finestra in pixel. Non disponibile a schermo intero.";
+    if (text == desc::internal) return "Risoluzione del gioco. Originale lascia scegliere al gioco; valori più alti richiedono più potenza grafica. Si applica al riavvio.";
+    if (text == desc::vsync) return "Sincronizza i fotogrammi con lo schermo. Disattivandola possono comparire interruzioni nell’immagine.";
+    if (text == desc::frame_cap) return "Limite massimo di fotogrammi al secondo. Valori più alti richiedono un PC e uno schermo adeguati.";
+    if (text == desc::fullscreen) return "Mostra il gioco a schermo intero. Puoi usare anche F11.";
+    if (text == desc::topmost) return "Mantiene la finestra sopra le altre. Non disponibile su Wayland.";
+    if (text == desc::volume) return "Regola il volume del gioco.";
+    if (text == desc::mute) return "Disattiva il suono senza cambiare il volume.";
+    if (text == desc::game_language) return "Scegli la lingua del gioco. La modifica si applica al riavvio.";
+    if (text == desc::preset) return "Scegli la posizione del pulsante A sul controller.";
+    if (text == desc::rumble) return "Regola la vibrazione del controller. A 0% è disattivata.";
+    if (text == desc::key) return "Seleziona e premi il tasto desiderato. Esc annulla.";
+    if (text == desc::pad) return "Scegli il pulsante del controller per questa azione.";
+    if (text == desc::metrics) return "Mostra un pannello delle prestazioni sullo schermo.";
+    if (text == desc::fps) return "Fotogrammi al secondo negli ultimi 60 fotogrammi.";
+    if (text == desc::low) return "Frequenza dell’1% dei fotogrammi più lenti tra gli ultimi 300.";
+    if (text == desc::speed) return "Velocità del gioco rispetto alla velocità prevista: 100% è normale.";
+    if (text == desc::graph) return "Durata degli ultimi 300 fotogrammi, da 0 a 50 ms.";
+    if (text == desc::position) return "Scegli l’angolo in cui mostrare il pannello.";
+    if (text == desc::memory) return "Soglia oltre la quale Vulkan libera le immagini riutilizzabili non in uso. Non è un limite diretto della VRAM.";
+    if (text == desc::upscaler) return "Scegli come ingrandire l’immagine. FSR 1 mantiene i contorni più nitidi.";
+    if (text == desc::antialiasing) return "Riduce le scalettature. FXAA può rendere meno nitidi i dettagli sottili.";
+    if (text == desc::anisotropy) return "Migliora la nitidezza delle texture viste di sbieco. Si applica al riavvio.";
+    if (text == desc::sharpness) return "Regola la nitidezza di FSR 1.";
+    if (text == desc::low_vram) return "Mantiene compresse le texture decodificate per ridurre la memoria video, con una lieve perdita di qualità. Si applica al riavvio.";
+    if (text == desc::quit) return "Chiude il gioco. I progressi non salvati andranno persi. Seleziona due volte per confermare.";
+    return text;
+}
+
 const Settings kDefaults{};
 
 void video(MenuContext& c, const Labels& l) {
@@ -238,42 +590,42 @@ void video(MenuContext& c, const Labels& l) {
     int n = 4;
     if (size < 0) std::snprintf(custom, sizeof custom, "%d x %d", s.width, s.height), sizes[4] = custom, size = 4, n = 5;
     if (!c.host.can_resize || s.fullscreen) rows::disable_next();
-    if (rows::choice(l.window_size, &size, sizes, n, 0, desc::window_size) && size < 4)
+    if (rows::choice(l.window_size, &size, sizes, n, 0, translated_desc(desc::window_size, lang)) && size < 4)
         s.width = kSizes[size][0], s.height = kSizes[size][1], settings_changed(true);
-    if (rows::toggle(l.fullscreen, &s.fullscreen, kDefaults.fullscreen, desc::fullscreen)) settings_changed(true);
+    if (rows::toggle(l.fullscreen, &s.fullscreen, kDefaults.fullscreen, translated_desc(desc::fullscreen, lang))) settings_changed(true);
     if (!c.host.can_always_on_top) rows::disable_next();
-    if (rows::toggle(l.topmost, &s.always_on_top, kDefaults.always_on_top, desc::topmost)) settings_changed(true);
+    if (rows::toggle(l.topmost, &s.always_on_top, kDefaults.always_on_top, translated_desc(desc::topmost, lang))) settings_changed(true);
     rows::section(kCommon[lang][1]);
     if (rows::choice(l.internal_resolution, &s.internal_resolution, kInternal[lang], 7, kDefaults.internal_resolution,
-                     desc::internal))
+                     translated_desc(desc::internal, lang)))
         settings_changed(true), ui::notify(l.restart_note);
     const char* upscalers[] = {"Bilinear", "FSR 1"};
-    if (rows::choice(kCommon[lang][3], &s.upscaler, upscalers, 2, kDefaults.upscaler, desc::upscaler)) settings_changed(true);
+    if (rows::choice(kCommon[lang][3], &s.upscaler, upscalers, 2, kDefaults.upscaler, translated_desc(desc::upscaler, lang))) settings_changed(true);
     rows::indent(1);
     if (s.upscaler != 1) rows::disable_next();
     int sharp = 200 - s.fsr_sharpness;  // shown as sharpness: 0 soft .. 200 sharp
-    if (rows::integer(kCommon[lang][4], &sharp, 0, 200, 5, 200 - kDefaults.fsr_sharpness, "%d%%", desc::sharpness))
+    if (rows::integer(kCommon[lang][4], &sharp, 0, 200, 5, 200 - kDefaults.fsr_sharpness, "%d%%", translated_desc(desc::sharpness, lang)))
         s.fsr_sharpness = 200 - sharp, settings_changed(true);
     rows::indent(-1);
     const char* aa[] = {"Off", "FXAA"};
-    if (rows::choice(kCommon[lang][5], &s.antialiasing, aa, 2, kDefaults.antialiasing, desc::antialiasing))
+    if (rows::choice(kCommon[lang][5], &s.antialiasing, aa, 2, kDefaults.antialiasing, translated_desc(desc::antialiasing, lang)))
         settings_changed(true);
     const char* af_names[] = {"Game default", "2x", "4x", "8x", "16x"};
     const int af_levels[] = {0, 2, 4, 8, 16};
     int af = 0;
     for (int i = 0; i < 5; ++i)
         if (af_levels[i] == s.anisotropy) af = i;
-    if (rows::choice(kCommon[lang][6], &af, af_names, 5, 0, desc::anisotropy))
+    if (rows::choice(kCommon[lang][6], &af, af_names, 5, 0, translated_desc(desc::anisotropy, lang)))
         s.anisotropy = af_levels[af], settings_changed(true), ui::notify(l.restart_note);
     rows::section(kCommon[lang][2]);
     const char* vsync_names[] = {"On", "Fast", "Adaptive", "Off"};
-    if (rows::choice(kCommon[lang][7], &s.vsync, vsync_names, 4, kDefaults.vsync, desc::vsync)) settings_changed(true);
+    if (rows::choice(kCommon[lang][7], &s.vsync, vsync_names, 4, kDefaults.vsync, translated_desc(desc::vsync, lang))) settings_changed(true);
     const char* caps[] = {"30 fps", "60 fps", "90 fps", "120 fps", "144 fps"};
     constexpr int cap_values[] = {30, 60, 90, 120, 144};
     int cap = 1;
     for (int i = 0; i < 5; ++i)
         if (cap_values[i] == s.frame_cap) cap = i;
-    if (rows::choice(l.frame_cap_label, &cap, caps, 5, 1, desc::frame_cap))
+    if (rows::choice(l.frame_cap_label, &cap, caps, 5, 1, translated_desc(desc::frame_cap, lang)))
         s.frame_cap = cap_values[cap], settings_changed(true);
     rows::page_note(l.restart_note);
     rows::end();
@@ -281,13 +633,14 @@ void video(MenuContext& c, const Labels& l) {
 
 void audio(MenuContext& c, const Labels& l) {
     Settings& s = c.settings;
+    const int lang = std::clamp(s.language, 0, 12);
     rows::begin("##audio", c.height);
     rows::section(l.audio);
-    if (rows::integer(l.volume, &s.volume, 0, 100, 5, kDefaults.volume, "%d%%", desc::volume)) settings_changed(true);
-    if (rows::toggle(l.mute, &s.muted, kDefaults.muted, desc::mute)) settings_changed(true);
+    if (rows::integer(l.volume, &s.volume, 0, 100, 5, kDefaults.volume, "%d%%", translated_desc(desc::volume, lang))) settings_changed(true);
+    if (rows::toggle(l.mute, &s.muted, kDefaults.muted, translated_desc(desc::mute, lang))) settings_changed(true);
     rows::section(l.game_language);
     if (rows::choice(l.game_language, &s.game_language, kGameLanguageNames, int(std::size(kGameLanguageNames)),
-                     kDefaults.game_language, desc::game_language))
+                     kDefaults.game_language, translated_desc(desc::game_language, lang)))
         settings_changed(true), ui::notify(l.game_language_restart);
     rows::page_note(l.game_language_restart);
     rows::end();
@@ -299,15 +652,15 @@ void controls(MenuContext& c, const Labels& l) {
     rows::begin("##controls", c.height);
     rows::section(kHeaders[lang][1]);
     const char* presets[] = {"Xbox / DualSense", "Nintendo"};
-    if (rows::choice(l.control_preset, &s.controller_preset, presets, 2, kDefaults.controller_preset, desc::preset))
+    if (rows::choice(l.control_preset, &s.controller_preset, presets, 2, kDefaults.controller_preset, translated_desc(desc::preset, lang)))
         settings_changed(true);
-    if (rows::integer(kCommon[lang][8], &s.rumble, 0, 100, 10, kDefaults.rumble, "%d%%", desc::rumble)) settings_changed(true);
+    if (rows::integer(kCommon[lang][8], &s.rumble, 0, 100, 10, kDefaults.rumble, "%d%%", translated_desc(desc::rumble, lang))) settings_changed(true);
     for (size_t a = 0; a < kControlCount; ++a) {
         int phys = controller_binding(s, a);
         const int def = default_controller_binding(a, s.controller_preset);
         char id[48];
         std::snprintf(id, sizeof id, "%s###pad%zu", kActions[a], a);
-        if (rows::choice(id, &phys, kPhysical, int(kControlCount), def, desc::pad)) {
+        if (rows::choice(id, &phys, kPhysical, int(kControlCount), def, translated_desc(desc::pad, lang))) {
             s.controller_bindings[a] = phys;
             s.controller_custom_mask |= 1u << a;
             if (phys == def) s.controller_custom_mask &= ~(1u << a);
@@ -320,7 +673,7 @@ void controls(MenuContext& c, const Labels& l) {
         std::snprintf(id, sizeof id, "%s###key%zu", kActions[a], a);
         const bool waiting = c.capture_action == int(a);
         const char* name = waiting ? "Press a key..." : c.host.key_name ? c.host.key_name(s.keyboard_bindings[a]) : "?";
-        if (rows::action(id, name, desc::key, true, waiting)) c.capture_action = int(a);  // overlay.cpp takes the next key
+        if (rows::action(id, name, translated_desc(desc::key, lang), true, waiting)) c.capture_action = int(a);  // overlay.cpp takes the next key
     }
     rows::page_note(s.controller_preset == 1 ? l.nintendo_desc : l.standard_desc);
     rows::end();
@@ -331,23 +684,23 @@ void overlay_tab(MenuContext& c) {
     const int lang = std::clamp(s.language, 0, 12);
     const auto& o = kOverlayLabels[lang];
     rows::begin("##overlay", c.height);
-    if (rows::toggle(o[0], &s.metrics_enabled, kDefaults.metrics_enabled, desc::metrics)) settings_changed(true);
+    if (rows::toggle(o[0], &s.metrics_enabled, kDefaults.metrics_enabled, translated_desc(desc::metrics, lang))) settings_changed(true);
     rows::indent(1);
     const struct {
         bool* v;
         bool def;
         const char *label, *desc;
-    } items[] = {{&s.metric_fps, kDefaults.metric_fps, o[1], desc::fps},
-                 {&s.metric_one_percent_low, kDefaults.metric_one_percent_low, o[2], desc::low},
-                 {&s.metric_game_speed, kDefaults.metric_game_speed, o[3], desc::speed},
-                 {&s.metric_frametime_graph, kDefaults.metric_frametime_graph, o[4], desc::graph}};
+    } items[] = {{&s.metric_fps, kDefaults.metric_fps, o[1], translated_desc(desc::fps, lang)},
+                 {&s.metric_one_percent_low, kDefaults.metric_one_percent_low, o[2], translated_desc(desc::low, lang)},
+                 {&s.metric_game_speed, kDefaults.metric_game_speed, o[3], translated_desc(desc::speed, lang)},
+                 {&s.metric_frametime_graph, kDefaults.metric_frametime_graph, o[4], translated_desc(desc::graph, lang)}};
     for (const auto& it : items) {
         if (!s.metrics_enabled) rows::disable_next();
         if (rows::toggle(it.label, it.v, it.def, it.desc)) settings_changed(true);
     }
     rows::indent(-1);
     if (!s.metrics_enabled) rows::disable_next();
-    if (rows::choice(o[5], &s.overlay_position, kPositions[lang], 4, kDefaults.overlay_position, desc::position))
+    if (rows::choice(o[5], &s.overlay_position, kPositions[lang], 4, kDefaults.overlay_position, translated_desc(desc::position, lang)))
         settings_changed(true);
     rows::end();
 }
@@ -357,18 +710,18 @@ void system_tab(MenuContext& c, const Labels& l) {
     rows::begin("##system", c.height);
     rows::section(l.system);
     const int lang = std::clamp(s.language, 0, 12);
-    if (rows::choice(kCommon[lang][11], &s.language, kLanguageNames, int(std::size(kLanguageNames)), kDefaults.language, desc::language))
+    if (rows::choice(kCommon[lang][11], &s.language, kLanguageNames, int(std::size(kLanguageNames)), kDefaults.language, translated_desc(desc::language, lang)))
         settings_changed(true);
-    if (rows::integer(l.memory_limit, &s.memory_limit_gb, 2, 32, 1, kDefaults.memory_limit_gb, "%d GB", desc::memory))
+    if (rows::integer(l.memory_limit, &s.memory_limit_gb, 2, 32, 1, kDefaults.memory_limit_gb, "%d GB", translated_desc(desc::memory, lang)))
         settings_changed(true);
-    if (rows::toggle(l.low_vram, &s.low_vram_profile, kDefaults.low_vram_profile, desc::low_vram))
+    if (rows::toggle(l.low_vram, &s.low_vram_profile, kDefaults.low_vram_profile, translated_desc(desc::low_vram, lang)))
         settings_changed(true), ui::notify(l.restart_low_vram);
     // Quit: A once arms it (the row pulses, "Press again to quit"), A again within 4 s quits as closing the window does
     // (the pipeline cache is saved); progress since the game's last save is lost
     static double armed_at = -10;
     const bool armed = ImGui::GetTime() - armed_at < 4.0;
     rows::section(kCommon[lang][9]);
-    if (rows::action(kCommon[lang][10], armed ? "Press again to quit" : "", desc::quit, true, armed)) {
+    if (rows::action(kCommon[lang][10], armed ? "Press again to quit" : "", translated_desc(desc::quit, lang), true, armed)) {
         if (armed) log("overlay: quit from the menu"), plat::exit_process(0);
         armed_at = ImGui::GetTime();
     }
