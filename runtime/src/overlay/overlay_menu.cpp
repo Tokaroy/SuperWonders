@@ -636,7 +636,7 @@ void audio(MenuContext& c, const Labels& l) {
     const int lang = std::clamp(s.language, 0, 12);
     rows::begin("##audio", c.height);
     rows::section(l.audio);
-    if (rows::integer(l.volume, &s.volume, 0, 100, 5, kDefaults.volume, "%d%%", translated_desc(desc::volume, lang))) settings_changed(true);
+    if (rows::integer(l.volume, &s.volume, 0, 200, 5, kDefaults.volume, "%d%%", translated_desc(desc::volume, lang))) settings_changed(true);
     if (rows::toggle(l.mute, &s.muted, kDefaults.muted, translated_desc(desc::mute, lang))) settings_changed(true);
     rows::section(l.game_language);
     if (rows::choice(l.game_language, &s.game_language, kGameLanguageNames, int(std::size(kGameLanguageNames)),

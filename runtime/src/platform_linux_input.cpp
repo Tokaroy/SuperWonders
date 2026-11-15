@@ -67,8 +67,10 @@ void apply_settings(const overlay::Settings& s, bool persist) {
     for (size_t a = 0; a < overlay::kControlCount; ++a)
         g_key_binding[a] = s.keyboard_bindings[a], g_pad_binding[a] = overlay::controller_binding(s, a);
     if (g_stream) {
-        float v = float(std::clamp(s.volume, 0, 100)) / 100.0f;
-        SDL_SetAudioStreamGain(g_stream, s.muted ? 0.0f : v * v);
+        const int percent = std::clamp(s.volume, 0, 200);
+        const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
+                                          : float(percent) / 100.0f;
+        SDL_SetAudioStreamGain(g_stream, s.muted ? 0.0f : gain);
     }
     nx::set_internal_resolution_preset(s.internal_resolution);  // read at the next boot
     nx::set_game_language(s.game_language);

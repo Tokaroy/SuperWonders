@@ -187,7 +187,7 @@ void notify(bool persist) {
 
 void set_volume_from_x(int x) {
     const int clamped = std::clamp(x, kSliderLeft, kSliderRight);
-    g_state.volume = (clamped - kSliderLeft) * 100 / (kSliderRight - kSliderLeft);
+    g_state.volume = (clamped - kSliderLeft) * 200 / (kSliderRight - kSliderLeft);
     notify(false);
 }
 
@@ -266,7 +266,7 @@ void paint_audio(HDC dc) {
     std::swprintf(volume, 24, L"%d%%", g_state.volume);
     paint_text(dc, volume, RECT{420, 160, 510, 192}, RGB(245, 247, 255), 16, DT_RIGHT);
     fill(dc, RECT{kSliderLeft, kSliderY - 2, kSliderRight, kSliderY + 2}, RGB(83, 98, 124));
-    const int knob_x = kSliderLeft + (kSliderRight - kSliderLeft) * g_state.volume / 100;
+    const int knob_x = kSliderLeft + (kSliderRight - kSliderLeft) * g_state.volume / 200;
     fill(dc, RECT{kSliderLeft, kSliderY - 2, knob_x, kSliderY + 2}, RGB(102, 174, 255));
     HBRUSH knob = CreateSolidBrush(RGB(230, 240, 255));
     HGDIOBJ old = SelectObject(dc, knob);

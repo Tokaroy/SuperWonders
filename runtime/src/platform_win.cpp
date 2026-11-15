@@ -384,7 +384,7 @@ static void load_pc_settings() {
         if (std::sscanf(line.c_str(), "width=%d", &value) == 1 && value >= 640 && value <= 7680) g_pc_settings.width = value;
         else if (std::sscanf(line.c_str(), "height=%d", &value) == 1 && value >= 360 && value <= 4320) g_pc_settings.height = value;
         else if (std::sscanf(line.c_str(), "internal_resolution=%d", &value) == 1) g_pc_settings.internal_resolution = std::clamp(value, 0, 6);
-        else if (std::sscanf(line.c_str(), "volume=%d", &value) == 1) g_pc_settings.volume = std::clamp(value, 0, 100);
+        else if (std::sscanf(line.c_str(), "volume=%d", &value) == 1) g_pc_settings.volume = std::clamp(value, 0, 200);
         else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) g_pc_settings.muted = value != 0;
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) g_pc_settings.fullscreen = value != 0;
         else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) g_pc_settings.always_on_top = value != 0;
@@ -449,8 +449,10 @@ static void load_pc_settings() {
 
 static void set_game_volume() {
     if (IXAudio2MasteringVoice* voice = g_master_voice.load()) {
-        const float volume = float(std::clamp(g_pc_settings.volume, 0, 100)) / 100.0f;
-        voice->SetVolume(g_pc_settings.muted ? 0.0f : volume * volume, XAUDIO2_COMMIT_NOW);
+        const int percent = std::clamp(g_pc_settings.volume, 0, 200);
+        const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
+                                          : float(percent) / 100.0f;
+        voice->SetVolume(g_pc_settings.muted ? 0.0f : gain, XAUDIO2_COMMIT_NOW);
     }
 }
 
@@ -648,7 +650,7 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings = state;
     g_pc_settings.width = std::clamp(g_pc_settings.width, 640, 7680);
     g_pc_settings.height = std::clamp(g_pc_settings.height, 360, 4320);
-    g_pc_settings.volume = std::clamp(g_pc_settings.volume, 0, 100);
+    g_pc_settings.volume = std::clamp(g_pc_settings.volume, 0, 200);
     g_pc_settings.internal_resolution = std::clamp(g_pc_settings.internal_resolution, 0, 6);
     g_pc_settings.language = std::clamp(g_pc_settings.language, 0, 12);
     g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 11);
