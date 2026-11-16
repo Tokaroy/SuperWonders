@@ -25,7 +25,7 @@ This repository contains source code and project documentation. It does not cont
 
 I have tested the project on a Windows and Linux PC with an **NVIDIA GeForce RTX 5060 Ti**. A contributor tested on his AMD RX 9070XT on both Windows and Linux. 
 
-**Support on intel graphic cards is still at early stages. It botts, but it may display graphical glitches**. Other systems and GPUs may behave differently. Linux support is available.
+**Support on intel graphic cards is still at early stages. It boots, but it may display graphical glitches**. Other systems and GPUs may behave differently. Linux support is available.
 
 The recompilation targets the game's base version **1.0.0**. The builder uses the extracted folders provided by the user and does not identify the game version automatically. Updates and DLC are not supported.
 
