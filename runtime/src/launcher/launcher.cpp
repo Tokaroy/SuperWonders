@@ -33,6 +33,8 @@
 #include "overlay/overlay.h"
 #include "overlay/overlay_ui.h"
 #include "platform.h"
+#include "user_profiles.h"
+#include "profile_image.h"
 
 namespace fs = std::filesystem;
 
@@ -730,9 +732,168 @@ void page_files() {
     rows::end();
 }
 
+// The active profile is chosen before boot. The legacy UID keeps the existing save path.
+void profile_dialog(bool open) {
+    static profiles::Database db;
+    static int edited = 0;
+    static int copy_from = 0, copy_to = 1;
+    static char name[32] = {}, icon[1024] = {};
+    static std::string message;
+    static std::mutex image_lock;
+    static std::string picked_image;
+    auto read_fields = [&] {
+        std::snprintf(name, sizeof name, "%s", db.users[edited].name.c_str());
+        std::snprintf(icon, sizeof icon, "%s", db.users[edited].icon.c_str());
+    };
+    const fs::path root = u8(plat::data_root());
+    if (open) {
+        db = profiles::load(root);
+        edited = int(db.selected);
+        copy_from = edited;
+        copy_to = db.users.size() > 1 ? (edited == 0 ? 1 : 0) : 0;
+        read_fields();
+        message = db.valid ? "" : "Profile file is invalid or unreadable; it will not be overwritten.";
+        ImGui::OpenPopup("Profiles");
+    }
+    ImGui::SetNextWindowSize({720, 540}, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Profiles", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+    ImGui::TextUnformatted("Choose the profile used when the game starts.");
+    if (ImGui::BeginCombo("Profile", db.users[edited].name.c_str())) {
+        for (int i = 0; i < int(db.users.size()); ++i) {
+            ImGui::PushID(i);
+            if (ImGui::Selectable(db.users[i].name.c_str(), i == edited)) edited = i, read_fields(), message.clear();
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::InputText("Name", name, sizeof name);
+    {
+        std::lock_guard lk(image_lock);
+        if (!picked_image.empty()) {
+            std::snprintf(icon, sizeof icon, "%s", picked_image.c_str());
+            picked_image.clear();
+        }
+    }
+    ImGui::TextWrapped("Icon: %s", icon[0] ? icon : "None");
+    if (ImGui::Button("Choose image..."))
+        plat::pick_image([](std::string path) {
+            std::lock_guard lk(image_lock);
+            picked_image = std::move(path);
+        });
+    ImGui::SameLine();
+    if (ImGui::Button("No icon")) icon[0] = 0;
+    ImGui::TextUnformatted("Original icons:");
+    const char* names[] = {"Blue diamond", "Coral circle", "Green cross", "Purple diamond", "Gold circle", "Teal cross"};
+    const ImVec4 colors[] = {{0.27f,0.53f,0.90f,1},{0.94f,0.47f,0.37f,1},{0.35f,0.71f,0.55f,1},
+                             {0.65f,0.44f,0.81f,1},{0.91f,0.68f,0.27f,1},{0.25f,0.71f,0.75f,1}};
+    for (int i = 0; i < 6; ++i) {
+        if (i && i % 3) ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, colors[i]);
+        if (ImGui::Button(names[i])) std::snprintf(icon, sizeof icon, "builtin:%d", i);
+        ImGui::PopStyleColor();
+    }
+    ImGui::TextWrapped("Images are cropped to a square and converted to 256x256 JPEG.");
+    auto valid = [&] {
+        if (!name[0]) { message = "Enter a name."; return false; }
+        return true;
+    };
+    auto set_icon = [&](profiles::User& user) {
+        if (!icon[0] || std::strncmp(icon, "builtin:", 8) == 0) { user.icon = icon; return true; }
+        const auto bytes = profiles::import_icon(u8(icon));
+        if (bytes.empty()) { message = "Could not read image (choose a JPEG or PNG)."; return false; }
+        char id[33];
+        std::snprintf(id, sizeof id, "%016llx%016llx", (unsigned long long)user.hi, (unsigned long long)user.lo);
+        const fs::path dir = root / "user" / "icons";
+        std::error_code ec; fs::create_directories(dir, ec);
+        if (ec) { message = "Could not create icon directory."; return false; }
+        const fs::path dest = dir / (std::string(id) + ".jpg");
+        const fs::path tmp = dir / (std::string(id) + ".tmp");
+        { std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+          if (!f || !f.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size())) || !f.flush()) {
+              message = "Could not write profile icon."; return false;
+          } }
+#if defined(_WIN32)
+        // MoveFileEx replaces the icon atomically without deleting the previous copy first.
+        if (!MoveFileExW(tmp.c_str(), dest.c_str(), MOVEFILE_REPLACE_EXISTING)) { message = "Could not save profile icon."; return false; }
+#else
+        fs::rename(tmp, dest, ec);
+        if (ec) { message = "Could not save profile icon."; return false; }
+#endif
+        user.icon = str(dest);
+        return true;
+    };
+    if (ImGui::Button("Save changes") && valid()) {
+        auto next = db;
+        next.users[edited].name = name;
+        if (!set_icon(next.users[edited])) { ImGui::EndPopup(); return; }
+        if (profiles::save(root, next)) db = std::move(next), message = "Profile saved.";
+        else message = "Could not save profiles.";
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Use this profile")) {
+        auto next = db;
+        next.selected = size_t(edited);
+        if (profiles::save(root, next)) db = std::move(next), message = "Selected for the next launch.";
+        else message = "Could not save profiles.";
+    }
+    ImGui::SameLine();
+    const bool at_limit = db.users.size() >= 8;
+    if (at_limit) ImGui::BeginDisabled();
+    if (ImGui::Button("Add profile") && valid()) {
+        auto next = db;
+        auto user = profiles::make_user(next, name);
+        if (!set_icon(user)) { ImGui::EndPopup(); return; }
+        next.users.push_back(std::move(user));
+        if (profiles::save(root, next)) {
+            db = std::move(next); edited = int(db.users.size()) - 1; read_fields(); message = "Profile created; select it to play.";
+        } else message = "Could not save profiles.";
+    }
+    if (at_limit) ImGui::EndDisabled();
+    ImGui::Separator();
+    ImGui::Text("Selected: %s", db.users[db.selected].name.c_str());
+    if (!message.empty()) ImGui::TextWrapped("%s", message.c_str());
+    if (db.users.size() < 2) ImGui::BeginDisabled();
+    if (ImGui::Button("Copy saves...")) { message.clear(); ImGui::OpenPopup("Copy saves"); }
+    if (db.users.size() < 2) ImGui::EndDisabled();
+    if (ImGui::BeginPopupModal("Copy saves", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        auto choose = [&](const char* label, int& value) {
+            if (ImGui::BeginCombo(label, db.users[value].name.c_str())) {
+                for (int i = 0; i < int(db.users.size()); ++i) {
+                    ImGui::PushID(i);
+                    if (ImGui::Selectable(db.users[i].name.c_str(), i == value)) value = i;
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+        };
+        choose("From", copy_from);
+        choose("To", copy_to);
+        ImGui::TextWrapped("Close any running game before copying. The destination's existing save will be backed up.");
+        if (copy_from == copy_to) ImGui::BeginDisabled();
+        if (ImGui::Button("Confirm copy")) {
+            fs::path backup;
+            std::string error;
+            if (profiles::copy_save(root, db.users[copy_from], db.users[copy_to], backup, error)) {
+                message = "Save copied from " + db.users[copy_from].name + " to " + db.users[copy_to].name + ".";
+                if (!backup.empty()) message += " Backup: " + str(backup);
+                ImGui::CloseCurrentPopup();
+            } else message = error;
+        }
+        if (copy_from == copy_to) ImGui::EndDisabled();
+        if (!message.empty()) ImGui::TextWrapped("%s", message.c_str());
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 void page_settings() {
     rows::begin("##settings", ImGui::GetContentRegionAvail().y);
     rows::section(lt(LtSettings));
+    const bool open_profiles = rows::action("Profiles", "", "Create and select local profiles and set their names or JPEG icons.", true);
     const char* aspect_names[] = {"16:9 (original)", "21:9", "32:9"};
     const bool italian = overlay::menu_language() == 1;
     const char* aspect_desc = italian ? "Si applica al prossimo avvio del gioco." : "Takes effect the next time the game starts.";
@@ -744,6 +905,7 @@ void page_settings() {
                      true, true))
         overlay::toggle();
     rows::end();
+    profile_dialog(open_profiles);
 }
 
 void page_mods() {

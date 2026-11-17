@@ -204,6 +204,13 @@ void run_posted() {
 
 bool handle_event(const SDL_Event& e) {
     switch (e.type) {
+        case SDL_EVENT_TEXT_INPUT: {
+            if (overlay::enabled() && e.text.text) {
+                const char* text = e.text.text;
+                while (uint32_t ch = SDL_StepUTF8(&text, nullptr)) overlay::text_input(ch);
+            }
+            return true;
+        }
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP: {
             const bool down = e.type == SDL_EVENT_KEY_DOWN;

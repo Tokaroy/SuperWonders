@@ -740,16 +740,24 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                 return 0;
         }
     }
-    if (overlay::enabled() && overlay::is_open()) {
+    if (overlay::enabled() && overlay::wants_mouse()) {
         switch (msg) {
             case WM_KEYDOWN:
             case WM_KEYUP:
                 if (w == VK_F1 || w == VK_F11) break;  // handled below
                 if (msg == WM_KEYUP || !(l & (1ll << 30))) overlay::key_event(int(w), overlay_key(w), msg == WM_KEYDOWN);
                 return 0;
-            case WM_CHAR:
-                overlay::text_input(uint32_t(w));
+            case WM_CHAR: {
+                // WM_CHAR delivers UTF-16 code units, including surrogate pairs.
+                static uint16_t high = 0;
+                const uint16_t unit = uint16_t(w);
+                if (unit >= 0xD800 && unit <= 0xDBFF) { high = unit; return 0; }
+                if (unit >= 0xDC00 && unit <= 0xDFFF && high) {
+                    overlay::text_input(0x10000u + ((uint32_t(high) - 0xD800u) << 10) + unit - 0xDC00u);
+                } else if (unit < 0xD800 || unit > 0xDFFF) overlay::text_input(unit);
+                high = 0;
                 return 0;
+            }
         }
     }
     switch (msg) {
@@ -1368,6 +1376,34 @@ void pick_folder(const std::string& title, const std::string& start, std::functi
                         out.assign(size_t(std::max(1, n)) - 1, '\0');
                         WideCharToMultiByte(CP_UTF8, 0, path, -1, out.data(), n, nullptr, nullptr);
                         CoTaskMemFree(path);
+                    }
+                    item->Release();
+                }
+                d->Release();
+            }
+            CoUninitialize();
+        }
+        done(out);
+    }).detach();
+}
+
+void pick_image(const std::function<void(std::string)>& done) {
+    std::thread([done] {
+        std::string out;
+        if (SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
+            IFileOpenDialog* d = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d)))) {
+                DWORD opt = 0; d->GetOptions(&opt); d->SetOptions(opt | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST);
+                const COMDLG_FILTERSPEC filters[] = {{L"Images", L"*.jpg;*.jpeg;*.png"}};
+                d->SetFileTypes(1, filters);
+                IShellItem* item = nullptr;
+                if (SUCCEEDED(d->Show(nx::g_window)) && SUCCEEDED(d->GetResult(&item))) {
+                    PWSTR path = nullptr;
+                    if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                        int n = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+                        std::vector<char> text(size_t(std::max(1, n)));
+                        WideCharToMultiByte(CP_UTF8, 0, path, -1, text.data(), n, nullptr, nullptr);
+                        out = text.data(); CoTaskMemFree(path);
                     }
                     item->Release();
                 }
