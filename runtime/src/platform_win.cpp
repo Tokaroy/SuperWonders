@@ -918,10 +918,30 @@ void overlay_presented(uint64_t now_ns) {
 }
 
 void window_size(uint32_t& w, uint32_t& h) {
-    RECT r{};
-    if (g_window) GetClientRect(g_window, &r);
-    w = uint32_t(r.right - r.left);
-    h = uint32_t(r.bottom - r.top);
+    if (g_window) {
+        RECT r{};
+        GetClientRect(g_window, &r);
+        w = uint32_t(r.right - r.left);
+        h = uint32_t(r.bottom - r.top);
+        return;
+    }
+
+    // Game hooks can ask for the output size before nnMain creates the HWND. Use the size the
+    // PC menu loaded from pc-settings.ini so game-side camera setup starts with the right aspect.
+    if (g_pc_settings.fullscreen) {
+        w = uint32_t(GetSystemMetrics(SM_CXSCREEN));
+        h = uint32_t(GetSystemMetrics(SM_CYSCREEN));
+    } else if (g_pc_settings.width > 0 && g_pc_settings.height > 0) {
+        w = uint32_t(g_pc_settings.width);
+        h = uint32_t(g_pc_settings.height);
+    } else {
+        unsigned rw = 16, rh = 9;
+        if (const char* resolution = std::getenv("NX_RESOLUTION"))
+            std::sscanf(resolution, "%ux%u", &rw, &rh);
+        const int screen_h = GetSystemMetrics(SM_CYSCREEN);
+        h = uint32_t(std::max(540, screen_h * 8 / 10));
+        w = uint32_t(int64_t(h) * rw / std::max(1u, rh));
+    }
 }
 
 void screen_size(uint32_t& w, uint32_t& h) { window_size(w, h); }

@@ -13,6 +13,7 @@
 #include <set>
 
 #include "nvn_draw_state.h"
+#include "nvn_ultrawide.h"
 #include "platform.h"
 
 namespace nx::nvn {
@@ -40,9 +41,106 @@ namespace {
 
 bool g_rendering = false;
 bool g_render_pass = false;
+bool g_pass_placeholder_color = false;  // Intel depth-only compatibility target, if created for this pass
 bool g_vertex_pending = false;  // a narrow pass-end barrier since the last one that covers vertex stages (G4)
 uint64_t g_pass_serial = 0, g_vertex_visible_at = 0;  // pass ends so far; the serial a full barrier covered
 uint64_t g_vertex_barriers = 0;
+
+bool intel_placeholder_color_on() {
+    static const bool on = [] {
+        const char* e = std::getenv("NX_INTEL_PLACEHOLDER_COLOR");
+        VkPhysicalDeviceProperties props{};
+        p_vkGetPhysicalDeviceProperties(vk_physical(), &props);
+        const bool enabled = e ? e[0] != '0' : props.vendorID == 0x8086;
+        if (enabled)
+            log("nvn/vk: Intel depth-only pass workaround enabled%s",
+                e ? " (NX_INTEL_PLACEHOLDER_COLOR)" : " (Intel GPU default)");
+        return enabled;
+    }();
+    return on;
+}
+
+struct IntelPlaceholderColor {
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    uint32_t width = 0, height = 0;
+    uint64_t allocation_size = 0;
+};
+
+VkImageView intel_placeholder_color_view(VkCommandBuffer cb, uint32_t width, uint32_t height) {
+    static IntelPlaceholderColor target;
+    if (target.view && target.width >= width && target.height >= height) return target.view;
+    width = std::max(width, target.width);
+    height = std::max(height, target.height);
+
+    VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ci.imageType = VK_IMAGE_TYPE_2D;
+    ci.format = VK_FORMAT_R8_UNORM;
+    ci.extent = {width, height, 1};
+    ci.mipLevels = ci.arrayLayers = 1;
+    ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImage image = VK_NULL_HANDLE;
+    if (p_vkCreateImage(vk_device(), &ci, nullptr, &image) != VK_SUCCESS) {
+        log("nvn/vk: Intel placeholder color image creation failed");
+        return VK_NULL_HANDLE;
+    }
+
+    VkMemoryRequirements req{};
+    p_vkGetImageMemoryRequirements(vk_device(), image, &req);
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = req.size;
+    ai.memoryTypeIndex = memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (p_vkAllocateMemory(vk_device(), &ai, nullptr, &memory) != VK_SUCCESS ||
+        p_vkBindImageMemory(vk_device(), image, memory, 0) != VK_SUCCESS) {
+        if (memory) p_vkFreeMemory(vk_device(), memory, nullptr);
+        p_vkDestroyImage(vk_device(), image, nullptr);
+        log("nvn/vk: Intel placeholder color memory allocation failed");
+        return VK_NULL_HANDLE;
+    }
+    gpu_image_memory_allocated(req.size);
+
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = image;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = VK_FORMAT_R8_UNORM;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageView view = VK_NULL_HANDLE;
+    if (p_vkCreateImageView(vk_device(), &vi, nullptr, &view) != VK_SUCCESS) {
+        p_vkFreeMemory(vk_device(), memory, nullptr);
+        gpu_image_memory_freed(req.size);
+        p_vkDestroyImage(vk_device(), image, nullptr);
+        log("nvn/vk: Intel placeholder color view creation failed");
+        return VK_NULL_HANDLE;
+    }
+
+    // A larger target replaces the previous one only after its earlier submissions and cached framebuffers retire.
+    if (target.image) {
+        p_vkDeviceWaitIdle(vk_device());
+        forget_framebuffers(target.view);
+        p_vkDestroyImageView(vk_device(), target.view, nullptr);
+        p_vkDestroyImage(vk_device(), target.image, nullptr);
+        p_vkFreeMemory(vk_device(), target.memory, nullptr);
+        gpu_image_memory_freed(target.allocation_size);
+    }
+    target = {image, memory, view, width, height, req.size};
+
+    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    p_vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                           0, nullptr, 0, nullptr, 1, &barrier);
+    log("nvn/vk: Intel placeholder color target ready (%ux%u, R8_UNORM)", width, height);
+    return view;
+}
 
 // Off by default (NX_PASS_BARRIER_NARROW=1 turns it on): the first S23 run with it showed a black band over the course
 // background in 2 of 28 frames (phone_n6def, 15000 and 16200), a timing-dependent hazard of the DEBUG-2 #71 class.
@@ -156,6 +254,7 @@ void begin_rendering(VkCommandBuffer cb, const Targets& t) {
     VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     VkExtent2D extent{UINT32_MAX, UINT32_MAX};
     VkFormat formats[8]{};  // the views' (render pass objects)
+    g_pass_placeholder_color = false;
     for (uint32_t k = 0; k < t.color_count; k++) {
         colors[k].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         GpuImage* img = t.colors[k] ? image_of(t.colors[k]) : nullptr;
@@ -201,20 +300,34 @@ void begin_rendering(VkCommandBuffer cb, const Targets& t) {
         dimg = nullptr;
     }
     if (extent.width == UINT32_MAX) extent = {1, 1};
+    uint32_t color_count = t.color_count;
+    if (!color_count && dimg && intel_placeholder_color_on()) {
+        VkImageView view = intel_placeholder_color_view(cb, extent.width, extent.height);
+        if (view) {
+            colors[0] = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+            colors[0].imageView = view;
+            colors[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            colors[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            colors[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            formats[0] = VK_FORMAT_R8_UNORM;
+            color_count = 1;
+            g_pass_placeholder_color = true;
+        }
+    }
     VkRenderingAttachmentInfo stencil = depth;  // same view, its own loadOp
     uint32_t cleared = clears_apply(t, colors, depth, stencil);  // pending clears of these targets: loadOp CLEAR
     VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
     ri.renderArea = {{0, 0}, extent};
     ri.layerCount = 1;
-    ri.colorAttachmentCount = t.color_count;
-    ri.pColorAttachments = colors;
+    ri.colorAttachmentCount = color_count;
+    ri.pColorAttachments = color_count ? colors : nullptr;
     if (dimg) {
         if (dimg->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) ri.pDepthAttachment = &depth;
         if (dimg->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) ri.pStencilAttachment = &stencil;
     }
     g_render_pass = render_pass_objects();
     if (g_render_pass)
-        begin_render_pass(cb, t.color_count, formats, colors, dimg ? dimg->format : VK_FORMAT_UNDEFINED, depth, stencil,
+        begin_render_pass(cb, color_count, formats, colors, dimg ? dimg->format : VK_FORMAT_UNDEFINED, depth, stencil,
                           extent);
     else
         p_vkCmdBeginRendering(cb, &ri);
@@ -315,10 +428,16 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                                          ? std::strtoull(before.c_str() + before.find('@') + 1, nullptr, 10) : 0;
         static int taken = 0;
         bool match = (fs && before.compare(0, 16, fs->hash) == 0) || before.compare(0, 16, vs->hash) == 0;
-        if (!before.empty() && match && g_stats.total >= from && taken < 8 &&
+        static const char* before_trigger = std::getenv("NX_SNAP_BEFORE_TRIGGER_FILE");
+        static bool before_triggered = !before_trigger || !*before_trigger;
+        if (!before_triggered && match)
+            if (FILE* marker = std::fopen(before_trigger, "rb")) { std::fclose(marker); before_triggered = true; }
+        static const int before_limit = [] { const char* e = std::getenv("NX_SNAP_BEFORE_LIMIT"); return e ? std::atoi(e) : 8; }();
+        if (before_triggered && !before.empty() && match && g_stats.total >= from && taken < before_limit &&
             t.color_count && t.colors[0])
             if (GpuImage* img = image_of(t.colors[0])) {
                 taken++;
+                log("map before snapshot: total=%llu done=%llu", (unsigned long long)g_stats.total, (unsigned long long)g_stats.done);
                 draw_end_rendering(cb, 6);
                 debug_snapshot(cb, *img, 0xB0000000ull + g_stats.total);
             }
@@ -346,7 +465,9 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
             }
         return t;
     }();
-    GpuImage* primary_target = tt.color_count && tt.colors[0] ? image_of(tt.colors[0]) : nullptr;
+    GpuImage* primary_target = tt.color_count && tt.colors[0] ? image_of(tt.colors[0])
+                                                             : (tt.depth ? image_of(tt.depth) : nullptr);
+    g_uw_wide = primary_target && primary_target->uw;
     const float target_scale = primary_target ? primary_target->render_scale : 1.0f;
     vertex_read_barrier(cb, vs);  // G4
     bool need_break = gathered & kNeedBreak;
@@ -382,6 +503,241 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     PipelineKey key;
     std::memset(&key, 0, sizeof key);  // the key is compared byte for byte
     key.vs = vs, key.fs = fs;
+    static const bool cam_patch = !(std::getenv("NX_UW_CAMERA") && std::getenv("NX_UW_CAMERA")[0] == '0');
+    if (uw_on() && cam_patch && !g_uw_wide && t.color_count && t.colors[0]) {
+        const Texture* layer = get<Texture>(t.colors[0]);
+        if (layer && layer->format == 0x25 && (layer->flags & 8)) uw_ui_vertex_shader(vs);
+    }
+    static const bool ui_learn = std::getenv("NX_UW_UI") && std::string(std::getenv("NX_UW_UI")) == "learn";
+    const bool ui_pick = !cam_patch || (ui_learn ? uw_is_ui_vertex_shader(vs) : !g_state.depth.depth_test);
+    bool anchor_hud_left = false;
+    float flower_offset = 0.0f;
+    static uint64_t flower_frame = UINT64_MAX;
+    static float flower_x = 0.0f, flower_y = 0.0f, flower_proj_x = 1.0f, flower_proj_y = 1.0f;
+    static bool flower_seen = false;
+    const char* flower_test = std::getenv("NX_UW_FLOWER_TEST");
+    if (flower_test && std::strcmp(flower_test, "1") == 0 && g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
+        uint64_t frame = g_frame.load();
+        if (frame != flower_frame) { flower_frame = frame; flower_seen = false; }
+        GpuImage* target = image_of(t.colors[0]);
+        const Range& u = g_state.uniforms[0][0];
+        const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
+        if (target && target->logical_width == 1920 && target->logical_height == 1080 && f) {
+            static unsigned flower_logs = 0;
+            const char* flower_trace = std::getenv("NX_UW_FLOWER_TRACE");
+            FILE* marker = flower_trace && flower_logs < 120 ? std::fopen(flower_trace, "rb") : nullptr;
+            if (marker) {
+                std::fclose(marker);
+                if ((vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406") ||
+                    vs->hash == "2fc962d8d063c1c9" || vs->hash == "a106c763cf05f818") {
+                    ++flower_logs;
+                    std::string textures;
+                    for (const ResolvedTexture& r : g_textures.resolved) {
+                        GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
+                        Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                        if (!img || !src) continue;
+                        char item[64]; std::snprintf(item, sizeof item, "%ux%u/f%x ", img->logical_width, img->logical_height, src->format);
+                        textures += item;
+                    }
+                    log("flower trace: frame=%llu vs=%s fs=%s mat=%g,%g model=%g,%g ref=%u,%g,%g src=%s", (unsigned long long)frame,
+                        vs->hash.c_str(), fs->hash.c_str(), f[3], f[7], f[19], f[23], unsigned(flower_seen), flower_x, flower_y, textures.c_str());
+                }
+            }
+            bool bubble = false;
+            if (vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406") {
+                for (const ResolvedTexture& r : g_textures.resolved) {
+                    GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
+                    Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                    if (img && src && ((src->format == 0x49 &&
+                        ((img->logical_width == 48 && img->logical_height == 96) ||
+                         (img->logical_width == 32 && img->logical_height == 64))) ||
+                        (src->format == 0x87 && img->logical_width == 48 &&
+                         (img->logical_height == 72 || img->logical_height == 104)))) bubble = true;
+                }
+                if (bubble) { flower_x = f[19]; flower_y = f[23]; flower_proj_x = f[0]; flower_proj_y = f[5]; flower_seen = true; flower_offset = flower_x * (uw_factor() - 1.0f); }
+                else if (flower_seen && std::fabs(f[19] - flower_x) < 8.0f && std::fabs(f[23] - flower_y) < 100.0f)
+                    flower_offset = flower_x * (uw_factor() - 1.0f);
+            }
+            if (flower_seen && vs->hash == "2fc962d8d063c1c9" &&
+                (fs->hash == "46841c209865a1c0" || fs->hash == "49add6de02fe8180") &&
+                std::fabs(f[3] - flower_x * flower_proj_x) < 32.0f && std::fabs(f[7] - flower_y * flower_proj_y) < 100.0f)
+                flower_offset = flower_x * (uw_factor() - 1.0f);
+        }
+    }
+    if (g_uw_wide && ui_pick && uw_vs_scaled(vs)) {
+        bool samples_wide = false;
+        bool samples_hud_layer = false;
+        bool samples_powerup_candidate = false;
+        bool samples_powerup_icon = false;
+        bool samples_stock_shadow = false;
+        const uint32_t count = indexed ? uint32_t(c.i[0]) : uint32_t(c.i[1]);
+        if (count <= 6) for (const ResolvedTexture& r : g_textures.resolved) {
+            GpuImage* sampled = r.texture ? image_of(r.texture) : nullptr;
+            samples_wide |= sampled && sampled->uw;
+            // Wonder composites its HUD from this fixed-size layer. It is screen-anchored at 16:9
+            // coordinates, so the usual centered safe-area squeeze moves it away from the real edge.
+            Texture* source = r.texture ? get<Texture>(r.texture) : nullptr;
+            samples_hud_layer |= sampled && source && sampled->logical_width == 430 && sampled->logical_height == 180 &&
+                                 source->format == 0x25 && (source->flags & 0x8);
+            samples_powerup_candidate |= sampled && source && sampled->logical_width == 112 &&
+                                         sampled->logical_height == 112 && source->format == 0x49;
+            samples_powerup_icon |= sampled && source && sampled->logical_width == 80 &&
+                                    sampled->logical_height == 80 && source->format == 0x87;
+            samples_stock_shadow |= sampled && source && sampled->logical_width == 29 &&
+                                    sampled->logical_height == 29 && source->format == 0x01;
+        }
+        if (!samples_wide) {
+            key.uw_x = 1.0f / uw_factor();
+            static const bool powerup_test = std::getenv("NX_UW_POWERUP_TEST") &&
+                                             std::string(std::getenv("NX_UW_POWERUP_TEST")) == "1";
+            bool stock_content = false;
+            if (powerup_test && vs && fs && t.color_count && t.colors[0]) {
+                GpuImage* target = image_of(t.colors[0]);
+                const Range& u = g_state.uniforms[0][0];
+                const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
+                if (target && target->logical_width == 1920 && target->logical_height == 1080 && f) {
+                    // The stock icon and key label have distinct shaders; their transform positions identify the
+                    // fixed stock slot without moving unrelated 80x80 pictures or text in other UI layouts.
+                    if (samples_powerup_icon && vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406")
+                        stock_content = std::fabs(f[19] + 864.0f) < 128.0f && std::fabs(f[23] - 223.0f) < 128.0f;
+                    if ((vs->hash == "a106c763cf05f818" || vs->hash == "2fc962d8d063c1c9") &&
+                        (fs->hash == "46841c209865a1c0" || fs->hash == "49add6de02fe8180"))
+                        stock_content = std::fabs(f[3] + 836.412f) < 128.0f && std::fabs(f[7] - 413.192f) < 128.0f;
+                }
+            }
+            if (samples_hud_layer || (powerup_test && vs && fs &&
+                ((samples_powerup_candidate &&
+                  ((vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406") ||
+                   (vs->hash == "6a4179388f4b1b2e" && fs->hash == "846e8143e854b162"))) ||
+                 (samples_stock_shadow && vs->hash == "d0c055be04d18268" && fs->hash == "8886bf302ad2c2aa"))) || stock_content) {
+                anchor_hud_left = true;
+            }
+        }
+    }
+    static const bool uw_trace = std::getenv("NX_UW_TRACE") && std::string(std::getenv("NX_UW_TRACE")) == "1";
+    static const bool stock_trace = std::getenv("NX_UW_STOCK_TRACE") && std::string(std::getenv("NX_UW_STOCK_TRACE")) == "1";
+    if (stock_trace && g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
+        const Range& u = g_state.uniforms[0][0];
+        const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
+        GpuImage* target = image_of(t.colors[0]);
+        if (f && target && target->logical_width == 1920 && target->logical_height == 1080 &&
+            ((std::fabs(f[3] + 836.412f) < 180.0f && std::fabs(f[7] - 413.192f) < 180.0f) ||
+             (std::fabs(f[19] + 864.0f) < 180.0f && std::fabs(f[23] - 223.0f) < 180.0f))) {
+            std::string src;
+            for (const ResolvedTexture& r : g_textures.resolved) {
+                GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
+                Texture* tex = r.texture ? get<Texture>(r.texture) : nullptr;
+                if (!img || !tex) continue;
+                char b[64]; std::snprintf(b, sizeof b, "%ux%u/f%x ", img->logical_width, img->logical_height, tex->format);
+                src += b;
+            }
+            const std::string sig = vs->hash + ":" + fs->hash + ":" + src;
+            static std::set<std::string> seen_stock;
+            if (seen_stock.size() < 300 && seen_stock.insert(sig).second)
+                log("nvn: stock trace: frame=%llu vs=%s fs=%s pos=%g,%g model=%g,%g sources=%s",
+                    (unsigned long long)g_frame.load(), vs->hash.c_str(), fs->hash.c_str(),
+                    f[3], f[7], f[19], f[23], src.c_str());
+        }
+    }
+    static const bool powerup_trace = std::getenv("NX_UW_POWERUP_TRACE") &&
+                                      std::string(std::getenv("NX_UW_POWERUP_TRACE")) == "1";
+    if (powerup_trace && g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
+        GpuImage* target = image_of(t.colors[0]);
+        if (target && target->logical_width == 1920 && target->logical_height == 1080) {
+            std::string shapes;
+            for (const ResolvedTexture& r : g_textures.resolved) {
+                GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
+                Texture* tex = r.texture ? get<Texture>(r.texture) : nullptr;
+                if (!img || !tex) continue;
+                char b[64];
+                std::snprintf(b, sizeof b, "%ux%u/f%x%s ", img->logical_width, img->logical_height,
+                              tex->format, img->uw ? "W" : "");
+                shapes += b;
+            }
+            const std::string signature = vs->hash + ":" + fs->hash + ":" + shapes;
+            static std::set<std::string> seen_powerup;
+            if (seen_powerup.size() < 2000 && seen_powerup.insert(signature).second)
+                log("nvn: UW powerup trace: frame=%llu vs=%s fs=%s count=%u sources=%s",
+                    (unsigned long long)g_frame.load(), vs->hash.c_str(), fs->hash.c_str(),
+                    indexed ? unsigned(c.i[0]) : unsigned(c.i[1]), shapes.c_str());
+        }
+    }
+    if (uw_trace && t.color_count && t.colors[0]) {
+        Texture* dst = get<Texture>(t.colors[0]);
+        GpuImage* image = image_of(t.colors[0]);
+        if (dst && image && image->logical_width >= 640 && image->logical_height >= 360) {
+            char shape[96];
+            std::snprintf(shape, sizeof shape, "%ux%u/f%x/flags%x/uw%u", image->logical_width,
+                          image->logical_height, dst->format, dst->flags, unsigned(image->uw));
+            std::string state = std::string(shape) + ":" + (vs ? vs->hash : "-") + ":" +
+                                (fs ? fs->hash : "-") + ":d" + std::to_string(g_state.depth.depth_test) +
+                                ":vp" + std::to_string(g_state.has_viewport) + "/" +
+                                std::to_string(g_state.viewport[0]) + "," + std::to_string(g_state.viewport[1]) +
+                                "," + std::to_string(g_state.viewport[2]) + "," + std::to_string(g_state.viewport[3]);
+            static std::set<std::string> seen_uw_draws;
+            static unsigned uw_draw_count = 0;
+            if (seen_uw_draws.insert(state).second && uw_draw_count++ < 500) {
+                std::string sources;
+                for (const ResolvedTexture& r : g_textures.resolved) {
+                    GpuImage* sampled = r.texture ? image_of(r.texture) : nullptr;
+                    Texture* source = r.texture ? get<Texture>(r.texture) : nullptr;
+                    if (!sampled || !source) continue;
+                    char b[112];
+                    std::snprintf(b, sizeof b, "%llx:%ux%u/f%x%s ", (unsigned long long)r.texture,
+                                  sampled->logical_width, sampled->logical_height, source->format,
+                                  sampled->uw ? "W" : "");
+                    sources += b;
+                    if (sources.size() >= 240) break;
+                }
+                // A single shader/viewport often draws many distinct UI elements in one frame. Include the sampled
+                // texture handles in the deduplication key so the trace keeps those separate (e.g. HUD vs map art).
+                state += ":src=" + sources;
+                log("nvn: UW trace: draw frame=%llu target=%s wide-pass=%u vs=%s fs=%s depth=%u viewport=%u,%d,%d,%d,%d sources=%s",
+                    (unsigned long long)g_frame.load(), shape, unsigned(g_uw_wide), vs ? vs->hash.c_str() : "-",
+                    fs ? fs->hash.c_str() : "-", unsigned(g_state.depth.depth_test), unsigned(g_state.has_viewport),
+                    g_state.viewport[0], g_state.viewport[1], g_state.viewport[2], g_state.viewport[3], sources.c_str());
+            }
+
+            // The broad trace can spend its 500 entries on world materials before UI shaders are learned. Keep a
+            // separate, bounded trace for those shaders so HUD draws remain visible later in a long session.
+            static const bool uw_trace_ui = std::getenv("NX_UW_TRACE_UI") &&
+                                            std::string(std::getenv("NX_UW_TRACE_UI")) == "1";
+            if (uw_trace_ui && g_uw_wide && vs && uw_is_ui_vertex_shader(vs)) {
+                std::string ui_state = std::string(shape) + ":" + vs->hash + ":" +
+                                       (fs ? fs->hash : "-") + ":d" + std::to_string(g_state.depth.depth_test) +
+                                       ":vp" + std::to_string(g_state.has_viewport) + "/" +
+                                       std::to_string(g_state.viewport[0]) + "," + std::to_string(g_state.viewport[1]) +
+                                       "," + std::to_string(g_state.viewport[2]) + "," + std::to_string(g_state.viewport[3]);
+                std::string ui_sources;
+                for (const ResolvedTexture& r : g_textures.resolved) {
+                    GpuImage* sampled = r.texture ? image_of(r.texture) : nullptr;
+                    Texture* source = r.texture ? get<Texture>(r.texture) : nullptr;
+                    if (!sampled || !source) continue;
+                    char b[112];
+                    std::snprintf(b, sizeof b, "%llx:%ux%u/f%x%s ", (unsigned long long)r.texture,
+                                  sampled->logical_width, sampled->logical_height, source->format,
+                                  sampled->uw ? "W" : "");
+                    ui_sources += b;
+                }
+                ui_state += ":src=" + ui_sources;
+                static std::set<std::string> seen_uw_ui_draws;
+                static unsigned uw_ui_draw_count = 0;
+                if (seen_uw_ui_draws.insert(ui_state).second && uw_ui_draw_count++ < 1000) {
+                    log("nvn: UW UI trace: frame=%llu target=%s vs=%s fs=%s depth=%u viewport=%u,%d,%d,%d,%d sources=%s",
+                        (unsigned long long)g_frame.load(), shape, vs->hash.c_str(), fs ? fs->hash.c_str() : "-",
+                        unsigned(g_state.depth.depth_test), unsigned(g_state.has_viewport), g_state.viewport[0],
+                        g_state.viewport[1], g_state.viewport[2], g_state.viewport[3], ui_sources.c_str());
+                }
+            }
+        }
+    }
+    const char* map_align = std::getenv("NX_UW_MAP_ALIGN_TEST");
+    if (map_align && std::strcmp(map_align, "1") == 0 && g_uw_wide && vs && fs &&
+        vs->hash == "af561088cd1b1905" && fs->hash == "0bebd775cd1a4238") {
+        key.uw_x = 1.0f;
+        static bool logged = false;
+        if (!logged) { logged = true; log("ultrawide map align test: corrected composite geometry x scale %g", double(key.uw_x)); }
+    }
     key.topology = mode;
     key.attrib_count = uint32_t(std::min<size_t>(g_state.attribs.size(), 16));
     std::copy_n(g_state.attribs.begin(), key.attrib_count, key.attribs);
@@ -411,6 +767,10 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     }
     GpuImage* dimg = tt.depth ? image_of(tt.depth) : nullptr;
     key.depth_format = dimg && dimg->aspect != VK_IMAGE_ASPECT_COLOR_BIT ? dimg->format : VK_FORMAT_UNDEFINED;
+    if (g_pass_placeholder_color) {
+        key.color_count = 1;
+        key.color_formats[0] = VK_FORMAT_R8_UNORM;
+    }
     // A pipeline not compiled yet may be compiled on a worker while this draw is skipped, when the next frame draws it
     // again: every target of the pass was also rendered in the previous frame (or this one). A target rendered for
     // the first time, or once now and then (a light probe, a capture), waits for its pipeline (nvn_pipeline_async.h).
@@ -451,12 +811,20 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         if (in.used >> s & 1) bind_vertex(cb, s, in.vertex[s]);
     bind_vertex(cb, 15, zero_stream());
 
-    const float scale = g_pass_images[0] ? g_pass_images[0]->render_scale : 1.0f;
+    GpuImage* viewport_image = tt.color_count && tt.colors[0] ? g_pass_images[0] : g_pass_images[8];
+    const float scale = viewport_image ? viewport_image->render_scale : 1.0f;
     VkViewport vp{0, 0, float(g_pass_extent.width), float(g_pass_extent.height), 0, 1};
     if (g_state.has_viewport)
         vp = {float(g_state.viewport[0]) * scale, float(g_state.viewport[1]) * scale,
               float(g_state.viewport[2]) * scale, float(g_state.viewport[3]) * scale, g_state.depth_near,
               g_state.depth_far};
+    if (viewport_image && viewport_image->uw && g_state.has_viewport) {
+        vp.x *= uw_factor();
+        vp.width *= uw_factor();
+        vp.x += flower_offset * scale;
+        if (anchor_hud_left)
+            vp.x -= (uw_factor() - 1.0f) * float(g_state.viewport[2]) * scale * 0.5f;
+    }
     // NVN's upper-left window origin (what Wonder sets) maps NDC +Y to the top of the render target, like D3D;
     // Vulkan maps it to the bottom. A negative-height viewport gives NVN's mapping, and with it NVN's front faces.
     // (Before this, the front face was inverted instead: triangles were culled right, but every render target was
@@ -469,6 +837,10 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         int32_t y = int32_t(std::lround(g_state.scissor[1] * scale));
         uint32_t w = uint32_t(std::max(0l, std::lround(g_state.scissor[2] * scale)));
         uint32_t h = uint32_t(std::max(0l, std::lround(g_state.scissor[3] * scale)));
+        if (viewport_image && viewport_image->uw) {
+            x = int32_t(std::lround(float(x) * uw_factor()));
+            w = uint32_t(std::lround(float(w) * uw_factor()));
+        }
         sc = {{std::max(0, x), std::max(0, y)}, {w, h}};
     }
     set_dynamic(cb, vp, sc);
@@ -515,11 +887,17 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     // NX_DUMP_ON_FS=<fs hash>[,...]: a draw with one of these fragment shaders dumps its target 0 and what it samples.
     static const std::string dump_fs = [] { const char* e = std::getenv("NX_DUMP_ON_FS"); return std::string(e ? e : ""); }();
     static const uint64_t dump_from = [] { const char* e = std::getenv("NX_DUMP_FROM"); return e ? std::strtoull(e, nullptr, 10) : 0; }();
-    if (!dump_fs.empty() && fs && g_frame >= dump_from && dump_fs.find(fs->hash) != std::string::npos && g_dump_draws < 400 &&
+    static const char* dump_trigger = std::getenv("NX_DUMP_TRIGGER_FILE");
+    static bool dump_triggered = !dump_trigger || !*dump_trigger;
+    if (!dump_triggered && fs && !dump_fs.empty() && dump_fs.find(fs->hash) != std::string::npos)
+        if (FILE* marker = std::fopen(dump_trigger, "rb")) { std::fclose(marker); dump_triggered = true; log("map dump: trigger received"); }
+    static const uint64_t dump_limit = [] { const char* e = std::getenv("NX_DUMP_LIMIT"); return e ? std::strtoull(e, nullptr, 10) : 400ull; }();
+    if (dump_triggered && !dump_fs.empty() && fs && g_frame >= dump_from && dump_fs.find(fs->hash) != std::string::npos && g_dump_draws < dump_limit &&
         t.colors[0] && image_of(t.colors[0]) && (std::getenv("NX_DUMP_ANY") || image_of(t.colors[0])->view_type == VK_IMAGE_VIEW_TYPE_CUBE ||
                                                            image_of(t.colors[0])->view_type == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY)) {
         debug_dump_add(t.colors[0]);
-        for (const ResolvedTexture& r : g_textures.resolved) debug_dump_add(r.texture);
+        log("map dump: shader=%s target=%llx", fs->hash.c_str(), (unsigned long long)t.colors[0]);
+        for (const ResolvedTexture& r : g_textures.resolved) { log("map dump: sample=%llx", (unsigned long long)r.texture); debug_dump_add(r.texture); }
         g_dump_request = ++g_dump_draws;
     }
     trace_draw(t, mode, indexed, c, vs, fs, g_textures.bindings, g_textures.handles);

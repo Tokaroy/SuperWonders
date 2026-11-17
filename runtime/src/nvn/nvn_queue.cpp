@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "nvn.h"
+#include "nvn_ultrawide.h"
 #include "platform.h"
 #include "frametrace.h"
 #include "play.h"
@@ -462,6 +463,7 @@ void QueuePresentTexture(CPU& c) {
     }
     work_from = plat::monotonic_ns();
     uint64_t n = ++g_presents;
+    uw_cameras(n);
     if (n == 1 || (n & (n - 1)) == 0) log("nvn: present #%llu (texture %d)", (unsigned long long)n, int(c.x[2]));
     game::frame_presented(plat::monotonic_ns(), [&] {
         if (auto* w = get<Window>(c.x[1])) return w->interval;
