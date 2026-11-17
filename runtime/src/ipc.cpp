@@ -2,6 +2,7 @@
 #include "ipc.h"
 
 #include <mutex>
+#include <cstdlib>
 #include <unordered_map>
 
 namespace nx {
@@ -195,6 +196,9 @@ uint32_t ipc_request(CPU& c, uint32_t handle, uint64_t buf, uint64_t) {
         ctx.cmd = ld<uint32_t>(raw + 8);
         ctx.in = reinterpret_cast<const uint8_t*>(raw + 16);
         ctx.in_size = ndata * 4 > 32 ? ndata * 4 - 32 : 0;
+        if (std::getenv("NX_TRACE_CLOCK") && target->name == "ITimeZoneService" && (ctx.cmd == 100 || ctx.cmd == 101))
+            log("time trace: ipc cmd=%u ndata=%u start=%zu aligned=%llu domain=%d size=%zu rawarg=%lld", ctx.cmd, ndata, data_start,
+                (unsigned long long)(raw - buf), int(sess->domain), ctx.in_size, (long long)ld<int64_t>(raw + 16));
         if (magic != kSFCI) {
             log("ipc: %s bad magic %08x (data_start %zu, ndata %u)", target->name.c_str(), magic, data_start, ndata);
             for (int k = 0; k < 16; k++) log("   w[%d] = %08x", k, w[k]);
@@ -229,6 +233,8 @@ uint32_t ipc_request(CPU& c, uint32_t handle, uint64_t buf, uint64_t) {
         }
     } else {
         if (g_trace) log("ipc: %s cmd %u", target->name.c_str(), ctx.cmd);
+        if (std::getenv("NX_TRACE_CLOCK") && (target->name == "time:u" || target->name == "ISystemClock" || target->name == "ISteadyClock"))
+            log("time trace: %s cmd=%u", target->name.c_str(), ctx.cmd);
         rc = target->handle(ctx);
     }
 

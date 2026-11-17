@@ -1,6 +1,9 @@
 // time:u / time:a / time:s: clocks, time zone, and the shared memory the SDK reads the clocks from.
 #include <chrono>
 #include <ctime>
+#include <cstdlib>
+
+#include <nx/runtime.h>
 
 #include "ipc.h"
 
@@ -14,6 +17,8 @@ constexpr uint64_t kSourceLo = 0x4E58525443524543ull, kSourceHi = 0x484144455354
 int64_t unix_now() {
     return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
+
+bool trace_time() { return std::getenv("NX_TRACE_CLOCK") != nullptr; }
 
 int64_t steady_seconds() { return int64_t(system_tick() / 19200000); }
 
@@ -60,6 +65,8 @@ std::shared_ptr<KSharedMemory> time_shared_memory() {
         }
         // Local (0x38) and network (0x80) system clocks: {s64 offset; {s64 time_point; uuid}}
         int64_t offset = unix_now() - steady_seconds();
+        if (trace_time()) log("time trace: shared memory unix=%lld steady=%lld offset=%lld",
+                              (long long)unix_now(), (long long)steady_seconds(), (long long)offset);
         for (uint64_t base : {0x38ull, 0x80ull})
             for (int k = 0; k < 2; k++) {
                 uint64_t v = p + base + 8 + k * 0x20;
@@ -75,7 +82,12 @@ std::shared_ptr<KSharedMemory> time_shared_memory() {
 
 std::shared_ptr<Service> system_clock() {
     auto s = std::make_shared<Service>("ISystemClock");
-    s->cmds[0] = [](IpcCtx& c) { c.push<int64_t>(unix_now()); return 0u; };  // GetCurrentTime
+    s->cmds[0] = [](IpcCtx& c) {
+        const int64_t now = unix_now();
+        if (trace_time()) log("time trace: GetCurrentTime=%lld", (long long)now);
+        c.push<int64_t>(now);
+        return 0u;
+    };
     s->cmds[2] = [](IpcCtx& c) {                                              // GetSystemClockContext
         c.push<int64_t>(unix_now() - steady_seconds());
         c.push<int64_t>(0);
@@ -99,6 +111,7 @@ std::shared_ptr<Service> steady_clock() {
 
 // Calendar conversion in UTC (the host's local offset is applied as the "rule").
 void push_calendar(IpcCtx& c, int64_t t) {
+    if (trace_time()) log("time trace: ToCalendarTime input=%lld", (long long)t);
     long offset = utc_offset_west();
     time_t lt = time_t(t - offset);
     std::tm tm{};
@@ -161,6 +174,16 @@ void time_static(Service& s) {
     s.cmds[100] = [](IpcCtx& c) { c.push<uint8_t>(0); return 0u; };  // IsStandardUserSystemClockAutomaticCorrectionEnabled
     s.cmds[300] = [](IpcCtx& c) { c.push<int64_t>(unix_now()); return 0u; };  // CalculateMonotonicSystemClockBaseTimePoint
 }
+
+// Provide the host clock to the game's imported POSIX clock functions.
+void current_system_time(CPU& cpu) {
+    const int64_t now = unix_now();
+    if (cpu.x[0]) st<int64_t>(cpu.x[0], now);
+    if (trace_time()) log("time trace: game current time=%lld", (long long)now);
+    cpu.x[0] = 0;
+}
+NX_HLE("_ZN2nn4time23StandardUserSystemClock14GetCurrentTimeEPNS0_9PosixTimeE", current_system_time);
+NX_HLE("_ZN2nn4time26StandardNetworkSystemClock14GetCurrentTimeEPNS0_9PosixTimeE", current_system_time);
 
 ServiceRegistrar r_time_u("time:u", [] { auto s = std::make_shared<Service>("time:u"); time_static(*s); return s; });
 ServiceRegistrar r_time_a("time:a", [] { auto s = std::make_shared<Service>("time:a"); time_static(*s); return s; });

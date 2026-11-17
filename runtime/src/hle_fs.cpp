@@ -24,6 +24,7 @@
 #include <nx/game.h>
 
 #include "platform.h"
+#include "user_profiles.h"
 #include "frametrace.h"
 #include "play.h"
 
@@ -200,7 +201,7 @@ void EnsureSaveData(CPU& c) { c.x[0] = kOk; }
 void MountSaveData(CPU& c) {
     std::lock_guard lk(g_fs);
     std::string name = cstr(c.x[0]);
-    mount(name, data_root() / "user" / "save");
+    mount(name, profiles::save_path(data_root(), profiles::current()));
     c.x[0] = kOk;
 }
 

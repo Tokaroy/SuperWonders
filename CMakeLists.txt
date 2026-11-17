@@ -81,6 +81,9 @@ endforeach()
 option(NX_TESTS "Build the standalone unit tests" OFF)
 if(NX_TESTS AND NOT ANDROID)
     enable_testing()
+    add_executable(user_profiles_test tests/user_profiles_test.cpp runtime/src/user_profiles.cpp runtime/src/profile_image.cpp)
+    target_include_directories(user_profiles_test PRIVATE runtime/src)
+    add_test(NAME user_profiles COMMAND user_profiles_test)
     add_executable(settings_service_test tests/settings_service_test.cpp runtime/src/svc_settings.cpp)
     target_include_directories(settings_service_test PRIVATE runtime/include runtime/src)
     add_test(NAME settings_service COMMAND settings_service_test)
@@ -224,6 +227,8 @@ set(NX_RUNTIME_SOURCES
     runtime/src/svc_process.cpp
     runtime/src/hle_fs.cpp
     runtime/src/svc_account.cpp
+    runtime/src/user_profiles.cpp
+    runtime/src/profile_image.cpp
     runtime/src/hle_ro.cpp
     runtime/src/hle_vi.cpp
     runtime/src/hle_hid.cpp

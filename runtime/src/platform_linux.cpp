@@ -521,6 +521,12 @@ int main() {
 
     using namespace nx::plat;
     for (;;) {
+        // SDL3 emits text events only while text input is enabled for the window.
+        if (g_window) {
+            const bool wanted = nx::overlay::enabled() && nx::overlay::wants_mouse();
+            if (wanted && !SDL_TextInputActive(g_window)) SDL_StartTextInput(g_window);
+            else if (!wanted && SDL_TextInputActive(g_window)) SDL_StopTextInput(g_window);
+        }
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             switch (e.type) {
@@ -573,6 +579,18 @@ void pick_folder(const std::string& title, const std::string& start, std::functi
             },
             cb, props);
         SDL_DestroyProperties(props);
+    });
+}
+
+void pick_image(const std::function<void(std::string)>& done) {
+    auto* cb = new std::function<void(std::string)>(done);
+    run_on_main([cb] {
+        static const SDL_DialogFileFilter filters[] = {{"Images", "jpg;jpeg;png"}};
+        SDL_ShowOpenFileDialog([](void* user, const char* const* list, int) {
+            auto* f = static_cast<std::function<void(std::string)>*>(user);
+            (*f)(list && list[0] ? std::string(list[0]) : std::string());
+            delete f;
+        }, cb, linux_host::g_window, filters, 1, nullptr, false);
     });
 }
 
