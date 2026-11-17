@@ -399,6 +399,26 @@ void vertex_read_barrier(VkCommandBuffer cb, const ShaderInfo* vs) {
 }
 
 bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, const Cmd& c) {
+    struct AspectFlags {
+        uint64_t frame = UINT64_MAX;
+        bool flower = false, card = false, align = false, detail = false, markers = false, settings = false, alt = false;
+    };
+    static AspectFlags flags;
+    const uint64_t flag_frame = g_frame.load(std::memory_order_relaxed);
+    if (flags.frame != flag_frame) {
+        auto enabled = [](const char* name) {
+            const char* value = std::getenv(name);
+            return value && std::strcmp(value, "1") == 0;
+        };
+        flags.flower = enabled("NX_UW_FLOWER_TEST");
+        flags.card = enabled("NX_UW_MAP_CARD_TEST");
+        flags.align = enabled("NX_UW_MAP_ALIGN_TEST");
+        flags.detail = enabled("NX_UW_MAP_DETAIL_TEST");
+        flags.markers = enabled("NX_UW_MAP_MARKERS_TEST");
+        flags.settings = enabled("NX_UW_SETTINGS_SCISSOR_TEST");
+        flags.alt = enabled("NX_UW_FLOWER_ALT_TEST");
+        flags.frame = flag_frame;
+    }
     g_stats.total++;
     if (g_state.rasterizer_discard || !g_state.render_enable) return false;  // nothing reaches the targets
     const auto* shaders = program_shaders(g_state.program);
@@ -516,8 +536,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     static float flower_x = 0.0f, flower_y = 0.0f, flower_proj_x = 1.0f, flower_proj_y = 1.0f;
     static bool flower_seen = false;
     static float flower_direction = 1.0f;
-    const char* flower_test = std::getenv("NX_UW_FLOWER_TEST");
-    if (flower_test && std::strcmp(flower_test, "1") == 0 && g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
+    if (flags.flower && g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
         uint64_t frame = g_frame.load();
         if (frame != flower_frame) { flower_frame = frame; flower_seen = false; }
         GpuImage* target = image_of(t.colors[0]);
@@ -557,8 +576,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                 }
                 if (bubble) {
                     flower_x = f[19]; flower_y = f[23]; flower_proj_x = f[0]; flower_proj_y = f[5]; flower_seen = true;
-                    const char* alt = std::getenv("NX_UW_FLOWER_ALT_TEST");
-                    flower_direction = alt && std::strcmp(alt, "1") == 0 && std::fabs(f[16] - 0.95f) < 0.005f ? 2.0f : 1.0f;
+                    flower_direction = flags.alt && std::fabs(f[16] - 0.95f) < 0.005f ? 2.0f : 1.0f;
                     flower_offset = (flower_x - (flower_direction == 2.0f ? 384.0f : 0.0f)) * (uw_factor() - 1.0f);
                 }
                 else if (flower_seen && std::fabs(f[19] - flower_x) < 8.0f && std::fabs(f[23] - flower_y) < 100.0f)
@@ -573,8 +591,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     // World-map course cards use world-projected positions but are drawn in the
     // centered 16:9 UI layer. Track their distinctive frame texture, then move
     // nearby card components together by the same horizontal world offset.
-    const char* map_card_test = std::getenv("NX_UW_MAP_CARD_TEST");
-    if (map_card_test && std::strcmp(map_card_test, "1") == 0 && g_uw_wide &&
+    if (flags.card && g_uw_wide &&
         !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
         static uint64_t card_frame = UINT64_MAX;
         static float card_x = 0.0f, card_y = 0.0f;
@@ -599,8 +616,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                 flower_offset = card_x * (uw_factor() - 1.0f);
             // Extra pieces of the expanded card use their own transforms. Keep
             // their local spacing and apply the same anchor offset as the card.
-            const char* detail_test = std::getenv("NX_UW_MAP_DETAIL_TEST");
-            if (detail_test && std::strcmp(detail_test, "1") == 0 && card_seen) {
+            if (flags.detail && card_seen) {
                 bool detail_texture = false;
                 for (const ResolvedTexture& r : g_textures.resolved) {
                     GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
@@ -620,8 +636,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                     std::fabs(f[7] - card_y * 1.79259f) < 250.0f)
                     flower_offset = card_x * (uw_factor() - 1.0f);
             }
-            const char* markers_test = std::getenv("NX_UW_MAP_MARKERS_TEST");
-            if (markers_test && std::strcmp(markers_test, "1") == 0) {
+            if (flags.markers) {
                 static uint64_t msg_frame = UINT64_MAX;
                 static float msg_x = 0.0f, msg_y = 0.0f, msg_proj_x = 1.0f;
                 static bool msg_seen = false;
@@ -827,8 +842,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
             }
         }
     }
-    const char* map_align = std::getenv("NX_UW_MAP_ALIGN_TEST");
-    if (map_align && std::strcmp(map_align, "1") == 0 && g_uw_wide && vs && fs &&
+    if (flags.align && g_uw_wide && vs && fs &&
         vs->hash == "af561088cd1b1905" && fs->hash == "0bebd775cd1a4238") {
         key.uw_x = 1.0f;
         static bool logged = false;
@@ -921,12 +935,13 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         if (anchor_hud_left)
             vp.x -= (uw_factor() - 1.0f) * float(g_state.viewport[2]) * scale * 0.5f;
     }
-    if (const char* offset_trace = std::getenv("NX_UW_OFFSET_TRACE")) {
+    static const std::string offset_trace = [] { const char* e = std::getenv("NX_UW_OFFSET_TRACE"); return e ? e : ""; }();
+    if (!offset_trace.empty()) {
         static unsigned offset_logs = 0;
         if (offset_logs < 400 && vs && fs && g_uw_wide &&
             (vs->hash == "a106c763cf05f818" || vs->hash == "2fc962d8d063c1c9" ||
              vs->hash == "5587b5f73977f07e")) {
-            if (FILE* marker = std::fopen(offset_trace, "rb")) {
+            if (FILE* marker = std::fopen(offset_trace.c_str(), "rb")) {
                 std::fclose(marker);
                 const Range& u = g_state.uniforms[0][0];
                 const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
@@ -955,8 +970,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         uint32_t w = uint32_t(std::max(0l, std::lround(g_state.scissor[2] * scale)));
         uint32_t h = uint32_t(std::max(0l, std::lround(g_state.scissor[3] * scale)));
         if (viewport_image && viewport_image->uw) {
-            const char* settings_test = std::getenv("NX_UW_SETTINGS_SCISSOR_TEST");
-            const bool settings_text = settings_test && std::strcmp(settings_test, "1") == 0 &&
+            const bool settings_text = flags.settings &&
                 vs && vs->hash == "a106c763cf05f818" && fs && fs->hash == "46841c209865a1c0" &&
                 g_state.scissor[0] >= 1100 && g_state.scissor[0] <= 1200 &&
                 g_state.scissor[2] >= 500 && g_state.scissor[2] <= 530 &&

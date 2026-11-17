@@ -488,8 +488,17 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
                     // 64 KB, so every read past the data returns 0 as on Maxwell.
                     bool indexed = b.set == 0 && b.binding < 64 && (dynamic_uniform_bindings(s) >> b.binding & 1);
                     const uint64_t size = p ? std::min<uint64_t>(r.size, 0x10000) : 0;
-                    const char* map_test = std::getenv("NX_UW_MAP_COMPOSITE_TEST");
-                    if (map_test && std::strcmp(map_test, "1") == 0 && g_uw_wide && p && size >= 68 &&
+                    // The F1 aspect setting can change this flag while running. Read it once per frame, not once
+                    // per uniform binding, while retaining live switching between aspect ratios.
+                    static uint64_t flag_frame = UINT64_MAX;
+                    static bool map_test = false;
+                    const uint64_t frame = g_frame.load(std::memory_order_relaxed);
+                    if (frame != flag_frame) {
+                        const char* value = std::getenv("NX_UW_MAP_COMPOSITE_TEST");
+                        map_test = value && std::strcmp(value, "1") == 0;
+                        flag_frame = frame;
+                    }
+                    if (map_test && g_uw_wide && p && size >= 68 &&
                         s->stage == ShaderStage::Fragment && s->hash == "0bebd775cd1a4238" && b.nvn.index == 0 &&
                         !written_overlaps(p, size)) {
                         std::vector<uint8_t> copy(p, p + size);
