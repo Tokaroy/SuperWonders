@@ -441,7 +441,13 @@ void write_pipeline_keys(const std::string& path, const PipelineKeysHeader& h,
 }  // namespace
 
 void save_pipeline_keys(bool force) {
-    if (!g_pipeline_keys_dirty && !force) return;
+    // The standalone launcher also initializes Vulkan. It can shut down before
+    // the game loads its recorded keys; never replace the player's cache with
+    // that launcher's empty in-memory list. Wait for any earlier async write.
+    if (!g_pipeline_keys_loaded || !g_pipeline_keys_dirty) {
+        if (force) wait_background_writes();
+        return;
+    }
     open_pipeline_keys_path();
     PipelineKeysHeader h{};
     std::memcpy(h.magic, kPipelineKeysMagic, sizeof h.magic);
