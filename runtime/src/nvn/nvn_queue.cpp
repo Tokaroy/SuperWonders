@@ -290,6 +290,7 @@ uint32_t governor_max(uint64_t now) {
 // time every 600 frames, and NX_MAX_INTERVAL=1 clamps the game's own maximum to 1 (fields 0x24c/0x264/0x268).
 std::atomic<int> g_frame_cap{60};  // set_frame_cap: 60, or 30
 std::atomic<int> g_cap_hold{0};    // hold_frame_cap: a lower cap for a moment the game needs at its own rate, 0: none
+std::atomic<int> g_scene_cap_hold{0}; // independent of the Wonder Seed's temporary hold
 int frame_cap_setting() {
     static const int forced = [] {
         const char* e = std::getenv("NX_FPS_CAP");
@@ -306,8 +307,10 @@ int frame_cap_setting() {
     return forced ? forced : g_frame_cap.load(std::memory_order_relaxed);
 }
 int frame_cap() {
-    const int cap = frame_cap_setting(), hold = g_cap_hold.load(std::memory_order_relaxed);
-    return hold && hold < cap ? hold : cap;
+    int cap = frame_cap_setting();
+    for (int hold : {g_cap_hold.load(std::memory_order_relaxed), g_scene_cap_hold.load(std::memory_order_relaxed)})
+        if (hold && hold < cap) cap = hold;
+    return cap;
 }
 
 // The 30 fps cap: the game's own interval set to 2 (fw[0x264], fw[0x268] and the value it presents with), the mode
@@ -404,7 +407,9 @@ void pace_present(int interval) {
         return fps == 90 || fps == 120 || fps == 144 ? fps : 0;
     }();
     static uint64_t custom_next = 0;
-    const int custom_fps = env_fps ? env_fps : frame_cap();
+    int custom_fps = env_fps ? env_fps : frame_cap();
+    for (int hold : {g_cap_hold.load(std::memory_order_relaxed), g_scene_cap_hold.load(std::memory_order_relaxed)})
+        if (hold && hold < custom_fps) custom_fps = hold;
     if (custom_fps > 60 && !plat::fast_forward()) {
         // An explicit cap takes precedence over the raw unpaced diagnostic switch. Reset the deadline after a
         // significant hitch instead of trying to "catch up" with a burst of simulation frames.
@@ -514,9 +519,12 @@ NX_HLE("nvnWindowSetPresentInterval", WindowSetPresentInterval);
 void hold_frame_cap(int fps) {
     g_cap_hold.store(fps, std::memory_order_relaxed);
 }
+void hold_scene_frame_cap(int fps) {
+    g_scene_cap_hold.store(fps, std::memory_order_relaxed);
+}
 int held_frame_cap() {
-    const int hold = g_cap_hold.load(std::memory_order_relaxed);
-    return hold && hold < frame_cap_setting() ? hold : 0;
+    const int setting = frame_cap_setting(), cap = frame_cap();
+    return cap < setting ? cap : 0;
 }
 
 void set_frame_cap(int fps) {

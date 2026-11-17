@@ -21,6 +21,7 @@
 #endif
 
 #include <nx/runtime.h>
+#include <nx/game.h>
 
 #include "platform.h"
 #include "frametrace.h"
@@ -313,6 +314,7 @@ void OpenFile(CPU& c) {  // (FileHandle* out, path, int mode: 1 read, 2 write, 4
     st<uint64_t>(c.x[0], h);
     if (trace_fs()) log("fs: OpenFile(%s, %d) -> %llu", guest.c_str(), mode, (unsigned long long)h);
     play::file_opened(guest);
+    game::file_opened(guest.c_str());
     c.x[0] = kOk;
 }
 

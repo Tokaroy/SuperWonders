@@ -16,6 +16,30 @@
 
 namespace nx {
 
+namespace nvn { void hold_scene_frame_cap(int fps); }
+
+void game::file_opened(const char* path) {
+    static std::atomic<bool> held{false};
+    // The map can remain resident while entering a course, so returning to it does not necessarily reopen its
+    // StageLoadInfo. Its world music does reopen when the player returns from this house.
+    if (held.load() && std::strstr(path, "/Sound/Resource/Stream/BGM_World_") && held.exchange(false)) {
+        nvn::hold_scene_frame_cap(0);
+        log("wonder: first house scene left for world map: selected frame cap restored");
+        return;
+    }
+    constexpr const char* prefix = "/Stage/StageLoadInfo/";
+    const char* scene = std::strstr(path, prefix);
+    if (!scene) return;
+    scene += std::strlen(prefix);
+    constexpr const char* house = "Course500_Course.game__stage__StageLoadInfo.bgyml";
+    const bool in_house = std::strcmp(scene, house) == 0;
+    if (held.exchange(in_house) != in_house) {
+        nvn::hold_scene_frame_cap(in_house ? 60 : 0);
+        log("wonder: first house scene %s: %s", in_house ? "loading" : "left",
+            in_house ? "frame cap held at 60 for dialogue compatibility" : "selected frame cap restored");
+    }
+}
+
 const game::Info game::kInfo = {"wonder", "Super Mario Bros. Wonder", 0x010015100B514000ull,
                                 "io.github.belmantegu.wonderrecomp", "private/wonder",
                                 0x1000000 /* main.npdm: 16 MiB system resource */};
