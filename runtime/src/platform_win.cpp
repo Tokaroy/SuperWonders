@@ -245,7 +245,7 @@ static void metrics_reposition();
 
 static overlay::Settings to_overlay(const PcMenuState& s) {
     overlay::Settings o;
-    o.width = s.width, o.height = s.height, o.internal_resolution = s.internal_resolution, o.volume = s.volume;
+    o.width = s.width, o.height = s.height, o.aspect_ratio = s.aspect_ratio, o.internal_resolution = s.internal_resolution, o.volume = s.volume;
     o.language = s.language, o.game_language = s.game_language, o.memory_limit_gb = s.memory_limit_gb;
     o.controller_preset = s.controller_preset, o.muted = s.muted, o.fullscreen = s.fullscreen;
     o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile;
@@ -261,7 +261,7 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
 
 static PcMenuState from_overlay(const overlay::Settings& o) {
     PcMenuState s = g_pc_settings;
-    s.width = o.width, s.height = o.height, s.internal_resolution = o.internal_resolution, s.volume = o.volume;
+    s.width = o.width, s.height = o.height, s.aspect_ratio = o.aspect_ratio, s.internal_resolution = o.internal_resolution, s.volume = o.volume;
     s.language = o.language, s.game_language = o.game_language, s.memory_limit_gb = o.memory_limit_gb;
     s.controller_preset = o.controller_preset, s.muted = o.muted, s.fullscreen = o.fullscreen;
     s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile;
@@ -353,6 +353,7 @@ static void save_pc_settings() {
     std::ofstream file(data_root() + "/pc-settings.ini", std::ios::trunc);
     if (!file) return;
     file << "width=" << g_pc_settings.width << "\nheight=" << g_pc_settings.height << "\nvolume=" << g_pc_settings.volume
+         << "\naspect_ratio=" << std::max(0, g_pc_settings.aspect_ratio)
          << "\ninternal_resolution=" << g_pc_settings.internal_resolution << "\nmuted=" << g_pc_settings.muted << "\nfullscreen=" << g_pc_settings.fullscreen
          << "\nalways_on_top=" << g_pc_settings.always_on_top << "\nlanguage=" << g_pc_settings.language
          << "\ngame_language=" << g_pc_settings.game_language
@@ -383,6 +384,7 @@ static void load_pc_settings() {
         int value = 0;
         if (std::sscanf(line.c_str(), "width=%d", &value) == 1 && value >= 640 && value <= 7680) g_pc_settings.width = value;
         else if (std::sscanf(line.c_str(), "height=%d", &value) == 1 && value >= 360 && value <= 4320) g_pc_settings.height = value;
+        else if (std::sscanf(line.c_str(), "aspect_ratio=%d", &value) == 1) g_pc_settings.aspect_ratio = std::clamp(value, 0, 2);
         else if (std::sscanf(line.c_str(), "internal_resolution=%d", &value) == 1) g_pc_settings.internal_resolution = std::clamp(value, 0, 6);
         else if (std::sscanf(line.c_str(), "volume=%d", &value) == 1) g_pc_settings.volume = std::clamp(value, 0, 200);
         else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) g_pc_settings.muted = value != 0;
@@ -433,6 +435,20 @@ static void load_pc_settings() {
     }
     if (game_language_version < 2 && (g_pc_settings.game_language == 8 || g_pc_settings.game_language == 10))
         g_pc_settings.game_language = 0;
+    if (g_pc_settings.aspect_ratio >= 0) {
+        const int ratio = g_pc_settings.aspect_ratio;
+        if (g_pc_settings.width > 0)
+            g_pc_settings.height = std::max(360, ratio == 1 ? g_pc_settings.width * 27 / 64 :
+                                                  ratio == 2 ? g_pc_settings.width * 9 / 32 :
+                                                               g_pc_settings.width * 9 / 16);
+        _putenv_s("NX_ASPECT_PROFILE", ratio == 1 ? "21:9" : ratio == 2 ? "32:9" : "16:9");
+        _putenv_s("NX_ULTRAWIDE", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "0");
+        _putenv_s("NX_RESOLUTION", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "1920x1080");
+        const char* flags[] = {"NX_TERRAIN_MOD_ASPECT_TEST", "NX_UW_POWERUP_TEST", "NX_UW_FLOWER_TEST",
+            "NX_UW_FLOWER_ALT_TEST", "NX_UW_MAP_ALIGN_TEST", "NX_UW_MAP_COMPOSITE_TEST", "NX_UW_MAP_CARD_TEST",
+            "NX_UW_MAP_MARKERS_TEST", "NX_UW_MAP_DETAIL_TEST", "NX_UW_SETTINGS_SCISSOR_TEST"};
+        for (const char* flag : flags) _putenv_s(flag, ratio ? "1" : "0");
+    }
     nx::set_internal_resolution_preset(g_pc_settings.internal_resolution);
     nx::set_game_language(g_pc_settings.game_language);
     apply_input_bindings(g_pc_settings);
@@ -918,10 +934,30 @@ void overlay_presented(uint64_t now_ns) {
 }
 
 void window_size(uint32_t& w, uint32_t& h) {
-    RECT r{};
-    if (g_window) GetClientRect(g_window, &r);
-    w = uint32_t(r.right - r.left);
-    h = uint32_t(r.bottom - r.top);
+    if (g_window) {
+        RECT r{};
+        GetClientRect(g_window, &r);
+        w = uint32_t(r.right - r.left);
+        h = uint32_t(r.bottom - r.top);
+        return;
+    }
+
+    // Game hooks can ask for the output size before nnMain creates the HWND. Use the size the
+    // PC menu loaded from pc-settings.ini so game-side camera setup starts with the right aspect.
+    if (g_pc_settings.fullscreen) {
+        w = uint32_t(GetSystemMetrics(SM_CXSCREEN));
+        h = uint32_t(GetSystemMetrics(SM_CYSCREEN));
+    } else if (g_pc_settings.width > 0 && g_pc_settings.height > 0) {
+        w = uint32_t(g_pc_settings.width);
+        h = uint32_t(g_pc_settings.height);
+    } else {
+        unsigned rw = 16, rh = 9;
+        if (const char* resolution = std::getenv("NX_RESOLUTION"))
+            std::sscanf(resolution, "%ux%u", &rw, &rh);
+        const int screen_h = GetSystemMetrics(SM_CYSCREEN);
+        h = uint32_t(std::max(540, screen_h * 8 / 10));
+        w = uint32_t(int64_t(h) * rw / std::max(1u, rh));
+    }
 }
 
 void screen_size(uint32_t& w, uint32_t& h) { window_size(w, h); }

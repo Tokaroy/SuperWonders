@@ -35,6 +35,7 @@ bool load_settings(const std::string& path, Settings& s) {
         const char* l = line.c_str();
         if (std::sscanf(l, "width=%d", &v) == 1 && v >= 640 && v <= 7680) s.width = v;
         else if (std::sscanf(l, "height=%d", &v) == 1 && v >= 360 && v <= 4320) s.height = v;
+        else if (std::sscanf(l, "aspect_ratio=%d", &v) == 1) s.aspect_ratio = std::clamp(v, 0, 2);
         else if (std::sscanf(l, "internal_resolution=%d", &v) == 1) s.internal_resolution = std::clamp(v, 0, 6);
         else if (std::sscanf(l, "volume=%d", &v) == 1) s.volume = std::clamp(v, 0, 200);
         else if (std::sscanf(l, "muted=%d", &v) == 1) s.muted = v != 0;
@@ -81,6 +82,7 @@ void save_settings(const std::string& path, const Settings& s) {
     std::ofstream f(path, std::ios::trunc);
     if (!f) return;
     f << "width=" << s.width << "\nheight=" << s.height << "\nvolume=" << s.volume
+      << "\naspect_ratio=" << std::max(0, s.aspect_ratio)
       << "\ninternal_resolution=" << s.internal_resolution << "\nmuted=" << s.muted << "\nfullscreen=" << s.fullscreen
       << "\nalways_on_top=" << s.always_on_top << "\nlanguage=" << s.language << "\ngame_language=" << s.game_language
       << "\ngame_language_version=2"

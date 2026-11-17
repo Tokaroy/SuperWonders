@@ -159,6 +159,8 @@ def pack_kit(kit, a):
     copy(os.path.join(REPO, "tools", "nso2bin.py"), os.path.join(kit, "tools", "nso2bin.py"))
     copy(os.path.join(REPO, "tools", "fonts", "make_button_font.py"), os.path.join(kit, "tools", "fonts", "make_button_font.py"))
     copy(os.path.join(REPO, "tools", "wonder_menu_mod.py"), os.path.join(kit, "tools", "wonder_menu_mod.py"))
+    for f in ("wonder_uw_map_hud.py", "wonder_uw_screen_backgrounds.py", "wonder_uw_prepare.py"):
+        copy(os.path.join(REPO, "tools", f), os.path.join(kit, "tools", f))
     open(os.path.join(kit, "tools", "__init__.py"), "w").close()
     for f in glob.glob(os.path.join(REPO, "tools", "maxwell", "*.py")):
         copy(f, os.path.join(kit, "tools", "maxwell", os.path.basename(f)))
