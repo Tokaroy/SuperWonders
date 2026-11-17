@@ -21,8 +21,14 @@ https://github.com/StevensND/switch-port-mods/tree/main/Super%20Mario%20Bros.%20
 
 The world-map HUD and screen layouts use assets generated from the player's
 extracted game data. Those generated files are not distributed with the source.
-Generate both aspect variants before selecting them. With the game's Python
-and zstd dependencies installed, run the following from the repository root,
+Game setup generates both aspect variants automatically. When an ultrawide
+profile is launched, SuperWonders checks the layouts and regenerates missing
+or outdated files using the installed game-build kit. No game assets are
+included in the source or release. If this fails, the game reports an error;
+check `data/nx.log` and repair the game-build kit or rerun game setup.
+
+For development or troubleshooting, with Python and zstd installed, the
+individual layout generators can also be run from the repository root,
 substituting paths for the extracted RomFS, the existing `recomp-menu` mod's
 RomFS folder, and the installation's mods folder:
 
@@ -41,8 +47,7 @@ python tools/wonder_uw_screen_backgrounds.py --romfs $rom --menu-mod $menu --out
 The generated world-map resource-size table is based on the specified table.
 If the menu mod is regenerated or other RomFS mods replace that table, their
 resource-size changes must be combined; otherwise mod precedence can discard
-entries. If the generated layouts are missing, the aspect selector cannot
-supply them automatically.
+entries. The automatic generator uses the active `recomp-menu` resource table.
 
 The Windows aspect selector initializes the runtime switches on startup. The
 Linux startup path has not yet been wired to the selector or tested for these

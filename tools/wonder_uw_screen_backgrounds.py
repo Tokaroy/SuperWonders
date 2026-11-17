@@ -27,13 +27,13 @@ PANES = {
     'WipeWarp': ('P_WipeToUp',),
 }
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--romfs', required=True)
     ap.add_argument('--menu-mod', required=True, help='active recomp-menu romfs')
     ap.add_argument('--out', required=True, help='new mod directory')
     ap.add_argument('--aspect', type=float, default=32/9)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     factor = args.aspect / (16/9)
     if not 1.0 <= factor <= 3.0:
         raise ValueError('unsupported aspect')

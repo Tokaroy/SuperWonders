@@ -38,8 +38,8 @@ def wrap(data, targets):
         struct.pack_into('<H',out,0x10,struct.unpack_from('<H',out,0x10)[0]+3)
     return bytes(out)
 
-def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--romfs',required=True);ap.add_argument('--out',required=True);ap.add_argument('--aspect',type=float,default=32/9);ap.add_argument('--rstb',required=True);args=ap.parse_args()
+def main(argv=None):
+    ap=argparse.ArgumentParser();ap.add_argument('--romfs',required=True);ap.add_argument('--out',required=True);ap.add_argument('--aspect',type=float,default=32/9);ap.add_argument('--rstb',required=True);args=ap.parse_args(argv)
     if not 16/9 <= args.aspect <= 64/9: raise ValueError('unsupported aspect')
     shift=960*(args.aspect/(16/9)-1)
     source=os.path.join(args.romfs,'Layout','WorldMapDisplay.Nin_NX_NVN.blarc.zs')
