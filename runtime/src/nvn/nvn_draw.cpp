@@ -564,6 +564,96 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                 flower_offset = flower_x * (uw_factor() - 1.0f);
         }
     }
+    // World-map course cards use world-projected positions but are drawn in the
+    // centered 16:9 UI layer. Track their distinctive frame texture, then move
+    // nearby card components together by the same horizontal world offset.
+    const char* map_card_test = std::getenv("NX_UW_MAP_CARD_TEST");
+    if (map_card_test && std::strcmp(map_card_test, "1") == 0 && g_uw_wide &&
+        !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
+        static uint64_t card_frame = UINT64_MAX;
+        static float card_x = 0.0f, card_y = 0.0f;
+        static bool card_seen = false;
+        const uint64_t frame = g_frame.load();
+        if (frame != card_frame) { card_frame = frame; card_seen = false; }
+        GpuImage* target = image_of(t.colors[0]);
+        const Range& u = g_state.uniforms[0][0];
+        const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
+        if (target && target->logical_width == 1920 && target->logical_height == 1080 && f) {
+            bool card_frame_texture = false;
+            for (const ResolvedTexture& r : g_textures.resolved) {
+                GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
+                Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                if (img && src && img->logical_width == 88 && img->logical_height == 276 && src->format == 0x49)
+                    card_frame_texture = true;
+            }
+            if (card_frame_texture && vs->hash == "5587b5f73977f07e" && fs->hash == "e4ff94e7165656b5") {
+                card_x = f[19]; card_y = f[23]; card_seen = true;
+            }
+            if (card_seen && std::fabs(f[19] - card_x) < 8.0f && std::fabs(f[23] - card_y) < 100.0f)
+                flower_offset = card_x * (uw_factor() - 1.0f);
+            // Extra pieces of the expanded card use their own transforms. Keep
+            // their local spacing and apply the same anchor offset as the card.
+            const char* detail_test = std::getenv("NX_UW_MAP_DETAIL_TEST");
+            if (detail_test && std::strcmp(detail_test, "1") == 0 && card_seen) {
+                bool detail_texture = false;
+                for (const ResolvedTexture& r : g_textures.resolved) {
+                    GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
+                    Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                    if (!img || !src) continue;
+                    detail_texture |= (src->format == 0x49 && img->logical_width == 150 && img->logical_height == 150) ||
+                                      (src->format == 0x87 && img->logical_width == 240 && img->logical_height == 240);
+                }
+                const bool detail_shape = vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406" &&
+                    std::fabs(f[19] - card_x - 158.0f) < 5.0f && std::fabs(f[23] - card_y + 81.0f) < 10.0f;
+                if ((detail_texture || detail_shape) && std::fabs(f[19] - card_x) < 240.0f &&
+                    std::fabs(f[23] - card_y) < 120.0f)
+                    flower_offset = card_x * (uw_factor() - 1.0f);
+                if ((vs->hash == "2fc962d8d063c1c9" || vs->hash == "a106c763cf05f818") &&
+                    (fs->hash == "46841c209865a1c0" || fs->hash == "49add6de02fe8180") &&
+                    std::fabs(f[3] - card_x * 1.00833f) < 300.0f &&
+                    std::fabs(f[7] - card_y * 1.79259f) < 250.0f)
+                    flower_offset = card_x * (uw_factor() - 1.0f);
+            }
+            const char* markers_test = std::getenv("NX_UW_MAP_MARKERS_TEST");
+            if (markers_test && std::strcmp(markers_test, "1") == 0) {
+                static uint64_t msg_frame = UINT64_MAX;
+                static float msg_x = 0.0f, msg_y = 0.0f, msg_proj_x = 1.0f;
+                static bool msg_seen = false;
+                if (frame != msg_frame) { msg_frame = frame; msg_seen = false; }
+                bool marker_icon = false, message_frame = false, seed_counter = false;
+                for (const ResolvedTexture& r : g_textures.resolved) {
+                    GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
+                    Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                    if (!img || !src) continue;
+                    marker_icon |= (src->format == 0x87 &&
+                                   ((img->logical_width == 160 && img->logical_height == 160) ||
+                                    (img->logical_width == 48 && img->logical_height == 48))) ||
+                                   (src->format == 0x49 && img->logical_width == 256 && img->logical_height == 256);
+                    message_frame |= src->format == 0x49 && img->logical_width == 48 && img->logical_height == 112;
+                    seed_counter |= src->format == 0x25 && img->logical_width == 200 && img->logical_height == 130;
+                }
+                if (card_seen && marker_icon && std::fabs(f[19] - card_x) < 200.0f &&
+                    std::fabs(f[23] - card_y) < 130.0f &&
+                    (vs->hash == "42ea61385aa6a70c" || vs->hash == "6a4179388f4b1b2e"))
+                    flower_offset = card_x * (uw_factor() - 1.0f);
+                if (seed_counter && vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406")
+                    flower_offset = f[19] * (uw_factor() - 1.0f);
+                if (message_frame && vs->hash == "5587b5f73977f07e" && fs->hash == "e4ff94e7165656b5") {
+                    msg_x = f[19]; msg_y = f[23]; msg_proj_x = f[0]; msg_seen = true;
+                    flower_offset = msg_x * (uw_factor() - 1.0f);
+                } else if (msg_seen && vs->hash == "9e68098b1e77c2fa" &&
+                           std::fabs(f[23] - msg_y) < 100.0f && std::fabs(f[19] - msg_x) < 200.0f) {
+                    flower_offset = msg_x * (uw_factor() - 1.0f);
+                } else if (msg_seen && vs->hash == "2fc962d8d063c1c9" &&
+                           std::fabs(f[3] - msg_x * msg_proj_x) < 24.0f) {
+                    flower_offset = msg_x * (uw_factor() - 1.0f);
+                } else if (msg_seen && vs->hash == "d0c055be04d18268" && fs->hash == "8886bf302ad2c2aa" &&
+                           std::fabs(f[7] - msg_x * msg_proj_x) < 24.0f) {
+                    flower_offset = msg_x * (uw_factor() - 1.0f);
+                }
+            }
+        }
+    }
     if (g_uw_wide && ui_pick && uw_vs_scaled(vs)) {
         bool samples_wide = false;
         bool samples_hud_layer = false;

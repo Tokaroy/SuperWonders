@@ -2,7 +2,8 @@
 
 The tested configuration is Wonder 1.0.0 at 3840x1080 (32:9). It widens the
 world view, includes the experimental terrain, in-game HUD, talking flower,
-and world-map player adjustments, and retains the existing separate launcher.
+world-map player, course cards, seed and difficulty markers, and map message
+adjustments, and retains the existing separate launcher.
 Some menus and loading screens may still use a centered 16:9 layout. Other
 aspect ratios and game versions have not been validated with all these fixes.
 
@@ -16,6 +17,9 @@ $env:NX_UW_POWERUP_TEST = '1'
 $env:NX_UW_FLOWER_TEST = '1'
 $env:NX_UW_MAP_ALIGN_TEST = '1'
 $env:NX_UW_MAP_COMPOSITE_TEST = '1'
+$env:NX_UW_MAP_CARD_TEST = '1'
+$env:NX_UW_MAP_MARKERS_TEST = '1'
+$env:NX_UW_MAP_DETAIL_TEST = '1'
 Start-Process -FilePath '.\wonder.exe' -ArgumentList '--play'
 ```
 
