@@ -81,6 +81,18 @@ endforeach()
 option(NX_TESTS "Build the standalone unit tests" OFF)
 if(NX_TESTS AND NOT ANDROID)
     enable_testing()
+    add_executable(settings_service_test tests/settings_service_test.cpp runtime/src/svc_settings.cpp)
+    target_include_directories(settings_service_test PRIVATE runtime/include runtime/src)
+    add_test(NAME settings_service COMMAND settings_service_test)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import fontTools" RESULT_VARIABLE NX_FONTTOOLS_MISSING
+                        OUTPUT_QUIET ERROR_QUIET)
+        if(NOT NX_FONTTOOLS_MISSING)
+            add_test(NAME overlay_font_coverage COMMAND "${Python3_EXECUTABLE}"
+                     "${CMAKE_SOURCE_DIR}/tests/overlay_font_coverage_test.py")
+        endif()
+    endif()
     add_executable(gpu_pick_test tests/gpu_pick_test.cpp runtime/src/nvn/nvn_gpu_pick.cpp)
     target_compile_definitions(gpu_pick_test PRIVATE NX_GPU_PICK_STANDALONE)
     target_include_directories(gpu_pick_test PRIVATE runtime/src/nvn)
@@ -205,6 +217,7 @@ set(NX_RUNTIME_SOURCES
     runtime/src/kernel_watch.cpp
     runtime/src/ipc.cpp
     runtime/src/svc_am.cpp
+    runtime/src/svc_settings.cpp
     runtime/src/svc_nfp.cpp
     runtime/src/svc_misc.cpp
     runtime/src/svc_time.cpp
