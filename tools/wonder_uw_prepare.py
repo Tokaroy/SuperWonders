@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import tempfile
+import uuid
 
 import wonder_uw_map_hud
 import wonder_uw_screen_backgrounds
@@ -14,6 +15,20 @@ import wonder_uw_screen_backgrounds
 PROFILES = (("21-9", "2.37037037037", "00-uw-map-hud-21-9", "00-uw-screen-test-21-9"),
             ("32-9", "3.55555555556", "00-uw-map-hud-32-9", "00-uw-screen-test"))
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def publish_file(source, target):
+    # Create the replacement in its final directory so it inherits that
+    # directory's permissions (TemporaryDirectory is private on Windows).
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    temporary = target + '.new-' + uuid.uuid4().hex
+    try:
+        with open(source, 'rb') as src, open(temporary, 'xb') as dst:
+            shutil.copyfileobj(src, dst)
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def ensure(data):
@@ -69,13 +84,12 @@ def ensure(data):
                         original = os.path.join(base, name)
                         rel = os.path.relpath(original, source)
                         target = os.path.join(destinations[dest_index], rel)
-                        os.makedirs(os.path.dirname(target), exist_ok=True)
-                        os.replace(original, target)
+                        publish_file(original, target)
                         files.append([dest_index, rel])
         temporary = os.path.join(work, 'state.json')
         with open(temporary, 'w', encoding='utf8') as stream:
             json.dump({'signature': signature, 'files': files}, stream)
-        os.replace(temporary, state)
+        publish_file(temporary, state)
     print('Ultrawide layouts are ready.', flush=True)
 
 
