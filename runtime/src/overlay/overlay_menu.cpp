@@ -581,6 +581,15 @@ void video(MenuContext& c, const Labels& l) {
     const int lang = std::clamp(s.language, 0, 12);
     rows::begin("##video", c.height);
     rows::section(kCommon[lang][0]);
+    const char* aspect_names[] = {"16:9 (original)", "21:9", "32:9"};
+    int aspect = std::max(0, s.aspect_ratio);
+    const char* aspect_label = lang == 1 ? "Formato schermo" : "Aspect ratio";
+    const char* aspect_desc = lang == 1 ? "Si applica al prossimo avvio del gioco." : "Takes effect the next time the game starts.";
+    if (rows::choice(aspect_label, &aspect, aspect_names, 3, 0, aspect_desc)) {
+        s.aspect_ratio = aspect;
+        settings_changed(true);
+        ui::notify(aspect_desc);
+    }
     // the window's size: one of four, or the size it has now (dragged) as a fifth
     const char* sizes[5] = {"1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", nullptr};
     char custom[32];

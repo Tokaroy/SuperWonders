@@ -393,8 +393,16 @@ void load_modules(const ModuleInfo* const* mods, size_t count, const std::string
             game::kInfo.program_id == 0x010015100B514000ull && image > 0x29b5fec) {
             uint32_t* word = reinterpret_cast<uint32_t*>(mi->base + 0x29b5fe8);
             if (*word == 0x3fe38e3bu) {
-                *word = 0x40638e3bu;
-                log("terrain mod aspect test: main+29b5fe8 16:9 -> 32:9 before constructors");
+                float aspect = 32.0f / 9.0f;
+                const char* requested = std::getenv("NX_ULTRAWIDE");
+                unsigned width = 0, height = 0;
+                if (requested && ((std::sscanf(requested, "%ux%u", &width, &height) == 2) ||
+                                  (std::sscanf(requested, "%u:%u", &width, &height) == 2)) &&
+                    width && height && float(width) / float(height) >= 16.0f / 9.0f &&
+                    float(width) / float(height) <= 16.0f / 3.0f)
+                    aspect = float(width) / float(height);
+                std::memcpy(word, &aspect, sizeof aspect);
+                log("terrain mod aspect test: main+29b5fe8 16:9 -> %.5f before constructors", double(aspect));
             } else log("terrain mod aspect test: incompatible original %08x; unchanged", *word);
         }
         vm_set(mi->base + mi->text, mi->text_size, kMemCode, 5);

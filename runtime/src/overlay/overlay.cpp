@@ -253,6 +253,13 @@ void settings_changed(bool persist) {
     if (h.apply) h.apply(g_settings, persist);
 }
 
+int aspect_ratio() { return std::clamp(g_settings.aspect_ratio, 0, 2); }
+
+void set_aspect_ratio(int ratio) {
+    g_settings.aspect_ratio = std::clamp(ratio, 0, 2);
+    settings_changed(true);
+}
+
 void key_event(int raw, Key key, bool down) {
     if (key == KeyF1 && down) {
         toggle();

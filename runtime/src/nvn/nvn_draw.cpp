@@ -515,6 +515,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     static uint64_t flower_frame = UINT64_MAX;
     static float flower_x = 0.0f, flower_y = 0.0f, flower_proj_x = 1.0f, flower_proj_y = 1.0f;
     static bool flower_seen = false;
+    static float flower_direction = 1.0f;
     const char* flower_test = std::getenv("NX_UW_FLOWER_TEST");
     if (flower_test && std::strcmp(flower_test, "1") == 0 && g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
         uint64_t frame = g_frame.load();
@@ -554,14 +555,19 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                         (src->format == 0x87 && img->logical_width == 48 &&
                          (img->logical_height == 72 || img->logical_height == 104)))) bubble = true;
                 }
-                if (bubble) { flower_x = f[19]; flower_y = f[23]; flower_proj_x = f[0]; flower_proj_y = f[5]; flower_seen = true; flower_offset = flower_x * (uw_factor() - 1.0f); }
+                if (bubble) {
+                    flower_x = f[19]; flower_y = f[23]; flower_proj_x = f[0]; flower_proj_y = f[5]; flower_seen = true;
+                    const char* alt = std::getenv("NX_UW_FLOWER_ALT_TEST");
+                    flower_direction = alt && std::strcmp(alt, "1") == 0 && std::fabs(f[16] - 0.95f) < 0.005f ? 2.0f : 1.0f;
+                    flower_offset = (flower_x - (flower_direction == 2.0f ? 384.0f : 0.0f)) * (uw_factor() - 1.0f);
+                }
                 else if (flower_seen && std::fabs(f[19] - flower_x) < 8.0f && std::fabs(f[23] - flower_y) < 100.0f)
-                    flower_offset = flower_x * (uw_factor() - 1.0f);
+                    flower_offset = (flower_x - (flower_direction == 2.0f ? 384.0f : 0.0f)) * (uw_factor() - 1.0f);
             }
             if (flower_seen && vs->hash == "2fc962d8d063c1c9" &&
                 (fs->hash == "46841c209865a1c0" || fs->hash == "49add6de02fe8180") &&
                 std::fabs(f[3] - flower_x * flower_proj_x) < 32.0f && std::fabs(f[7] - flower_y * flower_proj_y) < 100.0f)
-                flower_offset = flower_x * (uw_factor() - 1.0f);
+                flower_offset = (flower_x - (flower_direction == 2.0f ? 384.0f : 0.0f)) * (uw_factor() - 1.0f);
         }
     }
     // World-map course cards use world-projected positions but are drawn in the
@@ -638,7 +644,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                     flower_offset = card_x * (uw_factor() - 1.0f);
                 if (seed_counter && vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406")
                     flower_offset = f[19] * (uw_factor() - 1.0f);
-                if (message_frame && vs->hash == "5587b5f73977f07e" && fs->hash == "e4ff94e7165656b5") {
+                if (message_frame && std::fabs(f[16] - 0.8f) < 0.01f && vs->hash == "5587b5f73977f07e" && fs->hash == "e4ff94e7165656b5") {
                     msg_x = f[19]; msg_y = f[23]; msg_proj_x = f[0]; msg_seen = true;
                     flower_offset = msg_x * (uw_factor() - 1.0f);
                 } else if (msg_seen && vs->hash == "9e68098b1e77c2fa" &&
@@ -915,6 +921,27 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         if (anchor_hud_left)
             vp.x -= (uw_factor() - 1.0f) * float(g_state.viewport[2]) * scale * 0.5f;
     }
+    if (const char* offset_trace = std::getenv("NX_UW_OFFSET_TRACE")) {
+        static unsigned offset_logs = 0;
+        if (offset_logs < 400 && vs && fs && g_uw_wide &&
+            (vs->hash == "a106c763cf05f818" || vs->hash == "2fc962d8d063c1c9" ||
+             vs->hash == "5587b5f73977f07e")) {
+            if (FILE* marker = std::fopen(offset_trace, "rb")) {
+                std::fclose(marker);
+                const Range& u = g_state.uniforms[0][0];
+                const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
+                if (f && t.color_count && t.colors[0]) {
+                    GpuImage* target = image_of(t.colors[0]);
+                    if (target && target->logical_width == 1920 && target->logical_height == 1080) {
+                        ++offset_logs;
+                        log("UW offset trace: frame=%llu vs=%s fs=%s text=%g,%g model=%g,%g offset=%g hud=%u flower=%u,%g,%g",
+                            (unsigned long long)g_frame.load(), vs->hash.c_str(), fs->hash.c_str(), f[3], f[7], f[19], f[23],
+                            flower_offset, unsigned(anchor_hud_left), unsigned(flower_seen), flower_x, flower_y);
+                    }
+                }
+            }
+        }
+    }
     // NVN's upper-left window origin (what Wonder sets) maps NDC +Y to the top of the render target, like D3D;
     // Vulkan maps it to the bottom. A negative-height viewport gives NVN's mapping, and with it NVN's front faces.
     // (Before this, the front face was inverted instead: triangles were culled right, but every render target was
@@ -928,8 +955,18 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         uint32_t w = uint32_t(std::max(0l, std::lround(g_state.scissor[2] * scale)));
         uint32_t h = uint32_t(std::max(0l, std::lround(g_state.scissor[3] * scale)));
         if (viewport_image && viewport_image->uw) {
-            x = int32_t(std::lround(float(x) * uw_factor()));
-            w = uint32_t(std::lround(float(w) * uw_factor()));
+            const char* settings_test = std::getenv("NX_UW_SETTINGS_SCISSOR_TEST");
+            const bool settings_text = settings_test && std::strcmp(settings_test, "1") == 0 &&
+                vs && vs->hash == "a106c763cf05f818" && fs && fs->hash == "46841c209865a1c0" &&
+                g_state.scissor[0] >= 1100 && g_state.scissor[0] <= 1200 &&
+                g_state.scissor[2] >= 500 && g_state.scissor[2] <= 530 &&
+                g_state.scissor[3] >= 30 && g_state.scissor[3] <= 65;
+            if (settings_text) {
+                x += int32_t(std::lround((uw_factor() - 1.0f) * 960.0f * scale));
+            } else {
+                x = int32_t(std::lround(float(x) * uw_factor()));
+                w = uint32_t(std::lround(float(w) * uw_factor()));
+            }
         }
         sc = {{std::max(0, x), std::max(0, y)}, {w, h}};
     }

@@ -1,56 +1,50 @@
 # Experimental ultrawide support
 
-The tested configuration is Wonder 1.0.0 at 3840x1080 (32:9). It widens the
-world view, includes the experimental terrain, in-game HUD, talking flower,
-world-map player, course cards, seed and difficulty markers, and map message
-adjustments, and retains the existing separate launcher.
-Some menus and loading screens may still use a centered 16:9 layout. Other
-aspect ratios and game versions have not been validated with all these fixes.
+Wonder 1.0.0 has been tested by the player at 3840x1080 (32:9) and
+2560x1080 (approximately 21:9). The implementation changes world rendering,
+terrain, in-game HUD, talking flowers, world-map rendering, cards and markers.
+Some menu and transition details still require further validation. Other game
+versions and aspect ratios have not been validated.
 
-For a build of this branch, launch the game directly with these environment
-variables in the same PowerShell session:
+On Windows, select **Aspect ratio** in the launcher Settings page or in the
+F1 Video menu. The choices are 16:9 (original), 21:9 and 32:9. Restart the
+game for the change to take effect. The selection is saved as `aspect_ratio`
+in `data/pc-settings.ini`; the game selects the corresponding generated mod
+folders without renaming them. Existing extra mods remain separate.
 
-```powershell
-$env:NX_ULTRAWIDE = '3840x1080'
-$env:NX_TERRAIN_MOD_ASPECT_TEST = '1'
-$env:NX_UW_POWERUP_TEST = '1'
-$env:NX_UW_FLOWER_TEST = '1'
-$env:NX_UW_MAP_ALIGN_TEST = '1'
-$env:NX_UW_MAP_COMPOSITE_TEST = '1'
-$env:NX_UW_MAP_CARD_TEST = '1'
-$env:NX_UW_MAP_MARKERS_TEST = '1'
-$env:NX_UW_MAP_DETAIL_TEST = '1'
-Start-Process -FilePath '.\wonder.exe' -ArgumentList '--play'
-```
+The terrain adjustment changes a verified Wonder 1.0.0 constant in memory
+before constructors run. It uses the selected aspect ratio, following the
+approach of the emulator patch by StevensND and KeatonTheBot:
+https://github.com/StevensND/switch-port-mods/tree/main/Super%20Mario%20Bros.%20Wonder/%5B010015100B514000%5D/Aspect%20Ratio/32.9
 
-The terrain option changes a verified Wonder 1.0.0 constant in memory before
-constructors run. The 32:9 value follows the emulator patch by StevensND and
-KeatonTheBot: https://github.com/StevensND/switch-port-mods/tree/main/Super%20Mario%20Bros.%20Wonder/%5B010015100B514000%5D/Aspect%20Ratio/32.9
-It is a fixed 32:9 value; do not enable it for a different ratio. The other
-options activate the fixes tested alongside it. Restart the game after changing
-aspect ratio or these options.
+## Generate layout mods from your own game data
 
-## World-map HUD layout
-
-The tested 32:9 map HUD also uses a layout generated from the player's own
-extracted game data. The generated files are not distributed in this repository.
-With the game's Python dependencies installed, run the following from the
-repository root, substituting the paths for the extracted RomFS, the existing
-`recomp-menu` mod's resource-size table, and the installation's mods folder:
+The world-map HUD and screen layouts use assets generated from the player's
+extracted game data. Those generated files are not distributed with the source.
+Generate both aspect variants before selecting them. With the game's Python
+and zstd dependencies installed, run the following from the repository root,
+substituting paths for the extracted RomFS, the existing `recomp-menu` mod's
+RomFS folder, and the installation's mods folder:
 
 ```powershell
-python tools/wonder_uw_map_hud.py `
-  --romfs 'PATH_TO_DATA\extract\romfs' `
-  --rstb 'PATH_TO_DATA\mods\recomp-menu\romfs\System\Resource\ResourceSizeTable.Product.100.rsizetable.zs' `
-  --out 'PATH_TO_DATA\mods\00-uw-map-hud-32-9' `
-  --aspect 3.5555555556
+$rom = 'PATH_TO_DATA\extract\romfs'
+$menu = 'PATH_TO_DATA\mods\recomp-menu\romfs'
+$mods = 'PATH_TO_DATA\mods'
+$rstb = "$menu\System\Resource\ResourceSizeTable.Product.100.rsizetable.zs"
+
+python tools/wonder_uw_map_hud.py --romfs $rom --rstb $rstb --out "$mods\00-uw-map-hud-21-9" --aspect 2.37037037037
+python tools/wonder_uw_screen_backgrounds.py --romfs $rom --menu-mod $menu --out "$mods\00-uw-screen-test-21-9" --aspect 2.37037037037
+python tools/wonder_uw_map_hud.py --romfs $rom --rstb $rstb --out "$mods\00-uw-map-hud-32-9" --aspect 3.55555555556
+python tools/wonder_uw_screen_backgrounds.py --romfs $rom --menu-mod $menu --out "$mods\00-uw-screen-test" --aspect 3.55555555556
 ```
 
-The generated resource-size table is based on the specified table. If the menu
-mod is regenerated or other RomFS mods also replace this table, their resource
-size changes must be combined; otherwise mod precedence can discard entries.
-The HUD layout generated above is specific to the requested aspect ratio.
+The generated world-map resource-size table is based on the specified table.
+If the menu mod is regenerated or other RomFS mods replace that table, their
+resource-size changes must be combined; otherwise mod precedence can discard
+entries. If the generated layouts are missing, the aspect selector cannot
+supply them automatically.
 
-Diagnostic `*_TEST`, snapshot, and tracing switches remain available for the
-investigation; the map proxy and map depth test switches are diagnostics, not
-part of the working configuration above.
+The Windows aspect selector initializes the runtime switches on startup. The
+Linux startup path has not yet been wired to the selector or tested for these
+changes; the presence of the shared menu does not establish Linux support.
+Diagnostic switches and the map proxy remain investigation tools.

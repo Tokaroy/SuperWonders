@@ -733,6 +733,12 @@ void page_files() {
 void page_settings() {
     rows::begin("##settings", ImGui::GetContentRegionAvail().y);
     rows::section(lt(LtSettings));
+    const char* aspect_names[] = {"16:9 (original)", "21:9", "32:9"};
+    const bool italian = overlay::menu_language() == 1;
+    const char* aspect_desc = italian ? "Si applica al prossimo avvio del gioco." : "Takes effect the next time the game starts.";
+    int aspect = overlay::aspect_ratio();
+    if (rows::choice(italian ? "Formato schermo" : "Aspect ratio", &aspect, aspect_names, 3, 0, aspect_desc))
+        overlay::set_aspect_ratio(aspect);
     if (rows::action(lt(LtOpenSettings), "", "Display, graphics, audio, controls and the overlay: the same settings as "
                                           "the in-game menu (F1, or Minus + Plus held). Saved in pc-settings.ini.",
                      true, true))
