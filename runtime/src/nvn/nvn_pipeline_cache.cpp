@@ -23,6 +23,7 @@ namespace {
 VkPipelineCache g_cache = VK_NULL_HANDLE;
 bool g_tried = false;
 std::atomic<bool> g_cache_dirty{false};
+std::atomic<uint64_t> g_unsaved_pipelines{0};
 size_t g_saved_size = 0;
 std::string g_path;
 uint64_t g_pipelines = 0, g_pipeline_ns = 0, g_astc = 0, g_astc_ns = 0;
@@ -49,6 +50,7 @@ void write_pipeline_cache(bool force) {
         std::remove(g_path.c_str());
         if (ok && std::rename(tmp.c_str(), g_path.c_str()) == 0) {
             g_saved_size = n;
+            g_unsaved_pipelines.store(0, std::memory_order_release);
             log("nvn/vk: pipeline cache saved (%zu bytes)%s", n, force ? " at shutdown" : "");
             return;
         }
@@ -111,6 +113,7 @@ void pipeline_cache_save(bool force) { save_pipeline_cache(force); }
 void note_pipeline_cache_changed() { g_cache_dirty.store(true, std::memory_order_release); }
 void note_pipeline_created(uint64_t ns) {
     note_pipeline_cache_changed();
+    g_unsaved_pipelines.fetch_add(1, std::memory_order_relaxed);
     g_pipelines++, g_pipeline_ns += ns;
     ft::add(ft::kPipelines), ft::add(ft::kPipelineNs, ns);
 }
@@ -126,7 +129,10 @@ void creation_log(uint64_t frames) {
     gpl_log();
     g_pipelines = g_pipeline_ns = g_astc = g_astc_ns = g_pipelines_skipped = 0;
     static uint64_t windows = 0;
-    if (++windows % 10 == 0) pipeline_cache_save(), save_pipeline_keys();  // on the background writer
+    if (++windows % 10 == 0) {
+        save_pipeline_keys();
+        if (g_unsaved_pipelines.load(std::memory_order_relaxed) >= 16) pipeline_cache_save();
+    }
 }
 
 }  // namespace nx::nvn

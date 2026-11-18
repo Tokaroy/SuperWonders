@@ -4,11 +4,12 @@
 // inline uniform updates (UpdateUniformBuffer, which invalidates what it overlaps) and compute results (ranges a
 // dispatch writes are read from their written copy, nvn_written.cpp, and invalidated here): a copy made once can
 // serve every later draw of the submit that binds the same bytes.
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <map>
+#include <vector>
 
 #include "nvn_draw_state.h"
 
@@ -20,21 +21,46 @@ struct Entry {
     uint64_t size = 0, padded = 0;
     Upload upload;
 };
-// By host address; several sizes of one address are rare, so the latest one is kept.
-std::map<const uint8_t*, Entry> g_copies;
-uint64_t g_saved = 0, g_copied = 0;
 
-// In front of the map (a tree walk per bound buffer of every draw, and most are hits): a slot per address hash with a
-// copy of that address's entry in g_copies. A slot of the current generation always equals the map's entry: both are
-// written together, dedup_invalidate clears the slot of each entry it erases, dedup_reset starts a new generation.
-struct Front {
+constexpr uint32_t kTableSize = 16384;
+constexpr uint32_t kPageBuckets = 4096;
+
+struct Slot {
     const uint8_t* p = nullptr;
     uint64_t generation = 0;
+    bool valid = false;
     Entry entry;
 };
-Front g_front[1024];
+
+struct PageBucket {
+    uint64_t generation = 0;
+    std::vector<uint32_t> slots;
+};
+
+Slot g_table[kTableSize];
+PageBucket g_pages[kPageBuckets];
 uint64_t g_generation = 1;
-Front& front_of(const uint8_t* p) { return g_front[(uintptr_t(p) >> 4 ^ uintptr_t(p) >> 14) & 1023]; }
+uint32_t g_table_used = 0;
+uint64_t g_saved = 0, g_copied = 0;
+
+uint32_t slot_hash(const uint8_t* p) {
+    uintptr_t v = uintptr_t(p);
+    return uint32_t(((v >> 4) ^ ((v >> 14) * 0x9E3779B9u)) & (kTableSize - 1));
+}
+
+void register_pages(const uint8_t* p, uint64_t size, uint32_t idx) {
+    const uintptr_t p0 = uintptr_t(p) >> 16;
+    const uintptr_t p1 = uintptr_t(p + (size ? size - 1 : 0)) >> 16;
+    const uintptr_t span = std::min<uintptr_t>(p1 - p0, kPageBuckets - 1);
+    for (uintptr_t k = 0; k <= span; ++k) {
+        PageBucket& b = g_pages[(p0 + k) & (kPageBuckets - 1)];
+        if (b.generation != g_generation) {
+            b.generation = g_generation;
+            b.slots.clear();
+        }
+        b.slots.push_back(idx);
+    }
+}
 
 }  // namespace
 
@@ -45,40 +71,62 @@ Upload dedup_upload(const uint8_t* p, uint64_t size, uint64_t padded, uint64_t a
         return u;
     }
     static const bool off = std::getenv("NX_NO_DEDUP") != nullptr;  // bisecting: a fresh copy every time
-    Front& f = front_of(p);
-    const Entry* e = nullptr;
-    if (!off && f.generation == g_generation && f.p == p) {
-        e = &f.entry;  // the map's entry for p
-    } else if (auto it = off ? g_copies.end() : g_copies.find(p); it != g_copies.end()) {
-        f = {p, g_generation, it->second};
-        e = &f.entry;
-    }
-    if (e && e->size == size && e->padded == padded && e->upload.offset % align == 0) {
-        g_saved += padded;
-        return e->upload;
+    uint32_t target_idx = UINT32_MAX;
+    if (!off) {
+        if (g_table_used >= kTableSize / 2) dedup_reset();
+        const uint32_t h = slot_hash(p);
+        for (uint32_t probe = 0; probe < kTableSize; ++probe) {
+            const uint32_t idx = (h + probe) & (kTableSize - 1);
+            Slot& s = g_table[idx];
+            if (s.generation != g_generation) {
+                if (target_idx == UINT32_MAX) target_idx = idx;
+                break;
+            }
+            if (!s.valid) {
+                if (target_idx == UINT32_MAX) target_idx = idx;
+                continue;
+            }
+            if (s.p == p) {
+                if (s.entry.size == size && s.entry.padded >= padded && s.entry.upload.offset % align == 0) {
+                    g_saved += padded;
+                    return s.entry.upload;
+                }
+                target_idx = idx;
+                break;
+            }
+        }
     }
     Upload u = upload_alloc(padded, align);
     std::memcpy(u.ptr, p, size);
     if (padded > size) std::memset(u.ptr + size, 0, padded - size);
-    g_copies[p] = {size, padded, u};
-    f = {p, g_generation, {size, padded, u}};
+    if (!off && target_idx != UINT32_MAX) {
+        Slot& s = g_table[target_idx];
+        if (s.generation != g_generation) ++g_table_used;
+        s = {p, g_generation, true, {size, padded, u}};
+        register_pages(p, size, target_idx);
+    }
     g_copied += padded;
     return u;
 }
 
-void dedup_reset() { g_copies.clear(), g_generation++; }
+void dedup_reset() {
+    ++g_generation;
+    g_table_used = 0;
+}
 
 void dedup_invalidate(const uint8_t* p, uint64_t size) {
-    // Entries starting before p may still reach into it: look back over the few that can.
-    auto it = g_copies.lower_bound(p + size);
-    while (it != g_copies.begin()) {
-        --it;
-        if (it->first + it->second.size <= p) {
-            if (p - it->first > (64ll << 20)) break;  // nothing larger than 64 MB is copied
-            continue;
+    if (!p || !size) return;
+    const uintptr_t p0 = uintptr_t(p) >> 16;
+    const uintptr_t p1 = uintptr_t(p + size - 1) >> 16;
+    const uintptr_t span = std::min<uintptr_t>(p1 - p0, kPageBuckets - 1);
+    for (uintptr_t k = 0; k <= span; ++k) {
+        PageBucket& b = g_pages[(p0 + k) & (kPageBuckets - 1)];
+        if (b.generation != g_generation) continue;
+        for (uint32_t idx : b.slots) {
+            Slot& s = g_table[idx];
+            if (s.generation == g_generation && s.valid && s.p < p + size && p < s.p + s.entry.size)
+                s.valid = false;
         }
-        if (Front& f = front_of(it->first); f.p == it->first) f.generation = 0;
-        it = g_copies.erase(it);
     }
 }
 

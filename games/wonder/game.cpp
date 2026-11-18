@@ -320,6 +320,7 @@ static void trace_screen_globals() {
 }  // namespace
 
 namespace nvn {
+int frame_cap();
 int held_frame_cap();
 }
 
@@ -366,6 +367,7 @@ void game::frame_presented(uint64_t now_ns, int present_interval) {
     static uint64_t previous_ns = 0;
     static double samples[5]{};
     static unsigned sample_count = 0, sample_next = 0;
+    static double prev_seconds = 1.0 / 60.0;
     static uint64_t report_ns = 0, report_frames = 0;
     static double report_seconds = 0, report_game_seconds = 0;
     static double speed_elapsed = 0, speed_simulated = 0;
@@ -391,14 +393,23 @@ void game::frame_presented(uint64_t now_ns, int present_interval) {
         // A moment the game needs at its own rate (seed_guard.cpp): presented at 60, a 60 Hz step each frame; the
         // average starts again when the hold ends.
         seconds = 1.0 / 60.0;
+        prev_seconds = seconds;
         sample_count = sample_next = 0;
     } else if (realtime) {
-        samples[sample_next++ % 5] = dt;
+        const int cap = std::max(30, nvn::frame_cap());
+        const double target_dt = 1.0 / double(cap);
+        if (sample_count == 0) prev_seconds = target_dt;
+        const double max_step = std::max(target_dt * 1.20, prev_seconds * 1.20);
+        const double min_step = std::min(target_dt * 0.85, prev_seconds * 0.85);
+        const double filtered_dt = std::clamp(dt, min_step, max_step);
+        samples[sample_next++ % 5] = filtered_dt;
         if (sample_count < 5) ++sample_count;
         seconds = 0;
         for (unsigned i = 0; i < sample_count; ++i) seconds += samples[i];
         seconds /= sample_count;
+        if (std::fabs(seconds - target_dt) <= target_dt * 0.06) seconds = target_dt;
         seconds = std::min(seconds, 1.0 / 15.0);  // spread brief hitches; avoid an enormous one-frame simulation step
+        prev_seconds = seconds;
     }
 
     store_frame_step(float(seconds));

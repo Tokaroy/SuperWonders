@@ -631,10 +631,14 @@ void log_timing(uint64_t frames) {
     g_timing = {};
 }
 
-// gpu_present's time, whatever way it returns.
+// gpu_present's time, whatever way it returns (excluding frame-cap pacing).
 struct PresentTimer {
     uint64_t t0 = plat::monotonic_ns();
-    ~PresentTimer() { g_timing.present_ns += plat::monotonic_ns() - t0; }
+    uint64_t paced_ns = 0;
+    ~PresentTimer() {
+        const uint64_t dt = plat::monotonic_ns() - t0;
+        g_timing.present_ns += dt > paced_ns ? dt - paced_ns : 0;
+    }
 };
 
 }  // namespace
@@ -704,27 +708,29 @@ void gpu_submit(const std::vector<std::shared_ptr<CmdList>>& lists, std::shared_
 
 // Headless: the presented texture is only counted, logged and dumped (no swapchain). Nothing is submitted unless a
 // frame dump is due: the empty submit was a Metal command buffer and a fence wait per frame.
-void present_headless(uint64_t texture) {
+uint64_t present_headless(uint64_t texture) {
     GpuImage* src = image_of(texture);  // made here if new, as before (the targets rendered into it share it, #44)
     static uint64_t presents = 0;
     presents++;
     if (std::getenv("NX_DRAW_STATS") && presents % (presents < 300 ? 60 : 300) == 0) draw_log_stats();
     if (presents % 60 == 0) log_timing(60), gpu_profile_log(60);
     if (std::getenv("NX_DRAW_STATS") && presents % 300 == 0) zero_draws_log();
-    if (!frame_dump_due(presents)) return;
-    if (src && src->layout != VK_IMAGE_LAYOUT_UNDEFINED && begin()) {
-        GpuImage* shown = src;  // NX_PRESENT_TEST: what the present pass would put on a display (nvn_present.cpp)
-        if (GpuImage* test = present_pass_test_target(); test && present_pass_record(g_cb, *src, nullptr, 0))
-            test->layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, shown = test;
-        transition(g_cb, *shown, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        bool dump = frame_dump_record(g_cb, *shown);
-        if (async_gpu())
-            frame_submit(VK_NULL_HANDLE, VK_NULL_HANDLE, {}, dump);  // a dumped frame is waited for
-        else
-            end_and_wait(VK_NULL_HANDLE, VK_NULL_HANDLE);
-        if (dump) frame_dump_write(*shown, presents);
+    if (frame_dump_due(presents)) {
+        if (src && src->layout != VK_IMAGE_LAYOUT_UNDEFINED && begin()) {
+            GpuImage* shown = src;  // NX_PRESENT_TEST: what the present pass would put on a display (nvn_present.cpp)
+            if (GpuImage* test = present_pass_test_target(); test && present_pass_record(g_cb, *src, nullptr, 0))
+                test->layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, shown = test;
+            transition(g_cb, *shown, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            bool dump = frame_dump_record(g_cb, *shown);
+            if (async_gpu())
+                frame_submit(VK_NULL_HANDLE, VK_NULL_HANDLE, {}, dump);  // a dumped frame is waited for
+            else
+                end_and_wait(VK_NULL_HANDLE, VK_NULL_HANDLE);
+            if (dump) frame_dump_write(*shown, presents);
+        }
+        debug_dump_textures(presents);
     }
-    debug_dump_textures(presents);
+    return pace_present_now();
 }
 
 // The startup shader preparation (nvn_shader_prepare.cpp, nvn_pipeline.cpp) runs inside the first gpu_submit or
@@ -818,8 +824,14 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
         prepare_recorded_pipelines();
     }
     if (!async_gpu() || pipelined()) free_retired_images(async_gpu() ? frame_completed() : UINT64_MAX);
-    if (plat::headless()) return present_headless(texture);
-    if (plat::window_minimized()) return;
+    if (plat::headless()) {
+        timer.paced_ns += present_headless(texture);
+        return;
+    }
+    if (plat::window_minimized()) {
+        timer.paced_ns += pace_present_now();
+        return;
+    }
     if (plat::window_generation() != g_window_gen) {  // Android: a new window after home or the lock screen
         if (async_gpu()) frame_wait_all();
         p_vkDeviceWaitIdle(g_device);
@@ -927,6 +939,7 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
         end_and_wait(acquired, rendered);
     if (dump) frame_dump_write(*shown, presents);
     if (due) debug_dump_textures(presents);
+    timer.paced_ns += pace_present_now();
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.waitSemaphoreCount = 1;
     pi.pWaitSemaphores = &rendered;

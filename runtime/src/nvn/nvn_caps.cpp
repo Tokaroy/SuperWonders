@@ -95,13 +95,13 @@ bool ubwc_flags() {
     return on;
 }
 
-// The upload ring takes ~11 MB of CPU writes per course frame (copies and zero padding). Host-visible coherent memory
-// is write-combined (uncached) on Adreno; NX_RING_CACHED=1 asks for a host-cached coherent type first, where the GPU
-// snoops the CPU's caches (PLAN.md R5).
+// The upload ring takes ~11-32 MB of CPU writes per frame (copies and zero padding) and compute write-backs read from
+// it after each submit. Host-visible coherent memory without HOST_CACHED is write-combined (uncached), making CPU
+// read-backs 50-100x slower; prefer a host-cached coherent type by default (NX_RING_CACHED=0 disables it).
 uint32_t upload_memory_type(uint32_t bits) {
     const VkMemoryPropertyFlags plain = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     const char* e = std::getenv("NX_RING_CACHED");
-    if (e && e[0] == '1') {
+    if (!(e && e[0] == '0')) {
         VkPhysicalDeviceMemoryProperties mp{};
         p_vkGetPhysicalDeviceMemoryProperties(vk_physical(), &mp);
         for (uint32_t k = 0; k < mp.memoryTypeCount; k++)

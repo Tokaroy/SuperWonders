@@ -77,6 +77,7 @@ bool note_int_texture(const ShaderInfo* s, uint32_t binding, uint32_t kind) {
     if (k == kind) return false;
     k = kind;
     r.generation[s]++;
+    __atomic_add_fetch(&s->int_tex_gen, 1u, __ATOMIC_RELEASE);
     static int logged = 0;
     if (logged++ < 40)
         log("nvn/vk: shader %s binding %u samples %s integer texture: declared as such", s->hash.c_str(), binding,
@@ -94,10 +95,7 @@ uint32_t int_texture_kind(const ShaderInfo* s, uint32_t binding) {
 }
 
 uint32_t int_texture_generation(const ShaderInfo* s) {
-    Records& r = records();
-    std::lock_guard lk(r.lock);
-    auto it = r.generation.find(s);
-    return it == r.generation.end() ? 0 : it->second;
+    return s ? __atomic_load_n(&s->int_tex_gen, __ATOMIC_ACQUIRE) : 0;
 }
 
 std::string int_texture_key(const ShaderInfo* s) {

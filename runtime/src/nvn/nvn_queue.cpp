@@ -138,6 +138,7 @@ void SyncWait(CPU& c) {
 // ---- queues -----------------------------------------------------------------------------------------------------
 
 std::atomic<uint64_t> g_presents{0};
+std::atomic<int> g_present_interval{1};
 
 void QueueInitialize(CPU& c) { c.x[0] = 1; }  // NVNboolean (NVNqueue*, const NVNqueueBuilder*)
 void QueueFinalize(CPU&) {}
@@ -201,6 +202,7 @@ void WindowInitialize(CPU& c) {  // NVNboolean (NVNwindow*, const NVNwindowBuild
     w.active = int(driver(c, "nvnWindowBuilderGetNumActiveTextures", {builder}));
     if (w.active <= 0 || w.active > n) w.active = n;
     w.interval = int(driver(c, "nvnWindowBuilderGetPresentInterval", {builder}));
+    g_present_interval.store(w.interval, std::memory_order_relaxed);
     log("nvn: window %llx: %d textures (%d active), present interval %d", (unsigned long long)guest, n, w.active, w.interval);
     c.x[0] = 1;
 }
@@ -306,12 +308,6 @@ int frame_cap_setting() {
     if (until && g_frame.load(std::memory_order_relaxed) < until) return 30;
     return forced ? forced : g_frame_cap.load(std::memory_order_relaxed);
 }
-int frame_cap() {
-    int cap = frame_cap_setting();
-    for (int hold : {g_cap_hold.load(std::memory_order_relaxed), g_scene_cap_hold.load(std::memory_order_relaxed)})
-        if (hold && hold < cap) cap = hold;
-    return cap;
-}
 
 // The 30 fps cap: the game's own interval set to 2 (fw[0x264], fw[0x268] and the value it presents with), the mode
 // its governor picks under load. The game then steps its logic two vsyncs per frame and keeps full speed; waiting
@@ -324,7 +320,9 @@ void frame_time_probe(CPU& c) {
     static const char* max_env = std::getenv("NX_MAX_INTERVAL");
     static uint32_t game_max = 0;  // the game's own maximum (fw[0x24c]), restored when the governor lets go
     if (!game_max) game_max = ld<uint32_t>(c.x[19] + 0x24c);
-    uint32_t max = max_env && std::atoi(max_env) >= 1 ? uint32_t(std::atoi(max_env)) : governor_max(plat::monotonic_ns());
+    uint32_t max = max_env && std::atoi(max_env) >= 1 ? uint32_t(std::atoi(max_env))
+                 : frame_cap() >= 60                  ? 1u
+                                                      : governor_max(plat::monotonic_ns());
     if (!max && !max_env && game_max) st<uint32_t>(c.x[19] + 0x24c, game_max);
     if (max >= 1) {
         st<uint32_t>(c.x[19] + 0x24c, max);
@@ -388,17 +386,14 @@ void WindowSetPresentInterval(CPU& c) {
         if (w->interval != int(c.x[1]) && logged++ < 50)
             log("nvn: window present interval %d -> %d (frame %llu)", w->interval, int(c.x[1]), (unsigned long long)g_frame.load());
         w->interval = int(c.x[1]);
+        g_present_interval.store(w->interval, std::memory_order_relaxed);
     }
 }
 
 // (NVNqueue*, NVNwindow*, int textureIndex)
-// Frame pacing: a present returns no earlier than the window's present interval in vsyncs after the previous one.
-// On the Switch the texture-available sync of the next acquire does this; ours is signaled at once, so without it
-// the game runs as fast as it can once it is faster than 60 fps. The vsyncs are the vi ticks (hle_vi.cpp: the
-// display's blank where it can be), so frames reach the display on its refresh, not on a clock drifting against it.
-// A late frame does not wait for the next vsync. NX_NO_FRAME_LIMIT=1, or fast-forward held: unpaced when the selected
-// cap is 30/60. The explicit 90/120/144 caps use a monotonic host deadline instead of the 60 Hz VI timer.
-void pace_present(int interval) {
+// Frame pacing: a present waits until the window's present interval in vsyncs (or host deadline for > 60 FPS caps)
+// before vkQueuePresentKHR so submission/replay jitter is absorbed prior to display and intervals stay even.
+uint64_t pace_present(int interval) {
     static const bool off = std::getenv("NX_NO_FRAME_LIMIT") != nullptr;
     static const int env_fps = [] {
         const char* value = std::getenv("NX_FPS_LIMIT");
@@ -411,17 +406,29 @@ void pace_present(int interval) {
     for (int hold : {g_cap_hold.load(std::memory_order_relaxed), g_scene_cap_hold.load(std::memory_order_relaxed)})
         if (hold && hold < custom_fps) custom_fps = hold;
     if (custom_fps > 60 && !plat::fast_forward()) {
-        // An explicit cap takes precedence over the raw unpaced diagnostic switch. Reset the deadline after a
-        // significant hitch instead of trying to "catch up" with a burst of simulation frames.
         const uint64_t period = 1'000'000'000ull / uint64_t(custom_fps);
         const uint64_t now = plat::monotonic_ns();
-        if (!custom_next || now > custom_next + period * 2) custom_next = now + period;
-        else custom_next += period;
-        if (custom_next > now) plat::sleep_ns(int64_t(custom_next - now));
-        return;
+        if (!custom_next) {
+            custom_next = now;
+            return 0;
+        }
+        custom_next += period;
+        if (now >= custom_next) {
+            // Never sleep on an already-late frame; clamp drift so the next frame is not compressed into a burst.
+            if (now - custom_next > period / 4) custom_next = now;
+            return 0;
+        }
+        const uint64_t wait_ns = custom_next - now;
+        constexpr uint64_t kSpinMarginNs = 1'200'000ull;
+        if (wait_ns > kSpinMarginNs) plat::sleep_ns(int64_t(wait_ns - kSpinMarginNs));
+        while (plat::monotonic_ns() < custom_next) plat::yield();
+        const uint64_t done = plat::monotonic_ns();
+        return done > now ? done - now : 0;
     }
+    custom_next = 0;
     static uint64_t next = 0;
-    if (off || interval <= 0 || plat::fast_forward()) return;
+    if (off || interval <= 0 || plat::fast_forward()) return 0;
+    const uint64_t wait_from = plat::monotonic_ns();
     uint64_t now = vsync_wait(next);
     static uint64_t presents = 0, at2 = 0;  // how often the game asks for 30 fps (interval 2), per 600 presents
     // Pacing: presents more than a vsync later than asked (a frame shown late or twice), and the longest gap.
@@ -440,6 +447,8 @@ void pace_present(int interval) {
         log_wait_sites();
     }
     next = now + uint64_t(interval);
+    const uint64_t waited = plat::monotonic_ns();
+    return waited > wait_from ? waited - wait_from : 0;
 }
 
 void QueuePresentTexture(CPU& c) {
@@ -450,21 +459,24 @@ void QueuePresentTexture(CPU& c) {
     if (work_from) plat::perf_hint_frame(int64_t(t_in - work_from));
     if (auto* w = get<Window>(c.x[1])) {
         plat::overlay_game_interval(w->interval);
+        g_present_interval.store(w->interval, std::memory_order_relaxed);
         // At most two presents queued: the game runs at most two frames ahead of the replay.
         static uint64_t queued[2] = {};
         static int next_slot = 0;
         const uint64_t t_wait = plat::monotonic_ns();
         worker_wait(queued[next_slot]);
         const uint64_t replay_wait_ns = plat::monotonic_ns() - t_wait;
+        bool submitted_present = false;
         if (int(c.x[2]) >= 0 && size_t(c.x[2]) < w->textures.size()) {
             uint64_t texture = w->textures[size_t(c.x[2])];
             std::array<int32_t, 4> crop{w->crop[0], w->crop[1], w->crop[2], w->crop[3]};
             queued[next_slot] = worker_run([texture, crop] { gpu_present(texture, crop.data()); });
             next_slot ^= 1;
+            submitted_present = true;
         }
         const uint64_t t_pace = plat::monotonic_ns();
-        pace_present(w->interval);
-        ft::guest_present(replay_wait_ns, plat::monotonic_ns() - t_pace, w->interval);  // frametrace.h
+        const uint64_t paced_ns = submitted_present ? 0 : pace_present_now();
+        ft::guest_present(replay_wait_ns, paced_ns ? paced_ns : plat::monotonic_ns() - t_pace, w->interval);  // frametrace.h
     }
     work_from = plat::monotonic_ns();
     uint64_t n = ++g_presents;
@@ -513,6 +525,15 @@ NX_HLE("nvnWindowGetNumActiveTextures", WindowGetNumActiveTextures);
 NX_HLE("nvnWindowSetNumActiveTextures", WindowSetNumActiveTextures);
 NX_HLE("nvnWindowGetPresentInterval", WindowGetPresentInterval);
 NX_HLE("nvnWindowSetPresentInterval", WindowSetPresentInterval);
+
+int frame_cap() {
+    int cap = frame_cap_setting();
+    for (int hold : {g_cap_hold.load(std::memory_order_relaxed), g_scene_cap_hold.load(std::memory_order_relaxed)})
+        if (hold && hold < cap) cap = hold;
+    return cap;
+}
+
+uint64_t pace_present_now() { return pace_present(g_present_interval.load(std::memory_order_relaxed)); }
 
 // A game asks for its own rate for a moment (games/wonder/seed_guard.cpp): the cap drops to fps until released
 // (0), the setting is untouched. held_frame_cap() is the hold in force (0: none).

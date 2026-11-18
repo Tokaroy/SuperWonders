@@ -33,13 +33,23 @@ struct Region {
 using Regions = std::map<const uint8_t*, Region>;
 using It = Regions::iterator;
 Regions g_regions;
+const uint8_t* g_min_addr = nullptr;
+const uint8_t* g_max_addr = nullptr;
 bool g_read = false;  // a copy was bound for reading since the last write_after_read
 uint64_t g_binds = 0;  // written_bind calls, ever (nvn_frames.cpp: did a dispatch write storage after the split)
 uint64_t g_shared = 0, g_merged = 0, g_composed = 0, g_indirect = 0;  // for written_log
 
+bool has_overlap_fast(const uint8_t* p, uint64_t size) {
+    if (!p || !size || g_regions.empty() || p + size <= g_min_addr || p >= g_max_addr) return false;
+    It it = g_regions.upper_bound(p);
+    if (it != g_regions.begin() && std::prev(it)->first + std::prev(it)->second.size > p) return true;
+    return it != g_regions.end() && it->first < p + size;
+}
+
 // The regions overlapping [p, p + size), in address order.
 std::vector<It> overlapping(const uint8_t* p, uint64_t size) {
     std::vector<It> v;
+    if (!p || !size || g_regions.empty() || p + size <= g_min_addr || p >= g_max_addr) return v;
     It it = g_regions.upper_bound(p);
     if (it != g_regions.begin() && std::prev(it)->first + std::prev(it)->second.size > p) v.push_back(std::prev(it));
     for (; it != g_regions.end() && it->first < p + size; ++it) v.push_back(it);
@@ -135,7 +145,7 @@ Upload written_bind(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_
     r.up = alloc_anchored(r.cap, off);
     std::memcpy(r.up.ptr, lo, n);
     std::memset(r.up.ptr + n, 0, r.cap - n);
-    r.before = std::make_shared<std::vector<uint8_t>>(r.up.ptr, r.up.ptr + n);
+    r.before = std::make_shared<std::vector<uint8_t>>(lo, lo + n);
     for (It it : old)  // their parts: as they were before their own GPU writes
         if (it->second.before)
             std::memcpy(r.before->data() + (it->first - lo), it->second.before->data(), it->second.before->size());
@@ -145,12 +155,14 @@ Upload written_bind(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_
         g_merged++;
     }
     dedup_invalidate(lo, n);  // copies of these bytes made earlier in the submit are not what later work reads
+    if (!g_min_addr || lo < g_min_addr) g_min_addr = lo;
+    if (!g_max_addr || hi > g_max_addr) g_max_addr = hi;
     It it = g_regions.emplace(lo, r).first;
     return at(it, off);
 }
 
 bool written_read(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_t padded, uint64_t align, Upload& out) {
-    if (!p || !size || g_regions.empty() || written_separate()) return false;
+    if (!p || !size || g_regions.empty() || p + size <= g_min_addr || p >= g_max_addr || written_separate()) return false;
     std::vector<It> regions = overlapping(p, size);
     if (regions.empty()) return false;
     if (It it = containing(p, size, padded, align, regions); it != g_regions.end()) {
@@ -176,7 +188,7 @@ Upload read_upload(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_t
 }
 
 bool written_overlaps(const uint8_t* p, uint64_t size) {
-    return p && size && !g_regions.empty() && !overlapping(p, size).empty();
+    return has_overlap_fast(p, size);
 }
 
 bool written_indirect(VkCommandBuffer cb, const uint8_t* p) {
@@ -216,7 +228,7 @@ bool draw_inputs(VkCommandBuffer cb, const ShaderInfo* vs, bool indexed, const C
         return true;
     }
     uint64_t bytes = uint64_t(count) * index_size(c.mask);
-    if (!written_read(cb, p, bytes, bytes, index_size(c.mask), in.index)) in.index = upload(p, bytes, 16);
+    if (!written_read(cb, p, bytes, bytes, index_size(c.mask), in.index)) in.index = dedup_upload(p, bytes, bytes, 16);
     return true;
 }
 
@@ -282,10 +294,11 @@ std::vector<WriteBack> written_take() {
     v.reserve(g_regions.size());
     for (auto& [p, r] : g_regions) v.push_back({r.up.ptr, const_cast<uint8_t*>(p), r.size, r.before});
     g_regions.clear();
+    g_min_addr = g_max_addr = nullptr;
     return v;
 }
 
-void written_reset() { g_regions.clear(), g_read = false; }
+void written_reset() { g_regions.clear(), g_min_addr = g_max_addr = nullptr, g_read = false; }
 
 void written_log() {
     if (g_shared + g_merged + g_composed + g_indirect)

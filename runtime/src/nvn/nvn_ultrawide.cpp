@@ -1,6 +1,7 @@
 #include "nvn_ultrawide.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -143,19 +144,30 @@ void uw_scan(uint64_t present) {
 namespace {
 std::mutex g_cam_lock;
 std::vector<uint64_t> g_cams;  // addresses of the aspect floats
+std::atomic<bool> g_cam_rescan_needed{true};
 
-void cam_scan() {
+void cam_scan(bool throttled) {
     const uint32_t far_bits = 0x447a0000u, fov_bits = 0x3f490fdbu, asp_bits = 0x3fe38e39u;
+    float wide = float(16.0 / 9.0) * uw_factor();
+    uint32_t wide_bits = 0;
+    std::memcpy(&wide_bits, &wide, 4);
     uint64_t lo = kHeapBase, hi = kHeapBase + heap_size();
     std::vector<uint64_t> found;
-    for (uint64_t a = lo; a + 12 <= hi; a += 4) {
-        const uint32_t* w = reinterpret_cast<const uint32_t*>(a);
-        if (w[0] != far_bits) continue;
-        if (w[1] == fov_bits && (w[2] == asp_bits)) found.push_back(a + 8);
+    constexpr uint64_t kChunkBytes = 64ull << 20;
+    for (uint64_t base = lo; base + 12 <= hi; base += kChunkBytes) {
+        const uint64_t chunk_hi = std::min(hi, base + kChunkBytes);
+        for (uint64_t a = base; a + 12 <= chunk_hi; a += 4) {
+            const uint32_t* w = reinterpret_cast<const uint32_t*>(a);
+            if (w[0] != far_bits) continue;
+            if (w[1] == fov_bits && (w[2] == asp_bits || w[2] == wide_bits)) found.push_back(a + 8);
+        }
+        if (throttled && chunk_hi + 12 <= hi) plat::sleep_ns(2'000'000ll);
     }
     std::lock_guard lk(g_cam_lock);
+    g_cams.clear();
     for (uint64_t a : found)
-        if (std::find(g_cams.begin(), g_cams.end(), a) == g_cams.end() && g_cams.size() < 8192) g_cams.push_back(a);
+        if (g_cams.size() < 8192) g_cams.push_back(a);
+    g_cam_rescan_needed.store(g_cams.size() < 16, std::memory_order_release);
 }
 }  // namespace
 
@@ -168,12 +180,20 @@ void uw_cameras(uint64_t present) {
         std::thread([] {
             plat::set_thread_name("uw-camscan");
             for (;;) {
-                uint64_t t0 = plat::monotonic_ns();
-                cam_scan();
-                static int logged = 0;
-                if (logged++ < 5) {
+                size_t known = 0;
+                {
                     std::lock_guard lk(g_cam_lock);
-                    log("nvn: ultrawide: camera scan %.0f ms, %zu cameras", double(plat::monotonic_ns() - t0) / 1e6, g_cams.size());
+                    known = g_cams.size();
+                }
+                const bool urgent = known < 16 || g_cam_rescan_needed.load(std::memory_order_acquire);
+                if (urgent) {
+                    uint64_t t0 = plat::monotonic_ns();
+                    cam_scan(known >= 16);
+                    static int logged = 0;
+                    if (logged++ < 5) {
+                        std::lock_guard lk(g_cam_lock);
+                        log("nvn: ultrawide: camera scan %.0f ms, %zu cameras", double(plat::monotonic_ns() - t0) / 1e6, g_cams.size());
+                    }
                 }
                 plat::sleep_ns(2'000'000'000ll);
             }
@@ -184,12 +204,17 @@ void uw_cameras(uint64_t present) {
     uint32_t wide_bits;
     std::memcpy(&wide_bits, &wide, 4);
     std::lock_guard lk(g_cam_lock);
+    size_t valid = 0;
     for (uint64_t a : g_cams) {
         const uint64_t heap_end = kHeapBase + heap_size();
         if (a < kHeapBase + 8 || a + 4 > heap_end) continue;
         auto* p = reinterpret_cast<volatile uint32_t*>(a);
-        if (p[-2] == 0x447a0000u && p[-1] == 0x3f490fdbu && *p == asp_bits) *p = wide_bits;
+        if (p[-2] == 0x447a0000u && p[-1] == 0x3f490fdbu) {
+            ++valid;
+            if (*p == asp_bits) *p = wide_bits;
+        }
     }
+    if (valid < g_cams.size() || valid < 16) g_cam_rescan_needed.store(true, std::memory_order_release);
 }
 
 bool g_uw_wide = false;
@@ -202,31 +227,27 @@ void uw_span(int32_t& x, int32_t& w, uint32_t extent_w) {
     x = int32_t(x0), w = int32_t(ww);
 }
 
-namespace {
-std::mutex g_ui_lock;
-std::set<const ShaderInfo*> g_ui_vs;
-}  // namespace
 void uw_ui_vertex_shader(const ShaderInfo* vs) {
-    std::lock_guard lk(g_ui_lock);
-    if (g_ui_vs.insert(vs).second) log("nvn: ultrawide: UI vertex shader %s", vs->hash.c_str());
+    if (!vs || __atomic_load_n(&vs->uw_ui_vs, __ATOMIC_RELAXED)) return;
+    if (__atomic_exchange_n(&vs->uw_ui_vs, 1, __ATOMIC_ACQ_REL) == 0)
+        log("nvn: ultrawide: UI vertex shader %s", vs->hash.c_str());
 }
 bool uw_is_ui_vertex_shader(const ShaderInfo* vs) {
-    std::lock_guard lk(g_ui_lock);
-    return g_ui_vs.count(vs) != 0;
+    return vs && __atomic_load_n(&vs->uw_ui_vs, __ATOMIC_RELAXED) != 0;
 }
 
 bool uw_vs_scaled(const ShaderInfo* vs) {
-    static std::map<const ShaderInfo*, bool> cache;
+    if (!vs) return false;
+    if (uint8_t cached = __atomic_load_n(&vs->uw_scaled_cache, __ATOMIC_RELAXED)) return cached == 2;
     static const std::string off = std::getenv("NX_UW_NOSCALE") ? std::getenv("NX_UW_NOSCALE") : "";
     static const std::string only = std::getenv("NX_UW_SCALE") ? std::getenv("NX_UW_SCALE") : "";
-    auto it = cache.find(vs);
-    if (it != cache.end()) return it->second;
     bool scaled = false;
     for (const DescriptorBinding& b : vs->refl.bindings)
         if (b.type == DescriptorType::UniformBuffer && b.name != "support_buffer") scaled = true;
     if (!off.empty() && off.find(vs->hash) != std::string::npos) scaled = false;
     if (!only.empty()) scaled = only.find(vs->hash) != std::string::npos;
-    return cache[vs] = scaled;
+    __atomic_store_n(&vs->uw_scaled_cache, uint8_t(scaled ? 2 : 1), __ATOMIC_RELAXED);
+    return scaled;
 }
 
 

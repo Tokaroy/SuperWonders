@@ -367,9 +367,8 @@ uint64_t trim_reusable_image_cache() {
 
 uint64_t reclaim_reusable_images_now() {
     if (async_gpu()) {
-        const uint64_t released = trim_reusable_image_cache();
+        retire_through(g_submitted);
         free_retired_images(frame_completed());
-        return released;
     }
     std::vector<std::shared_ptr<GpuImage>> dead;
     {
@@ -393,19 +392,15 @@ uint64_t reclaim_reusable_images_now() {
     return freed_bytes;
 }
 
-// On by default on macOS only (course 1-1 headless: ~50 -> ~59 fps there; DEBUG.md #61): MoltenVK encodes Metal inside
-// vkQueueSubmit, which is what the overlap hides. With native drivers (Windows, NVIDIA) the synchronous path played
-// at 58 fps against 40 and had none of the exploded meshes the pipelined one shows in course 1-1 (DEBUG-2 #76).
+// On by default (DEBUG.md #61, DEBUG-2 #90/#91 fixed the cross-pool command-list drop that was blamed on #76):
+// splits submits after the last compute dispatch, queues the compute part early, waits only for the compute part's
+// fence to copy write-backs, and overlaps the graphics pass execution and present with the next frame's CPU replay.
 // NX_PIPELINED=0: synchronous; 1..4: pipelined, that many submits in flight (2 at least). NX_ASYNC_GPU wins.
 bool pipelined() {
     static const bool on = [] {
         if (env_int("NX_ASYNC_GPU") > 0) return false;
         const char* e = std::getenv("NX_PIPELINED");
-#if defined(__APPLE__)
         return !e || std::atoi(e) > 0;
-#else
-        return e && std::atoi(e) > 0;
-#endif
     }();
     return on;
 }

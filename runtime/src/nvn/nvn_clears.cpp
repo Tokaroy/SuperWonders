@@ -125,7 +125,7 @@ uint32_t clears_apply(const Targets& t, VkRenderingAttachmentInfo* colors, VkRen
 // clear as a Metal encoder of its own, DEBUG.md #31); NX_CLEARS_PASS=1: the pass; NX_CLEARS_TRANSFER=1: elsewhere too.
 bool transfer_clears() {
     static const bool on = [] {
-#if defined(__ANDROID__)
+#if !defined(__APPLE__)
         return std::getenv("NX_CLEARS_PASS") == nullptr;
 #else
         return std::getenv("NX_CLEARS_TRANSFER") != nullptr;

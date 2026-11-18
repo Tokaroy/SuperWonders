@@ -76,6 +76,7 @@ bool texture_race_old();
 Object* find_object(uint64_t guest, uint64_t mark);  // under objects_lock (shared)
 void note_replaced(uint64_t guest);                  // under objects_lock (alone): guest's object is about to change
 void purge_incarnations(uint64_t upto);              // under objects_lock (alone), from drain_objects: records <= upto
+bool has_pending_incarnations();                     // any retired/pool/sampler incarnation records waiting for purge
 uint64_t current_epoch();                            // the epoch of the last recorded change
 uint64_t replay_floor();                             // the last replay's mark: objects retired up to it can go
 // A submit's replay (gpu_submit, under the GPU lock): takes the mark, then drains the deferred objects no replay
@@ -392,6 +393,8 @@ uint64_t worker_last();
 void worker_finish();
 // guest NVNtexture* of a window texture; crop: the part shown (x, y, w, h; w 0: all), scaled to the window.
 void gpu_present(uint64_t texture, const int32_t* crop = nullptr);
+uint64_t pace_present_now();
+int frame_cap();
 // With NX_ASYNC_GPU submits run while the game goes on (nvn_frames.cpp): the serial of the last one, and a wait until
 // it completed with its results in guest memory (true if it had to wait). Synchronous: 0, and nothing to wait for.
 uint64_t gpu_serial();

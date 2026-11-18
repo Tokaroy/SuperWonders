@@ -26,6 +26,7 @@ namespace nx::nvn {
 namespace {
 
 std::atomic<uint64_t> g_epoch{1};  // bumped under objects_lock (alone) by each recorded change
+std::atomic<uint64_t> g_incarnation_records{0};
 // guest -> (epoch of the change, object it retired; null: there was none), in epoch order. Under objects_lock.
 std::unordered_map<uint64_t, std::vector<std::pair<uint64_t, Object*>>> g_retired;
 std::atomic<uint64_t> g_resolved_old{0};  // replay lookups answered with a retired incarnation
@@ -50,6 +51,7 @@ void note_replaced(uint64_t guest) {
     auto it = objects().find(guest);
     Object* current = it == objects().end() ? nullptr : it->second.get();
     g_retired[guest].push_back({g_epoch.fetch_add(1, std::memory_order_acq_rel) + 1, current});
+    g_incarnation_records.fetch_add(1, std::memory_order_release);
 }
 
 Object* find_object(uint64_t guest, uint64_t mark) {
@@ -82,6 +84,7 @@ std::atomic<uint64_t> g_pool_old{0};
 void note_pool_change(uint64_t pool, uint32_t id, const PoolEntry& before) {
     if (texture_race_old()) return;
     g_pool_changes[{pool, id}].push_back({g_epoch.fetch_add(1, std::memory_order_acq_rel) + 1, before});
+    g_incarnation_records.fetch_add(1, std::memory_order_release);
 }
 
 bool pool_entry_at(uint64_t pool, uint32_t id, uint64_t mark, PoolEntry& out) {
@@ -106,6 +109,7 @@ std::map<std::pair<uint64_t, uint32_t>, std::vector<std::pair<uint64_t, SamplerS
 void note_sampler_change(uint64_t pool, uint32_t id, const SamplerSlot& before) {
     if (texture_race_old()) return;
     g_sampler_changes[{pool, id}].push_back({g_epoch.fetch_add(1, std::memory_order_acq_rel) + 1, before});
+    g_incarnation_records.fetch_add(1, std::memory_order_release);
 }
 
 bool sampler_entry_at(uint64_t pool, uint32_t id, uint64_t mark, SamplerSlot& out) {
@@ -117,8 +121,11 @@ bool sampler_entry_at(uint64_t pool, uint32_t id, uint64_t mark, SamplerSlot& ou
     return false;
 }
 
+bool has_pending_incarnations() { return g_incarnation_records.load(std::memory_order_acquire) != 0; }
+
 void purge_incarnations(uint64_t upto) {
     auto trim = [upto](auto& map) {
+        if (map.empty()) return;
         for (auto it = map.begin(); it != map.end();) {
             auto& v = it->second;
             v.erase(std::remove_if(v.begin(), v.end(), [upto](auto& r) { return r.first <= upto; }), v.end());
@@ -126,6 +133,8 @@ void purge_incarnations(uint64_t upto) {
         }
     };
     trim(g_retired), trim(g_pool_changes), trim(g_sampler_changes);
+    if (g_retired.empty() && g_pool_changes.empty() && g_sampler_changes.empty())
+        g_incarnation_records.store(0, std::memory_order_release);
 }
 
 namespace {

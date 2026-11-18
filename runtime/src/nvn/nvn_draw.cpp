@@ -384,9 +384,11 @@ void vertex_read_barrier(VkCommandBuffer cb, const ShaderInfo* vs) {
     if (!g_vertex_pending || !vs) return;
     bool reads = false;
     for (size_t k = 0; k < g_textures.bindings.size() && !reads; k++)
-        if (g_textures.bindings[k].first == vs && k < g_textures.resolved.size() && g_textures.resolved[k].texture)
-            if (GpuImage* img = image_of(g_textures.resolved[k].texture))
-                reads = img->rendered && img->rendered_at > g_vertex_visible_at;
+        if (g_textures.bindings[k].first == vs && k < g_textures.resolved.size() && g_textures.resolved[k].texture) {
+            GpuImage* img = g_textures.resolved[k].image ? g_textures.resolved[k].image
+                                                         : image_of(g_textures.resolved[k].texture);
+            if (img) reads = img->rendered && img->rendered_at > g_vertex_visible_at;
+        }
     if (!reads) return;
     draw_end_rendering(cb, 1);
     VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
@@ -477,7 +479,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         GpuImage* dimg = image_of(t.depth);
         if (!dimg) return t;
         for (const ResolvedTexture& r : g_textures.resolved)
-            if (r.texture && image_of(r.texture) == dimg) {
+            if (r.texture && (r.image ? r.image : image_of(r.texture)) == dimg) {
                 static uint64_t n = 0;
                 if (n++ == 0) log("nvn: a pass samples its own unused depth image: drawn without it (#50)");
                 detached = t, detached.depth = 0;
@@ -539,7 +541,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     if (flags.flower && g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
         uint64_t frame = g_frame.load();
         if (frame != flower_frame) { flower_frame = frame; flower_seen = false; }
-        GpuImage* target = image_of(t.colors[0]);
+        GpuImage* target = primary_target;
         const Range& u = g_state.uniforms[0][0];
         const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
         if (target && target->logical_width == 1920 && target->logical_height == 1080 && f) {
@@ -553,8 +555,8 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                     ++flower_logs;
                     std::string textures;
                     for (const ResolvedTexture& r : g_textures.resolved) {
-                        GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
-                        Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                        GpuImage* img = r.image;
+                        Texture* src = r.object;
                         if (!img || !src) continue;
                         char item[64]; std::snprintf(item, sizeof item, "%ux%u/f%x ", img->logical_width, img->logical_height, src->format);
                         textures += item;
@@ -566,8 +568,8 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
             bool bubble = false;
             if (vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406") {
                 for (const ResolvedTexture& r : g_textures.resolved) {
-                    GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
-                    Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                    GpuImage* img = r.image;
+                    Texture* src = r.object;
                     if (img && src && ((src->format == 0x49 &&
                         ((img->logical_width == 48 && img->logical_height == 96) ||
                          (img->logical_width == 32 && img->logical_height == 64))) ||
@@ -598,14 +600,14 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         static bool card_seen = false;
         const uint64_t frame = g_frame.load();
         if (frame != card_frame) { card_frame = frame; card_seen = false; }
-        GpuImage* target = image_of(t.colors[0]);
+        GpuImage* target = primary_target;
         const Range& u = g_state.uniforms[0][0];
         const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
         if (target && target->logical_width == 1920 && target->logical_height == 1080 && f) {
             bool card_frame_texture = false;
             for (const ResolvedTexture& r : g_textures.resolved) {
-                GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
-                Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                GpuImage* img = r.image;
+                Texture* src = r.object;
                 if (img && src && img->logical_width == 88 && img->logical_height == 276 && src->format == 0x49)
                     card_frame_texture = true;
             }
@@ -619,8 +621,8 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
             if (flags.detail && card_seen) {
                 bool detail_texture = false;
                 for (const ResolvedTexture& r : g_textures.resolved) {
-                    GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
-                    Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                    GpuImage* img = r.image;
+                    Texture* src = r.object;
                     if (!img || !src) continue;
                     detail_texture |= (src->format == 0x49 && img->logical_width == 150 && img->logical_height == 150) ||
                                       (src->format == 0x87 && img->logical_width == 240 && img->logical_height == 240);
@@ -643,8 +645,8 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                 if (frame != msg_frame) { msg_frame = frame; msg_seen = false; }
                 bool marker_icon = false, message_frame = false, seed_counter = false;
                 for (const ResolvedTexture& r : g_textures.resolved) {
-                    GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
-                    Texture* src = r.texture ? get<Texture>(r.texture) : nullptr;
+                    GpuImage* img = r.image;
+                    Texture* src = r.object;
                     if (!img || !src) continue;
                     marker_icon |= (src->format == 0x87 &&
                                    ((img->logical_width == 160 && img->logical_height == 160) ||
@@ -683,11 +685,11 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         bool samples_stock_shadow = false;
         const uint32_t count = indexed ? uint32_t(c.i[0]) : uint32_t(c.i[1]);
         if (count <= 6) for (const ResolvedTexture& r : g_textures.resolved) {
-            GpuImage* sampled = r.texture ? image_of(r.texture) : nullptr;
+            GpuImage* sampled = r.image;
             samples_wide |= sampled && sampled->uw;
             // Wonder composites its HUD from this fixed-size layer. It is screen-anchored at 16:9
             // coordinates, so the usual centered safe-area squeeze moves it away from the real edge.
-            Texture* source = r.texture ? get<Texture>(r.texture) : nullptr;
+            Texture* source = r.object;
             samples_hud_layer |= sampled && source && sampled->logical_width == 430 && sampled->logical_height == 180 &&
                                  source->format == 0x25 && (source->flags & 0x8);
             samples_powerup_candidate |= sampled && source && sampled->logical_width == 112 &&
@@ -703,7 +705,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                                              std::string(std::getenv("NX_UW_POWERUP_TEST")) == "1";
             bool stock_content = false;
             if (powerup_test && vs && fs && t.color_count && t.colors[0]) {
-                GpuImage* target = image_of(t.colors[0]);
+                GpuImage* target = primary_target;
                 const Range& u = g_state.uniforms[0][0];
                 const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
                 if (target && target->logical_width == 1920 && target->logical_height == 1080 && f) {
@@ -871,11 +873,11 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         key.alpha_to_coverage = 0;
     }
     for (uint32_t k = 0; k < t.color_count; k++) {
-        GpuImage* img = t.colors[k] ? image_of(t.colors[k]) : nullptr;
+        GpuImage* img = g_pass_images[k];
         key.color_formats[k] = img ? view_format(*img, t.views.format[k]) : unused_slot_format();
         if (img && (img->nvn_format == 0x3f || t.views.format[k] == 0x3f)) key.ufloat_colors |= 1u << k;  // G4
     }
-    GpuImage* dimg = tt.depth ? image_of(tt.depth) : nullptr;
+    GpuImage* dimg = tt.depth ? g_pass_images[8] : nullptr;
     key.depth_format = dimg && dimg->aspect != VK_IMAGE_ASPECT_COLOR_BIT ? dimg->format : VK_FORMAT_UNDEFINED;
     if (g_pass_placeholder_color) {
         key.color_count = 1;
@@ -887,7 +889,7 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     bool may_skip = t.color_count || dimg;
     const uint64_t frame = g_frame.load(std::memory_order_relaxed) + 1;
     for (uint32_t k = 0; k < t.color_count && may_skip; k++) {
-        GpuImage* img = t.colors[k] ? image_of(t.colors[k]) : nullptr;
+        GpuImage* img = g_pass_images[k];
         may_skip = img && img->rendered_frame && img->rendered_frame + 1 >= frame;
     }
     if (may_skip && dimg) may_skip = dimg->rendered_frame && dimg->rendered_frame + 1 >= frame;
