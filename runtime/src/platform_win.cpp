@@ -1007,8 +1007,13 @@ static bool key(int vk) {
     return vk > 0 && g_window && GetForegroundWindow() == g_window && (GetAsyncKeyState(vk) & 0x8000);
 }
 static std::array<bool, kPcControlCount> g_previous_controller_state{};
+static std::atomic<bool> g_fast_forward_down{false};
+static void ensure_input_poller();
 
-bool fast_forward() { return key(VK_TAB); }
+bool fast_forward() {
+    ensure_input_poller();
+    return g_fast_forward_down.load(std::memory_order_relaxed);
+}
 
 bool headless() {  // NX_HEADLESS (platform.h)
     static const bool on = std::getenv("NX_HEADLESS") != nullptr;
@@ -1019,18 +1024,24 @@ bool headless() {  // NX_HEADLESS (platform.h)
 static std::mutex g_gamepad_lock;
 static std::array<SDL_Gamepad*, 4> g_gamepads{};
 static uint64_t g_last_scan_ms = 0;
+static std::array<std::atomic<uint64_t>, 4> g_pending_rumble{};
 struct PlayerInputs {
     std::array<PadState, 4> players{};
     std::array<bool, 4> connected{};
     std::array<int, 4> slots{{-1, -1, -1, -1}};
+    std::array<std::string, 4> names{};
 };
 
 static void scan_gamepads_locked() {
     SDL_UpdateGamepads();
-    for (auto& pad : g_gamepads)
+    bool any_connected = false;
+    for (auto& pad : g_gamepads) {
         if (pad && !SDL_GamepadConnected(pad)) SDL_CloseGamepad(pad), pad = nullptr;
+        if (pad) any_connected = true;
+    }
     const uint64_t now = SDL_GetTicks();
-    if (g_last_scan_ms && now - g_last_scan_ms < 500) return;
+    const uint64_t interval_ms = any_connected ? 2000 : 1000;
+    if (g_last_scan_ms && now - g_last_scan_ms < interval_ms) return;
     g_last_scan_ms = now;
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
@@ -1050,6 +1061,12 @@ static PlayerInputs sample_players_uncached() {
     {
         std::lock_guard lk(g_gamepad_lock);
         scan_gamepads_locked();
+        for (size_t slot = 0; slot < g_gamepads.size(); ++slot) {
+            const uint64_t req = g_pending_rumble[slot].exchange(0, std::memory_order_acq_rel);
+            if ((req >> 32) && g_gamepads[slot]) {
+                SDL_RumbleGamepad(g_gamepads[slot], Uint16((req >> 16) & 0xFFFFu), Uint16(req & 0xFFFFu), 250);
+            }
+        }
         constexpr SDL_GamepadButton buttons[] = {
             SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_NORTH,
             SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_GAMEPAD_BUTTON_INVALID,
@@ -1061,6 +1078,8 @@ static PlayerInputs sample_players_uncached() {
             SDL_Gamepad* pad = g_gamepads[slot];
             if (!pad) continue;
             present[slot] = true;
+            const char* name = SDL_GetGamepadName(pad);
+            result.names[slot] = name ? name : "Controller";
             bool down[kPcControlCount]{};
             for (size_t i = 0; i < kPcControlCount; ++i)
                 down[i] = buttons[i] != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(pad, buttons[i]);
@@ -1091,6 +1110,7 @@ static PlayerInputs sample_players_uncached() {
     PadState keyboard{};
     const bool focused = g_window && GetForegroundWindow() == g_window;
     auto key_focused = [focused](int vk) { return focused && vk > 0 && (GetAsyncKeyState(vk) & 0x8000); };
+    g_fast_forward_down.store(key_focused(VK_TAB), std::memory_order_relaxed);
     if (focused && !overlay::wants_keyboard() && !pc_menu_open()) {
         for (size_t action = 0; action < kPcControlCount; ++action) {
             if (!key_focused(g_keyboard_bindings[action].load())) continue;
@@ -1146,27 +1166,43 @@ static PlayerInputs sample_players_uncached() {
     return result;
 }
 
+static std::mutex g_player_sample_lock;
+static PlayerInputs g_cached_players = [] {
+    PlayerInputs init;
+    init.connected[0] = true;
+    return init;
+}();
+
+static void ensure_input_poller() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        PlayerInputs first = sample_players_uncached();
+        {
+            std::lock_guard lk(g_player_sample_lock);
+            g_cached_players = std::move(first);
+        }
+        std::thread([] {
+            set_thread_name("win-input");
+            for (;;) {
+                PlayerInputs next = sample_players_uncached();
+                {
+                    std::lock_guard lk(g_player_sample_lock);
+                    g_cached_players = std::move(next);
+                }
+                sleep_ns(2'000'000ll);
+            }
+        }).detach();
+    });
+}
+
 static PlayerInputs sample_players() {
-    static std::mutex g_player_sample_lock;
-    static PlayerInputs g_cached_players{};
-    static uint64_t g_last_player_sample_ns = 0;
+    ensure_input_poller();
     std::lock_guard lk(g_player_sample_lock);
-    const uint64_t now = monotonic_ns();
-    if (g_last_player_sample_ns && now - g_last_player_sample_ns < 2'000'000ull) return g_cached_players;
-    g_cached_players = sample_players_uncached();
-    g_last_player_sample_ns = now;
     return g_cached_players;
 }
 
 std::array<std::string, 4> controller_names() {
-    std::lock_guard lk(g_gamepad_lock);
-    scan_gamepads_locked();
-    std::array<std::string, 4> names;
-    for (size_t i = 0; i < g_gamepads.size(); ++i) if (g_gamepads[i]) {
-        const char* name = SDL_GetGamepadName(g_gamepads[i]);
-        names[i] = name ? name : "Controller";
-    }
-    return names;
+    return sample_players().names;
 }
 bool player_connected(unsigned player) {
     if (player >= 4) return false;
@@ -1175,12 +1211,12 @@ bool player_connected(unsigned player) {
 void rumble_player(unsigned player, float low, float high) {
     if (player >= 4) return;
     const int slot = sample_players().slots[player];
-    if (slot < 0) return;
+    if (slot < 0 || slot >= 4) return;
     const float strength = float(std::clamp(g_pc_settings.rumble, 0, 100)) / 100.0f;
-    std::lock_guard lk(g_gamepad_lock);
-    if (g_gamepads[size_t(slot)]) SDL_RumbleGamepad(g_gamepads[size_t(slot)],
-        Uint16(std::clamp(low * strength, 0.0f, 1.0f) * 65535.0f),
-        Uint16(std::clamp(high * strength, 0.0f, 1.0f) * 65535.0f), 250);
+    const uint32_t low_u16 = Uint16(std::clamp(low * strength, 0.0f, 1.0f) * 65535.0f);
+    const uint32_t high_u16 = Uint16(std::clamp(high * strength, 0.0f, 1.0f) * 65535.0f);
+    g_pending_rumble[size_t(slot)].store((1ull << 32) | (uint64_t(low_u16) << 16) | uint64_t(high_u16),
+                                         std::memory_order_release);
 }
 void rumble(float low, float high) { rumble_player(0, low, high); }
 void read_pad_player(unsigned player, PadState& p) {

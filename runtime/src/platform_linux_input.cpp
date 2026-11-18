@@ -51,6 +51,7 @@ std::atomic<bool> g_fast_forward{false};  // Tab held (sampled on the main threa
 // The open gamepad: sampled on the main thread, rumbled from the game's (both under g_gamepad_lock).
 std::mutex g_gamepad_lock;
 std::array<SDL_Gamepad*, 4> g_gamepads{};
+std::array<std::atomic<uint64_t>, 4> g_pending_rumble{};
 std::atomic<int> g_rumble_strength{100};  // percent
 
 std::mutex g_posted_lock;
@@ -141,10 +142,10 @@ void rumble_player(unsigned player, float low, float high) {
     { std::lock_guard lk(g_pad_lock); if (player < g_player_slots.size()) slot = g_player_slots[player]; }
     if (slot < 0 || slot >= int(g_gamepads.size())) return;
     float k = float(g_rumble_strength.load()) / 100.0f;
-    std::lock_guard lk(g_gamepad_lock);
-    if (!g_gamepads[slot]) return;
-    SDL_RumbleGamepad(g_gamepads[slot], Uint16(std::clamp(low * k, 0.0f, 1.0f) * 65535.0f),
-                      Uint16(std::clamp(high * k, 0.0f, 1.0f) * 65535.0f), 250);
+    const uint32_t low_u16 = Uint16(std::clamp(low * k, 0.0f, 1.0f) * 65535.0f);
+    const uint32_t high_u16 = Uint16(std::clamp(high * k, 0.0f, 1.0f) * 65535.0f);
+    g_pending_rumble[size_t(slot)].store((1ull << 32) | (uint64_t(low_u16) << 16) | uint64_t(high_u16),
+                                         std::memory_order_release);
 }
 void rumble(float low, float high) { rumble_player(0, low, high); }
 
@@ -284,10 +285,15 @@ void sample_input() {
     std::array<int, 4> player_slots{{-1, -1, -1, -1}};
     {
     std::lock_guard gamepad_lock(g_gamepad_lock);
-    for (auto& pad : g_gamepads) if (pad && !SDL_GamepadConnected(pad)) SDL_CloseGamepad(pad), pad = nullptr;
+    bool any_connected = false;
+    for (auto& pad : g_gamepads) {
+        if (pad && !SDL_GamepadConnected(pad)) SDL_CloseGamepad(pad), pad = nullptr;
+        if (pad) any_connected = true;
+    }
     static uint64_t last_scan = 0;
     const uint64_t now = SDL_GetTicks();
-    if (!last_scan || now - last_scan >= 500) {
+    const uint64_t interval_ms = any_connected ? 2000 : 1000;
+    if (!last_scan || now - last_scan >= interval_ms) {
         last_scan = now;
         int count = 0; SDL_JoystickID* ids = SDL_GetGamepads(&count);
         for (int i = 0; ids && i < count; ++i) {
@@ -297,6 +303,12 @@ void sample_input() {
             for (auto& open : g_gamepads) if (!open) { open = SDL_OpenGamepad(ids[i]); break; }
         }
         SDL_free(ids);
+    }
+    for (size_t slot = 0; slot < g_gamepads.size(); ++slot) {
+        const uint64_t req = g_pending_rumble[slot].exchange(0, std::memory_order_acq_rel);
+        if ((req >> 32) && g_gamepads[slot]) {
+            SDL_RumbleGamepad(g_gamepads[slot], Uint16((req >> 16) & 0xFFFFu), Uint16(req & 0xFFFFu), 250);
+        }
     }
     for (unsigned slot = 0; slot < g_gamepads.size(); ++slot) {
         SDL_Gamepad* pad = g_gamepads[slot];

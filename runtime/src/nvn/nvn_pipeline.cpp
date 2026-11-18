@@ -515,8 +515,8 @@ const ProgramLayout& program_layout(const std::vector<const ShaderInfo*>& stages
             vb.stageFlags |= stage_bit(s->stage);
         }
     ProgramLayout pl;
-    // On by default on Android only (NX_DYNAMIC_UBO=0/1 overrides): on the Mac (MoltenVK) every frame came out black
-    // and the GPU hung a few thousand frames in (2026-10-01), cause not found yet.
+    // On by default on Android only (NX_DYNAMIC_UBO=0/1 overrides): on the Mac (MoltenVK) every frame came out
+    // black and the GPU hung a few thousand frames in (2026-10-01), cause not found yet.
     static const uint32_t max_dynamic = [] {
         const char* e = std::getenv("NX_DYNAMIC_UBO");
 #if defined(__ANDROID__)

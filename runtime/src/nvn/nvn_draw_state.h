@@ -115,6 +115,8 @@ bool draw_slow(uint32_t what);
 // What a texture binding of the draw being replayed samples.
 struct ResolvedTexture {
     uint64_t texture = 0;  // guest NVNtexture*; 0: nothing behind the binding (the dummy)
+    Texture* object = nullptr;
+    GpuImage* image = nullptr;
     SamplerInfo sampler;
     ViewInfo view;
     VkSampler vk_sampler = VK_NULL_HANDLE;  // sampler_for(sampler, shadow) when the handle cache has it

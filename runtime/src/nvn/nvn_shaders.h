@@ -10,6 +10,7 @@
 // tests/shader_cache_test.cpp can run the same code over all 12,717 shaders (build with -DNX_SHADERS_STANDALONE).
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -221,6 +222,9 @@ struct ShaderInfo {
     // on use, as before.
     bool masks_known = false;
     uint64_t dynamic_uniforms = 0, written_storage = 0;
+    mutable uint32_t int_tex_gen = 0;
+    mutable uint8_t uw_ui_vs = 0;
+    mutable uint8_t uw_scaled_cache = 0;
 };
 
 // Builds a ShaderInfo from a code block, its control section and the SPIR-V words (no I/O). `resources` = the

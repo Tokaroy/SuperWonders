@@ -157,7 +157,7 @@ struct HandleSlot {
     ViewInfo view;
     VkSampler vk_sampler[2] = {};  // sampler_for(sampler, shadow), once a binding asked
 };
-constexpr uint32_t kHandleSlots = 2048;  // a course frame names a few hundred handles
+constexpr uint32_t kHandleSlots = 8192;  // a course or world-map frame names up to several thousand handles
 HandleSlot g_handle_slots[kHandleSlots];
 uint64_t g_handle_generation = 1, g_handle_mark = 0;
 uint32_t g_handle_used = 0;
@@ -196,25 +196,41 @@ HandleSlot* handle_slot(uint64_t handle) {
 // Here each distinct content gets a block of its own for the submit, found by what it is made from, and dedup keeps
 // one upload of it. The blocks are reused from sets_begin_submit on, where dedup starts over too.
 struct SupportBlock {
+    uint64_t hash = 0;
     SupportBuffer sb;
 };
 struct ConstantsBlock {
+    uint64_t hash = 0;
     int hw = 0;         // the key: the Maxwell stage (vertex 0, fragment 4) and the stage's storage bindings,
     Range storage[16];  // all driver_constants reads outside compute
     std::array<uint8_t, 0x1000> bytes;
 };
-constexpr size_t kBlocks = 32;  // more distinct ones in a submit: copied per draw, as before
+constexpr size_t kBlocks = 512;  // 4K render_scale creates many distinct render_scale slot masks per submit
 std::vector<std::unique_ptr<SupportBlock>> g_support;
 std::vector<std::unique_ptr<ConstantsBlock>> g_constants;
 size_t g_support_used = 0, g_constants_used = 0;
 
+uint64_t hash_bytes64(const void* data, size_t bytes, uint64_t seed = 0xCBF29CE484222325ull) {
+    const auto* w = static_cast<const uint64_t*>(data);
+    uint64_t h = seed;
+    for (size_t i = 0, n = bytes / 8; i < n; ++i) {
+        h ^= w[i];
+        h *= 0x100000001B3ull;
+    }
+    return h ^ (h >> 31);
+}
+
 const SupportBuffer* support_block(const SupportBuffer& key) {
-    for (size_t k = 0; k < g_support_used; k++)
-        if (std::memcmp(&g_support[k]->sb, &key, sizeof key) == 0)
-            return &g_support[k]->sb;
+    const uint64_t h = hash_bytes64(&key, sizeof key);
+    for (size_t k = 0; k < g_support_used; k++) {
+        if (g_support[k]->hash != h) continue;
+        const SupportBuffer& sb = g_support[k]->sb;
+        if (std::memcmp(&sb, &key, sizeof key) == 0) return &sb;
+    }
     if (g_support_used == kBlocks) return nullptr;
     if (g_support_used == g_support.size()) g_support.push_back(std::make_unique<SupportBlock>());
     SupportBlock& b = *g_support[g_support_used++];
+    b.hash = h;
     b.sb = key;
     return &b.sb;
 }
@@ -223,12 +239,15 @@ const uint8_t* constants_block(ShaderStage stage, int st) {
     if (stage == ShaderStage::Compute) return nullptr;  // its table also lists the uniform blocks; a few per frame
     int hw = stage == ShaderStage::Fragment ? 4 : 0;
     const Range* key = g_state.storage[st];
+    const uint64_t h = hash_bytes64(key, sizeof(Range) * 16, uint64_t(hw) + 0x9E3779B97F4A7C15ull);
     for (size_t k = 0; k < g_constants_used; k++)
-        if (g_constants[k]->hw == hw && std::memcmp(g_constants[k]->storage, key, sizeof g_constants[k]->storage) == 0)
+        if (g_constants[k]->hash == h && g_constants[k]->hw == hw &&
+            std::memcmp(g_constants[k]->storage, key, sizeof g_constants[k]->storage) == 0)
             return g_constants[k]->bytes.data();
     if (g_constants_used == kBlocks) return nullptr;
     if (g_constants_used == g_constants.size()) g_constants.push_back(std::make_unique<ConstantsBlock>());
     ConstantsBlock& b = *g_constants[g_constants_used++];
+    b.hash = h;
     b.hw = hw;
     std::memcpy(b.storage, key, sizeof b.storage);
     b.bytes = driver_constants(stage, st);
@@ -298,7 +317,7 @@ struct CachedSet {
     uint32_t at = 0, n = 0;  // its writes in g_set_arena
     VkDescriptorSet set = VK_NULL_HANDLE;
 };
-constexpr uint32_t kSetSlots = 8192;
+constexpr uint32_t kSetSlots = 16384;
 CachedSet g_set_cache[kSetSlots];
 std::vector<SetWrite> g_set_arena;
 uint64_t g_set_generation = 1, g_set_hits = 0, g_set_misses = 0;
@@ -422,8 +441,11 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
             auto [stage, binding] = g_textures.bindings[k];
             uint32_t slot = binding->binding % 128;
             uint32_t index = stage->stage == ShaderStage::Fragment ? slot : fragment_count + slot;
-            if (index < 64 && g_textures.resolved[k].texture)
-                if (GpuImage* image = image_of(g_textures.resolved[k].texture)) out.render_scale[1 + index][0] = image->render_scale;
+            if (index < 64 && g_textures.resolved[k].texture) {
+                GpuImage* image = g_textures.resolved[k].image ? g_textures.resolved[k].image
+                                                               : image_of(g_textures.resolved[k].texture);
+                if (image) out.render_scale[1 + index][0] = image->render_scale;
+            }
         }
         for (const ShaderInfo* shader : shaders) {
             int st = api_stage(shader->stage);
@@ -443,14 +465,20 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
         }
         return out;
     };
+    VkDescriptorBufferInfo sb_info{};
+    bool sb_uploaded = false;
     auto support = [&]() -> VkDescriptorBufferInfo {
+        if (sb_uploaded) return sb_info;
         if (!sb_built) sb = make_support(), sb_built = true;
         const SupportBuffer* block = shared ? support_block(sb) : nullptr;
         if (block) {
             Upload u = dedup_upload(reinterpret_cast<const uint8_t*>(block), sizeof sb, sizeof sb, 256);
-            return {u.buffer, u.offset, sizeof sb};
+            sb_info = {u.buffer, u.offset, sizeof sb};
+        } else {
+            sb_info = buffer_of(cb, &sb, sizeof sb, 16, false, false);
         }
-        return buffer_of(cb, &sb, sizeof sb, 16, false, false);
+        sb_uploaded = true;
+        return sb_info;
     };
     // A storage binding's bytes, and whether this compute stage writes them.
     auto storage = [](const ShaderInfo* s, const DescriptorBinding& b, int st, const uint8_t*& p, uint64_t& size) {
@@ -655,7 +683,7 @@ uint32_t gather_textures(const std::vector<const ShaderInfo*>& shaders) {
         // A pool entry naming a texture that no longer exists samples the dummy, like no texture: it ended the
         // render pass at every draw (~1.4M times in a run, docs/nvn/DEBUG.md #34).
         if (HandleSlot* slot = handle_slot(handle)) {
-            if (slot->object) texture = slot->texture, slot->object->last_sampled = submit_ns;
+            if (slot->object) texture = slot->texture, r.object = slot->object, slot->object->last_sampled = submit_ns;
             r.sampler = slot->sampler, r.view = slot->view;
             VkSampler& vk = slot->vk_sampler[b->image.depth ? 1 : 0];  // the same for every draw: a cache key built
             if (!vk) vk = sampler_for(slot->sampler, b->image.depth);  // per binding otherwise (nvn_sampler.cpp)
@@ -663,7 +691,7 @@ uint32_t gather_textures(const std::vector<const ShaderInfo*>& shaders) {
         } else {
             lookup_handle(handle, texture, r.sampler, &r.view);
             if (Texture* sampled = texture ? get<Texture>(texture) : nullptr)
-                sampled->last_sampled = submit_ns;
+                r.object = sampled, sampled->last_sampled = submit_ns;
             else
                 texture = 0;
         }
@@ -671,6 +699,7 @@ uint32_t gather_textures(const std::vector<const ShaderInfo*>& shaders) {
         if (texture ? !sampled_ready(texture) : !dummy_ready(b->image)) out |= kNeedBreak;
         if (!texture) continue;
         GpuImage* img = image_of(texture);
+        r.image = img;
         // An integer view behind a float declaration: the module declares it as an integer image, and the sampler
         // filters nearest (integer formats have no linear filtering; Maxwell ignores the filter for them).
         if (img && b->image.component == ScalarType::Float && !b->image.depth)
