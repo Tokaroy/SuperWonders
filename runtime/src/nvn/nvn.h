@@ -217,6 +217,8 @@ struct Texture : Object {
     bool watched = false;  // large ones: a write watch instead of the hash (write_watch.cpp)
     std::shared_ptr<GpuImage> image;  // made on first use by the GPU
     std::atomic<uint64_t> last_sampled{0};  // host ns of the last draw that sampled it (kept textures, nvn_objects.cpp)
+    bool alloc_failed = false;  // set under gpu_lock() when all Vulkan memory types failed
+    uint64_t alloc_retry_frees = 0, alloc_failed_frame = 0;
     ~Texture();  // nvn_vk.cpp: the image is freed once the GPU is done with it
 };
 

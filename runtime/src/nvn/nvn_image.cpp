@@ -134,6 +134,12 @@ GpuImage* image_of(uint64_t guest) {
                 t->width, t->height, t->image->render_scale, target_scale);
         t->image.reset();
     }
+    if (t->alloc_failed) {
+        const uint64_t now_frame = g_frame.load(std::memory_order_relaxed);
+        const uint64_t now_frees = gpu_image_memory_stats().frees;
+        if (now_frees == t->alloc_retry_frees && now_frame - t->alloc_failed_frame < 120) return nullptr;
+        t->alloc_failed = false;
+    }
     uint32_t swizzle = uint32_t(t->swizzle[0]) | uint32_t(t->swizzle[1]) << 8 | uint32_t(t->swizzle[2]) << 16 |
                   uint32_t(t->swizzle[3]) << 24;
     // Swizzles apply when sampling (sampled_view, #44): neither the key's nor a pool view's keeps textures from sharing.
@@ -154,10 +160,12 @@ GpuImage* image_of(uint64_t guest) {
                 static uint64_t shares = 0;
                 if (++shares % 1000 == 1) log("nvn/vk: %llu textures shared an image with another", (unsigned long long)shares);
                 shared->pool = t->pool, shared->pool_offset = t->offset, shared->pool_size = t->storage_size;
+                t->alloc_failed = false;
                 t->image = shared;
                 return shared.get();
             }
     if ((t->image = reuse_image(*t)); t->image && t->image->render_scale == image_scale && t->image->uw == t->uw) {
+        t->alloc_failed = false;
         t->image->pool = t->pool, t->image->pool_offset = t->offset, t->image->pool_size = t->storage_size;
         return t->image.get();
     }
@@ -259,42 +267,106 @@ GpuImage* image_of(uint64_t guest) {
     if (!check(p_vkCreateImage(vk_device(), &ci, nullptr, &img->image), "vkCreateImage")) return nullptr;
     VkMemoryRequirements req{};
     p_vkGetImageMemoryRequirements(vk_device(), img->image, &req);
-    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    ai.allocationSize = req.size;
-    ai.memoryTypeIndex = memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    const VkPhysicalDeviceMemoryProperties& mp = vk_memory_properties();
+    std::vector<uint32_t> device_types, shared_types;
+    static const bool allow_shared_fallback = [] {
+        const char* e = std::getenv("NX_NO_SHARED_VRAM_FALLBACK");
+        return !(e && e[0] == '1');
+    }();
+    for (int pass = 0; pass < 2; ++pass) {
+        for (uint32_t k = 0; k < mp.memoryTypeCount; ++k) {
+            if (!((req.memoryTypeBits >> k) & 1u)) continue;
+            const VkMemoryPropertyFlags f = mp.memoryTypes[k].propertyFlags;
+            if (f & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) continue;
+            const bool host_visible = (f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+            if ((pass == 0) == host_visible) continue;
+            if (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+                device_types.push_back(k);
+            else if (allow_shared_fallback)
+                shared_types.push_back(k);
+        }
+    }
+    if (device_types.empty() && shared_types.empty())
+        device_types.push_back(memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
+
     const uint64_t budget = simulated_image_memory_budget();
-    const GpuImageMemoryStats before = budget ? gpu_image_memory_stats() : GpuImageMemoryStats{};
-    const bool capped = budget && (req.size > budget || before.live_bytes > budget - req.size);
     if (budget) {
         static bool logged = false;
         if (!logged) {
-            log("nvn/vk: NX_VRAM_IMAGE_BUDGET_GB simulates %.2f GiB for NVN image allocations only",
+            log("nvn/vk: NX_VRAM_IMAGE_BUDGET_GB simulates %.2f GiB for NVN dedicated image allocations",
                 double(budget) / (1ull << 30));
             logged = true;
         }
     }
-    const VkResult result = capped ? VK_ERROR_OUT_OF_DEVICE_MEMORY
-                                   : p_vkAllocateMemory(vk_device(), &ai, nullptr, &img->memory);
-    if (!check(result, "vkAllocateMemory")) {
-        if (std::getenv("NX_TRACE_VRAM") || capped) {
-            const GpuImageMemoryStats stats = gpu_image_memory_stats();
-            log("nvn/vk: VRAM allocation failure%s: request %.2f MiB, tracked live %.2f GiB / peak %.2f GiB, %llu images",
-                capped ? " (simulated cap)" : "", double(req.size) / (1ull << 20),
-                double(stats.live_bytes) / (1ull << 30), double(stats.peak_bytes) / (1ull << 30),
-                (unsigned long long)stats.live_allocations);
+    auto is_capped = [&] {
+        if (!budget) return false;
+        const GpuImageMemoryStats stats = gpu_image_memory_stats();
+        const uint64_t device_live = stats.live_bytes > stats.shared_bytes ? stats.live_bytes - stats.shared_bytes : 0;
+        return req.size > budget || device_live > budget - req.size;
+    };
+    bool capped = is_capped();
+
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = req.size;
+    VkResult last_result = capped ? VK_ERROR_OUT_OF_DEVICE_MEMORY : VK_ERROR_INITIALIZATION_FAILED;
+    uint32_t chosen_type = 0;
+    auto try_types = [&](const std::vector<uint32_t>& types) {
+        for (uint32_t type : types) {
+            ai.memoryTypeIndex = type;
+            last_result = p_vkAllocateMemory(vk_device(), &ai, nullptr, &img->memory);
+            if (last_result == VK_SUCCESS) {
+                chosen_type = type;
+                return true;
+            }
+            if (last_result == VK_ERROR_DEVICE_LOST) gpu_hung("vkAllocateMemory");
+            img->memory = VK_NULL_HANDLE;
         }
+        return false;
+    };
+
+    if (!capped) try_types(device_types);
+    if (img->memory == VK_NULL_HANDLE && last_result == VK_ERROR_OUT_OF_DEVICE_MEMORY) {
+        const uint64_t frees_before = gpu_image_memory_stats().frees;
+        reclaim_reusable_images_now();
+        capped = is_capped();
+        if (!capped && gpu_image_memory_stats().frees > frees_before) try_types(device_types);
+    }
+    if (img->memory == VK_NULL_HANDLE && !shared_types.empty() && try_types(shared_types)) {
+        img->shared_memory = true;
+        static uint64_t spilled = 0;
+        const uint64_t n = ++spilled;
+        if (n <= 8 || (n & 255) == 0) {
+            const GpuImageMemoryStats stats = gpu_image_memory_stats();
+            log("nvn/vk: dedicated VRAM full; spilled %ux%u image (%.2f MiB) to shared GPU memory (type %u, shared live %.2f GiB)",
+                img->width, img->height, double(req.size) / (1ull << 20), chosen_type,
+                double(stats.shared_bytes + req.size) / (1ull << 30));
+        }
+    }
+    if (img->memory == VK_NULL_HANDLE) {
+        const GpuImageMemoryStats stats = gpu_image_memory_stats();
+        static uint64_t alloc_failures = 0;
+        const uint64_t n = ++alloc_failures;
+        if (std::getenv("NX_TRACE_VRAM") || capped || n <= 8 || (n & 255) == 0)
+            log("nvn/vk: image memory allocation failed (%d)%s: %ux%u request %.2f MiB, live %.2f GiB (%.2f GiB shared), %llu images",
+                int(last_result), capped ? " (simulated cap)" : "", img->width, img->height,
+                double(req.size) / (1ull << 20), double(stats.live_bytes) / (1ull << 30),
+                double(stats.shared_bytes) / (1ull << 30), (unsigned long long)stats.live_allocations);
         p_vkDestroyImage(vk_device(), img->image, nullptr);
         img->image = VK_NULL_HANDLE;
-        if (result == VK_ERROR_OUT_OF_DEVICE_MEMORY) trim_reusable_image_cache();
+        t->alloc_failed = true;
+        t->alloc_retry_frees = stats.frees;
+        t->alloc_failed_frame = g_frame.load(std::memory_order_relaxed);
         return nullptr;
     }
+    t->alloc_failed = false;
     img->allocation_size = req.size;
-    gpu_image_memory_allocated(req.size);
+    gpu_image_memory_allocated(req.size, img->shared_memory);
     if (!check(p_vkBindImageMemory(vk_device(), img->image, img->memory, 0), "vkBindImageMemory")) {
         p_vkFreeMemory(vk_device(), img->memory, nullptr);
-        gpu_image_memory_freed(img->allocation_size);
+        gpu_image_memory_freed(img->allocation_size, img->shared_memory);
         p_vkDestroyImage(vk_device(), img->image, nullptr);
         img->allocation_size = 0;
+        img->shared_memory = false;
         img->memory = VK_NULL_HANDLE;
         img->image = VK_NULL_HANDLE;
         return nullptr;

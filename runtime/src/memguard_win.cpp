@@ -62,11 +62,20 @@ void start_memory_guard() {
             if (f > peak) peak = f;
             if (++ticks % 120 == 0) {
                 const nx::nvn::GpuImageMemoryStats images = nx::nvn::gpu_image_memory_stats();
-                log("memory: %.2f GB (peak %.2f GB, cleanup threshold %.1f GB); guest heap %.2f GB; Vulkan images %.2f GB "
-                    "(peak %.2f GB, %llu live)",
-                    double(f) / double(1ull << 30), double(peak) / double(1ull << 30), current_gb,
-                    double(nx::heap_size()) / double(1ull << 30), double(images.live_bytes) / double(1ull << 30),
-                    double(images.peak_bytes) / double(1ull << 30), (unsigned long long)images.live_allocations);
+                if (images.shared_bytes) {
+                    log("memory: %.2f GB (peak %.2f GB, cleanup threshold %.1f GB); guest heap %.2f GB; Vulkan images %.2f GB "
+                        "(peak %.2f GB, %llu live, %.2f GB in shared RAM)",
+                        double(f) / double(1ull << 30), double(peak) / double(1ull << 30), current_gb,
+                        double(nx::heap_size()) / double(1ull << 30), double(images.live_bytes) / double(1ull << 30),
+                        double(images.peak_bytes) / double(1ull << 30), (unsigned long long)images.live_allocations,
+                        double(images.shared_bytes) / double(1ull << 30));
+                } else {
+                    log("memory: %.2f GB (peak %.2f GB, cleanup threshold %.1f GB); guest heap %.2f GB; Vulkan images %.2f GB "
+                        "(peak %.2f GB, %llu live)",
+                        double(f) / double(1ull << 30), double(peak) / double(1ull << 30), current_gb,
+                        double(nx::heap_size()) / double(1ull << 30), double(images.live_bytes) / double(1ull << 30),
+                        double(images.peak_bytes) / double(1ull << 30), (unsigned long long)images.live_allocations);
+                }
             }
             if (f <= current_limit * 9 / 10) pressure = false;
             if (f > current_limit && (!pressure || ticks % 120 == 0)) {

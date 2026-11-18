@@ -55,7 +55,7 @@ bool native_r11g11b10() {
     static std::atomic<int> state{-1};
     int s = state.load(std::memory_order_acquire);
     if (s >= 0) return s == 1;
-#if defined(__ANDROID__)
+#if !defined(__APPLE__)
     if (!vk_physical()) return false;  // asked before the device exists: not decided yet
     const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
                                       VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
@@ -63,7 +63,8 @@ bool native_r11g11b10() {
                                       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     VkFormatProperties fp{};
     p_vkGetPhysicalDeviceFormatProperties(vk_physical(), VK_FORMAT_B10G11R11_UFLOAT_PACK32, &fp);
-    bool on = (fp.optimalTilingFeatures & need) == need && !std::getenv("NX_R11G11B10_EMULATE");
+    const char* emu = std::getenv("NX_R11G11B10_EMULATE");
+    bool on = (fp.optimalTilingFeatures & need) == need && !(emu && *emu && emu[0] != '0');
     log("nvn/vk: R11G11B10F %s (format features %#x)", on ? "native (B10G11R11_UFLOAT)" : "as RGBA16F",
         unsigned(fp.optimalTilingFeatures));
 #else
@@ -73,17 +74,24 @@ bool native_r11g11b10() {
     return on;
 }
 
-// Image flags that keep Adreno's framebuffer compression (PHASE4.md G1a): MUTABLE_FORMAT only with a format list.
-// Android by default (NX_UBWC_FLAGS=0: every colour image mutable, as before); elsewhere NX_UBWC_FLAGS=1.
+// Image flags that keep framebuffer compression (UBWC on Adreno, DCC/delta compression on desktop GPUs):
+// MUTABLE_FORMAT only with a VkImageFormatListCreateInfo format list (PHASE4.md G1a).
 bool ubwc_flags() {
-    static const bool on = [] {
-        const char* e = std::getenv("NX_UBWC_FLAGS");
-#if defined(__ANDROID__)
-        return !(e && e[0] == '0');
+    static std::atomic<int> state{-1};
+    int s = state.load(std::memory_order_acquire);
+    if (s >= 0) return s == 1;
+    if (!vk_physical()) return false;
+    const char* e = std::getenv("NX_UBWC_FLAGS");
+#if defined(__APPLE__)
+    const bool wanted = e && e[0] == '1';
 #else
-        return e && e[0] == '1';
+    const bool wanted = !(e && e[0] == '0');
 #endif
-    }();
+    VkPhysicalDeviceProperties props{};
+    p_vkGetPhysicalDeviceProperties(vk_physical(), &props);
+    const bool on = wanted && props.apiVersion >= VK_API_VERSION_1_2;
+    log("nvn/vk: colour image format list %s", on ? "enabled" : "off");
+    state.store(on ? 1 : 0, std::memory_order_release);
     return on;
 }
 

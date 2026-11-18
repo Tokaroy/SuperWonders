@@ -497,9 +497,13 @@ bool vk_gpl() { return g_gpl; }
 bool vk_pipeline_cache_control() { return g_cache_control; }
 const VkPhysicalDeviceFeatures& vk_features() { return g_features; }
 
+const VkPhysicalDeviceMemoryProperties& vk_memory_properties() { return g_memory; }
+
 uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
     for (uint32_t k = 0; k < g_memory.memoryTypeCount; k++)
         if ((bits >> k) & 1 && (g_memory.memoryTypes[k].propertyFlags & want) == want) return k;
+    for (uint32_t k = 0; k < g_memory.memoryTypeCount; k++)
+        if ((bits >> k) & 1) return k;
     return 0;
 }
 

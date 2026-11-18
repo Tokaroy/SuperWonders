@@ -15,6 +15,7 @@ struct GpuImage {
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     uint64_t allocation_size = 0;  // Vulkan allocation size for VRAM diagnostics
+    bool shared_memory = false;    // allocated in non-device-local memory after dedicated VRAM filled up
     VkImageView view = VK_NULL_HANDLE;  // every level and layer
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -44,11 +45,13 @@ struct GpuImage {
 struct GpuImageMemoryStats {
     uint64_t live_bytes = 0, peak_bytes = 0;
     uint64_t live_allocations = 0, allocations = 0, frees = 0;
+    uint64_t shared_bytes = 0, shared_allocations = 0;
 };
 GpuImageMemoryStats gpu_image_memory_stats();
-void gpu_image_memory_allocated(uint64_t bytes);
-void gpu_image_memory_freed(uint64_t bytes);
+void gpu_image_memory_allocated(uint64_t bytes, bool shared = false);
+void gpu_image_memory_freed(uint64_t bytes, bool shared = false);
 uint64_t trim_reusable_image_cache();
+uint64_t reclaim_reusable_images_now();  // caller holds gpu_lock()
 
 VkDevice vk_device();
 VkInstance vk_instance();     // for the overlay (overlay/overlay_vk.cpp)
@@ -89,6 +92,7 @@ const VkPhysicalDeviceFeatures& vk_features();
 VkPhysicalDevice vk_physical();
 // nvn_gpu_pick.cpp: logs every device and returns the one NX_GPU asks for (default: the first discrete GPU).
 VkPhysicalDevice pick_physical_device(const std::vector<VkPhysicalDevice>& devices);
+const VkPhysicalDeviceMemoryProperties& vk_memory_properties();
 uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want);
 
 // The image behind an NVN texture (guest NVNtexture*), made on first use.

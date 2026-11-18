@@ -234,6 +234,7 @@ bool rumble_on() {
 
 std::mutex g_vibration_lock;
 float g_band[4][2][2] = {};  // [side][low, high] amplitude
+float g_last_rumble[4][2] = {};
 uint64_t g_vibration_sends = 0, g_vibration_nonzero = 0;
 
 void GetVibrationDeviceHandles(CPU& c) {  // (VibrationDeviceHandle* out, int count, const NpadIdType&, NpadStyleSet)
@@ -269,6 +270,7 @@ void vibrate(uint32_t h, uint64_t value) {
     int side = (h >> 16 & 0xFF) ? 1 : 0;
     float amp_low = ld<float>(value), amp_high = ld<float>(value + 8);
     float low = 0, high = 0;
+    bool skip = false;
     {
         std::lock_guard lk(g_vibration_lock);
         g_band[player][side][0] = std::clamp(amp_low, 0.0f, 1.0f);
@@ -280,7 +282,11 @@ void vibrate(uint32_t h, uint64_t value) {
         if (g_vibration_sends % 2000 == 1)
             log("hid: vibration values: %llu sent, %llu not zero", (unsigned long long)g_vibration_sends,
                 (unsigned long long)g_vibration_nonzero);
+        skip = low == 0.0f && high == 0.0f && g_last_rumble[player][0] == 0.0f && g_last_rumble[player][1] == 0.0f;
+        g_last_rumble[player][0] = low;
+        g_last_rumble[player][1] = high;
     }
+    if (skip) return;
 #if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
     plat::rumble_player(player, low, high);
 #else
