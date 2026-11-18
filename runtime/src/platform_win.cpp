@@ -222,6 +222,9 @@ std::string data_root() {
 }
 
 static PcMenuState g_pc_settings;
+static std::array<std::atomic<int>, 4> g_player_devices{};
+static std::atomic<bool> g_keyboard_separate{false};
+static std::array<std::array<std::atomic<int>, kPcControlCount>, 4> g_device_bindings{};
 static std::atomic<IXAudio2MasteringVoice*> g_master_voice{nullptr};
 static std::array<std::atomic<int>, kPcControlCount> g_keyboard_bindings{};
 static std::array<std::atomic<int>, kPcControlCount> g_controller_bindings{};
@@ -247,6 +250,8 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     overlay::Settings o;
     o.width = s.width, o.height = s.height, o.aspect_ratio = s.aspect_ratio, o.internal_resolution = s.internal_resolution, o.volume = s.volume;
     o.language = s.language, o.game_language = s.game_language, o.memory_limit_gb = s.memory_limit_gb;
+    o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask;
+    o.keyboard_separate = s.keyboard_separate;
     o.controller_preset = s.controller_preset, o.muted = s.muted, o.fullscreen = s.fullscreen;
     o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile;
     o.metric_fps = s.metric_fps, o.metric_one_percent_low = s.metric_one_percent_low;
@@ -263,6 +268,8 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     PcMenuState s = g_pc_settings;
     s.width = o.width, s.height = o.height, s.aspect_ratio = o.aspect_ratio, s.internal_resolution = o.internal_resolution, s.volume = o.volume;
     s.language = o.language, s.game_language = o.game_language, s.memory_limit_gb = o.memory_limit_gb;
+    s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask;
+    s.keyboard_separate = o.keyboard_separate;
     s.controller_preset = o.controller_preset, s.muted = o.muted, s.fullscreen = o.fullscreen;
     s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile;
     s.metric_fps = o.metric_fps, s.metric_one_percent_low = o.metric_one_percent_low;
@@ -339,7 +346,14 @@ static void apply_metrics_settings(const PcMenuState& state) {
 }
 
 static void apply_input_bindings(const PcMenuState& state) {
+    g_keyboard_separate.store(state.keyboard_separate);
+    for (size_t slot = 0; slot < 4; ++slot) g_player_devices[slot].store(state.player_devices[slot]);
     for (size_t i = 0; i < kPcControlCount; ++i) {
+        for (size_t slot = 0; slot < 4; ++slot) {
+            int binding = slot == 0 ? (state.controller_custom_mask & (1u << i) ? state.controller_bindings[i] : pc_default_controller_binding(i, state.controller_preset)) :
+                (state.pad_custom_mask[slot] & (1u << i) ? state.pad_bindings[slot][i] : pc_default_controller_binding(i, state.controller_preset));
+            g_device_bindings[slot][i].store(std::clamp(binding, 0, int(kPcControlCount) - 1));
+        }
         g_keyboard_bindings[i].store(std::clamp(state.keyboard_bindings[i], 0, 255), std::memory_order_relaxed);
         const int controller = state.controller_custom_mask & (1u << i)
                                    ? state.controller_bindings[i]
@@ -371,6 +385,15 @@ static void save_pc_settings() {
          << "\nantialiasing=" << g_pc_settings.antialiasing << "\nanisotropy=" << g_pc_settings.anisotropy
          << "\nrumble=" << g_pc_settings.rumble << "\nvsync=" << g_pc_settings.vsync
          << "\nframe_cap=" << g_pc_settings.frame_cap << '\n';
+    file << "keyboard_separate=" << g_pc_settings.keyboard_separate << '\n';
+    for (size_t slot = 0; slot < 4; ++slot) {
+        file << "player_device_" << slot << '=' << g_pc_settings.player_devices[slot] << '\n';
+        if (slot) {
+            file << "pad_mask_" << slot << '=' << g_pc_settings.pad_custom_mask[slot] << '\n';
+            for (size_t action = 0; action < kPcControlCount; ++action)
+                file << "pad_" << slot << '_' << action << '=' << g_pc_settings.pad_bindings[slot][action] << '\n';
+        }
+    }
     for (size_t i = 0; i < kPcControlCount; ++i)
         file << "keyboard_" << i << '=' << g_pc_settings.keyboard_bindings[i] << '\n'
              << "controller_" << i << '=' << g_pc_settings.controller_bindings[i] << '\n';
@@ -397,6 +420,7 @@ static void load_pc_settings() {
             game_language_version = value;
         else if (std::sscanf(line.c_str(), "memory_limit_gb=%d", &value) == 1) g_pc_settings.memory_limit_gb = std::clamp(value, 2, 32);
         else if (std::sscanf(line.c_str(), "low_vram_profile=%d", &value) == 1) g_pc_settings.low_vram_profile = value != 0;
+        else if (std::sscanf(line.c_str(), "keyboard_separate=%d", &value) == 1) g_pc_settings.keyboard_separate = value != 0;
         else if (std::sscanf(line.c_str(), "controller_preset=%d", &value) == 1)
             g_pc_settings.controller_preset = std::clamp(value, 0, 1);
         else if (std::sscanf(line.c_str(), "metrics_enabled=%d", &value) == 1) g_pc_settings.metrics_enabled = value != 0;
@@ -424,8 +448,15 @@ static void load_pc_settings() {
                                           ? value
                                           : 60;
         else {
-            int index = -1, binding = -1;
-            if (std::sscanf(line.c_str(), "keyboard_%d=%d", &index, &binding) == 2 &&
+            int index = -1, binding = -1, slot = -1;
+            unsigned mask = 0;
+            if (std::sscanf(line.c_str(), "player_device_%d=%d", &index, &binding) == 2 && index >= 0 && index < 4 && binding >= 0 && binding <= 6)
+                g_pc_settings.player_devices[size_t(index)] = binding;
+            else if (std::sscanf(line.c_str(), "pad_mask_%d=%u", &slot, &mask) == 2 && slot > 0 && slot < 4)
+                g_pc_settings.pad_custom_mask[size_t(slot)] = mask;
+            else if (std::sscanf(line.c_str(), "pad_%d_%d=%d", &slot, &index, &binding) == 3 && slot > 0 && slot < 4 && index >= 0 && index < int(kPcControlCount) && binding >= 0 && binding < int(kPcControlCount))
+                g_pc_settings.pad_bindings[size_t(slot)][size_t(index)] = binding;
+            else if (std::sscanf(line.c_str(), "keyboard_%d=%d", &index, &binding) == 2 &&
                 index >= 0 && index < int(kPcControlCount) && binding >= 0 && binding <= 255)
                 g_pc_settings.keyboard_bindings[size_t(index)] = binding;
             else if (std::sscanf(line.c_str(), "controller_%d=%d", &index, &binding) == 2 &&
@@ -984,145 +1015,178 @@ bool headless() {  // NX_HEADLESS (platform.h)
     return on;
 }
 
-// Player 1's pad for rumble: XInput's first controller, else the SDL gamepad read_pad opened.
+// SDL owns each physical gamepad once, including Xbox/XInput and HIDAPI controllers.
 static std::mutex g_gamepad_lock;
-static SDL_Gamepad* g_gamepad = nullptr;
-static std::atomic<bool> g_have_xinput{false};
+static std::array<SDL_Gamepad*, 4> g_gamepads{};
+static uint64_t g_last_scan_ms = 0;
+struct PlayerInputs {
+    std::array<PadState, 4> players{};
+    std::array<bool, 4> connected{};
+    std::array<int, 4> slots{{-1, -1, -1, -1}};
+};
 
-void rumble(float low, float high) {
-    const float k = float(std::clamp(g_pc_settings.rumble, 0, 100)) / 100.0f;
-    const WORD lo = WORD(std::clamp(low * k, 0.0f, 1.0f) * 65535.0f), hi = WORD(std::clamp(high * k, 0.0f, 1.0f) * 65535.0f);
-    if (g_have_xinput) {
-        XINPUT_VIBRATION v{lo, hi};
-        XInputSetState(0, &v);
-        return;
+static void scan_gamepads_locked() {
+    SDL_UpdateGamepads();
+    for (auto& pad : g_gamepads)
+        if (pad && !SDL_GamepadConnected(pad)) SDL_CloseGamepad(pad), pad = nullptr;
+    const uint64_t now = SDL_GetTicks();
+    if (g_last_scan_ms && now - g_last_scan_ms < 500) return;
+    g_last_scan_ms = now;
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    for (int i = 0; ids && i < count; ++i) {
+        bool known = false;
+        for (auto* pad : g_gamepads) if (pad && SDL_GetGamepadID(pad) == ids[i]) known = true;
+        if (known) continue;
+        for (auto& pad : g_gamepads) if (!pad) { pad = SDL_OpenGamepad(ids[i]); break; }
     }
-    std::lock_guard lk(g_gamepad_lock);
-    if (g_gamepad) SDL_RumbleGamepad(g_gamepad, lo, hi, 250);
+    SDL_free(ids);
 }
 
-void read_pad(PadState& p) {
-    std::array<bool, kPcControlCount> physical{};
-    XINPUT_STATE xs{};
-    bool have_xinput = XInputGetState(0, &xs) == ERROR_SUCCESS;
-    if (have_xinput) {
-        const auto& g = xs.Gamepad;
-        physical[PcSouth] = (g.wButtons & XINPUT_GAMEPAD_A) != 0;
-        physical[PcEast] = (g.wButtons & XINPUT_GAMEPAD_B) != 0;
-        physical[PcWest] = (g.wButtons & XINPUT_GAMEPAD_X) != 0;
-        physical[PcNorth] = (g.wButtons & XINPUT_GAMEPAD_Y) != 0;
-        physical[PcShoulderL] = (g.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
-        physical[PcShoulderR] = (g.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
-        physical[PcTriggerL] = g.bLeftTrigger > 100;
-        physical[PcTriggerR] = g.bRightTrigger > 100;
-        physical[PcStart] = (g.wButtons & XINPUT_GAMEPAD_START) != 0;
-        physical[PcBack] = (g.wButtons & XINPUT_GAMEPAD_BACK) != 0;
-        physical[PcStickL] = (g.wButtons & XINPUT_GAMEPAD_LEFT_THUMB) != 0;
-        physical[PcStickR] = (g.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0;
-        physical[PcLeft] = (g.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) != 0;
-        physical[PcUp] = (g.wButtons & XINPUT_GAMEPAD_DPAD_UP) != 0;
-        physical[PcRight] = (g.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0;
-        physical[PcDown] = (g.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) != 0;
-        auto dz = [](int v) { return (v > -7849 && v < 7849) ? 0 : std::max(-kStickMax, std::min(kStickMax, v)); };
-        p.lx = dz(g.sThumbLX);
-        p.ly = dz(g.sThumbLY);
-        p.rx = dz(g.sThumbRX);
-        p.ry = dz(g.sThumbRY);
-    }
-    // SDL's HIDAPI backend reads DualSense directly; keep XInput as the first-choice path for Xbox pads.
-    g_have_xinput = have_xinput;
-    if (!have_xinput) {
-        SDL_UpdateGamepads();
-        std::lock_guard gamepad_lock(g_gamepad_lock);
-        SDL_Gamepad*& gamepad = g_gamepad;
-        if (gamepad && !SDL_GamepadConnected(gamepad)) {
-            SDL_CloseGamepad(gamepad);
-            gamepad = nullptr;
-        }
-        if (!gamepad) {
-            int count = 0;
-            SDL_JoystickID* ids = SDL_GetGamepads(&count);
-            SDL_Gamepad* fallback = nullptr;
-            for (int i = 0; ids && i < count; ++i) {
-                SDL_Gamepad* candidate = SDL_OpenGamepad(ids[i]);
-                if (!candidate) continue;
-                if (SDL_GetGamepadType(candidate) == SDL_GAMEPAD_TYPE_PS5) {
-                    if (fallback) SDL_CloseGamepad(fallback);
-                    gamepad = candidate;
-                    break;
+static PlayerInputs sample_players() {
+    PlayerInputs result;
+    std::array<PadState, 4> physical{};
+    std::array<bool, 4> present{};
+    {
+        std::lock_guard lk(g_gamepad_lock);
+        scan_gamepads_locked();
+        constexpr SDL_GamepadButton buttons[] = {
+            SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_NORTH,
+            SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_GAMEPAD_BUTTON_INVALID,
+            SDL_GAMEPAD_BUTTON_INVALID, SDL_GAMEPAD_BUTTON_START, SDL_GAMEPAD_BUTTON_BACK,
+            SDL_GAMEPAD_BUTTON_LEFT_STICK, SDL_GAMEPAD_BUTTON_RIGHT_STICK, SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+            SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+        };
+        for (size_t slot = 0; slot < g_gamepads.size(); ++slot) {
+            SDL_Gamepad* pad = g_gamepads[slot];
+            if (!pad) continue;
+            present[slot] = true;
+            bool down[kPcControlCount]{};
+            for (size_t i = 0; i < kPcControlCount; ++i)
+                down[i] = buttons[i] != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(pad, buttons[i]);
+            down[PcTriggerL] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000;
+            down[PcTriggerR] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000;
+            if (slot == 0) {
+                for (size_t i = 0; i < kPcControlCount; ++i) {
+                    if (pc_menu_open() && down[i] && !g_previous_controller_state[i]) pc_menu_capture_controller_button(int(i));
+                    g_previous_controller_state[i] = down[i];
                 }
-                if (!fallback) fallback = candidate;
-                else SDL_CloseGamepad(candidate);
             }
-            SDL_free(ids);
-            if (!gamepad) gamepad = fallback;
-        }
-        if (gamepad) {
-            auto down = [](SDL_Gamepad* pad, SDL_GamepadButton b) { return SDL_GetGamepadButton(pad, b); };
-            physical[PcSouth] = down(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
-            physical[PcEast] = down(gamepad, SDL_GAMEPAD_BUTTON_EAST);
-            physical[PcWest] = down(gamepad, SDL_GAMEPAD_BUTTON_WEST);
-            physical[PcNorth] = down(gamepad, SDL_GAMEPAD_BUTTON_NORTH);
-            physical[PcShoulderL] = down(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
-            physical[PcShoulderR] = down(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-            physical[PcTriggerL] = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 10000;
-            physical[PcTriggerR] = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 10000;
-            physical[PcStart] = down(gamepad, SDL_GAMEPAD_BUTTON_START);
-            physical[PcBack] = down(gamepad, SDL_GAMEPAD_BUTTON_BACK);
-            physical[PcStickL] = down(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
-            physical[PcStickR] = down(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
-            physical[PcLeft] = down(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
-            physical[PcUp] = down(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP);
-            physical[PcRight] = down(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
-            physical[PcDown] = down(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
-            auto dz = [](int v) { return (v > -7849 && v < 7849) ? 0 : std::max(-kStickMax, std::min(kStickMax, v)); };
-            p.lx = dz(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
-            p.ly = dz(-SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
-            p.rx = dz(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-            p.ry = dz(-SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+            for (size_t action = 0; action < kPcControlCount; ++action) {
+                const int bind = g_device_bindings[slot][action].load();
+                if (bind >= 0 && bind < int(kPcControlCount) && down[bind]) physical[slot].buttons |= kPadActionBits[action];
+            }
+            auto axis = [&](SDL_GamepadAxis which, bool invert) {
+                int value = SDL_GetGamepadAxis(pad, which);
+                if (value > -7849 && value < 7849) return 0;
+                value = std::clamp(value, -kStickMax, kStickMax);
+                return invert ? -value : value;
+            };
+            physical[slot].lx = axis(SDL_GAMEPAD_AXIS_LEFTX, false);
+            physical[slot].ly = axis(SDL_GAMEPAD_AXIS_LEFTY, true);
+            physical[slot].rx = axis(SDL_GAMEPAD_AXIS_RIGHTX, false);
+            physical[slot].ry = axis(SDL_GAMEPAD_AXIS_RIGHTY, true);
         }
     }
-
-    PadState nav{};  // the controller through its bindings, for the overlay's navigation
-    nav.lx = p.lx, nav.ly = p.ly, nav.rx = p.rx, nav.ry = p.ry;
-    for (size_t action = 0; action < kPcControlCount; ++action) {
-        const int source = g_controller_bindings[action].load(std::memory_order_relaxed);
-        if (source >= 0 && source < int(physical.size()) && physical[size_t(source)]) nav.buttons |= kPadActionBits[action];
-    }
-    const bool menu_open = pc_menu_open() || (overlay::enabled() && overlay::is_open());
-    if (pc_menu_open()) {
-        for (size_t i = 0; i < physical.size(); ++i)
-            if (physical[i] && !g_previous_controller_state[i]) pc_menu_capture_controller_button(int(i));
-    } else {
+    PadState keyboard{};
+    if (!overlay::wants_keyboard() && !pc_menu_open()) {
         for (size_t action = 0; action < kPcControlCount; ++action) {
-            const int source = g_controller_bindings[action].load(std::memory_order_relaxed);
-            if (source >= 0 && source < int(physical.size()) && physical[size_t(source)])
-                p.buttons |= kPadActionBits[action];
-            const int vk = g_keyboard_bindings[action].load(std::memory_order_relaxed);
-            if (key(vk)) {
-                p.buttons |= kPadActionBits[action];
-                if (action == PcDpadLeft) p.lx = -kStickMax;
-                else if (action == PcDpadRight) p.lx = kStickMax;
-                else if (action == PcDpadUp) p.ly = kStickMax;
-                else if (action == PcDpadDown) p.ly = -kStickMax;
+            if (!key(g_keyboard_bindings[action].load())) continue;
+            keyboard.buttons |= kPadActionBits[action];
+            if (action == PcDpadLeft) keyboard.lx = -kStickMax;
+            else if (action == PcDpadRight) keyboard.lx = kStickMax;
+            else if (action == PcDpadUp) keyboard.ly = kStickMax;
+            else if (action == PcDpadDown) keyboard.ly = -kStickMax;
+        }
+        if (key('A')) keyboard.lx = -kStickMax;
+        if (key('D')) keyboard.lx = kStickMax;
+        if (key('W')) keyboard.ly = kStickMax;
+        if (key('S')) keyboard.ly = -kStickMax;
+    }
+    std::array<int, 4> assignment{};
+    bool manual = false;
+    for (size_t i = 0; i < 4; ++i) { assignment[i] = g_player_devices[i].load(); manual |= assignment[i] != 0; }
+    if (!manual) {
+        result.players[0] = keyboard;
+        result.connected[0] = true;
+        const bool separate = g_keyboard_separate.load();
+        for (size_t slot = 0; slot < 4; ++slot) {
+            const size_t player = slot + (separate ? 1 : 0);
+            if (!present[slot] || player >= 4) continue;
+            auto& dest = result.players[player];
+            dest.buttons |= physical[slot].buttons;
+            if (physical[slot].lx) dest.lx = physical[slot].lx;
+            if (physical[slot].ly) dest.ly = physical[slot].ly;
+            if (physical[slot].rx) dest.rx = physical[slot].rx;
+            if (physical[slot].ry) dest.ry = physical[slot].ry;
+            result.connected[player] = true;
+            result.slots[player] = int(slot);
+        }
+    } else {
+        bool used[7]{};
+        for (int a : assignment) if (a >= 2 && a <= 6) used[a] = true;
+        for (size_t player = 0; player < 4; ++player) {
+            int a = assignment[player];
+            if (!a) {
+                if (!used[2]) a = 2;
+                else for (int candidate = 3; candidate <= 6; ++candidate)
+                    if (!used[candidate] && present[candidate - 3]) { a = candidate; break; }
+                if (a >= 2) used[a] = true;
+            }
+            if (a == 2) result.players[player] = keyboard, result.connected[player] = true;
+            else if (a >= 3 && a <= 6 && present[a - 3]) {
+                result.players[player] = physical[a - 3];
+                result.connected[player] = true;
+                result.slots[player] = a - 3;
             }
         }
-        // WASD remains a convenient independent movement option in addition to remappable D-pad keys.
-        if (key('A')) p.lx = -kStickMax;
-        if (key('D')) p.lx = kStickMax;
-        if (key('W')) p.ly = kStickMax;
-        if (key('S')) p.ly = -kStickMax;
     }
-    g_previous_controller_state = physical;
-    if (menu_open) p = {};
-    input_script(p);  // NX_INPUT_SCRIPT (input_script.cpp): unattended runs
-    if (overlay::enabled()) {
-        PadState view = nav;
-        view.buttons |= p.buttons;
-        const bool had = view.buttons != 0;
-        overlay::filter_pad(view);  // Minus + Plus toggles; while open the menu takes the pad
-        if (overlay::is_open() || (had && view.buttons == 0)) p = {};
+    return result;
+}
+
+std::array<std::string, 4> controller_names() {
+    std::lock_guard lk(g_gamepad_lock);
+    scan_gamepads_locked();
+    std::array<std::string, 4> names;
+    for (size_t i = 0; i < g_gamepads.size(); ++i) if (g_gamepads[i]) {
+        const char* name = SDL_GetGamepadName(g_gamepads[i]);
+        names[i] = name ? name : "Controller";
     }
+    return names;
+}
+bool player_connected(unsigned player) {
+    if (player >= 4) return false;
+    return sample_players().connected[player];
+}
+void rumble_player(unsigned player, float low, float high) {
+    if (player >= 4) return;
+    const int slot = sample_players().slots[player];
+    if (slot < 0) return;
+    const float strength = float(std::clamp(g_pc_settings.rumble, 0, 100)) / 100.0f;
+    std::lock_guard lk(g_gamepad_lock);
+    if (g_gamepads[size_t(slot)]) SDL_RumbleGamepad(g_gamepads[size_t(slot)],
+        Uint16(std::clamp(low * strength, 0.0f, 1.0f) * 65535.0f),
+        Uint16(std::clamp(high * strength, 0.0f, 1.0f) * 65535.0f), 250);
+}
+void rumble(float low, float high) { rumble_player(0, low, high); }
+void read_pad_player(unsigned player, PadState& p) {
+    if (player >= 4) return;
+    const PlayerInputs inputs = sample_players();
+    if (inputs.connected[player]) p = inputs.players[player];
+    if (player == 0) {
+        input_script(p);
+        if (overlay::enabled()) overlay::filter_pad(p);
+        if (pc_menu_open()) p = {};
+    } else if (overlay::wants_keyboard() || pc_menu_open()) p = {};
+}
+void read_pad(PadState& p) {
+    PadState mapped{};
+    read_pad_player(0, mapped);
+    p.buttons |= mapped.buttons;
+    if (mapped.lx) p.lx = mapped.lx;
+    if (mapped.ly) p.ly = mapped.ly;
+    if (mapped.rx) p.rx = mapped.rx;
+    if (mapped.ry) p.ry = mapped.ry;
 }
 
 // ---- audio: XAudio2 -------------------------------------------------------------------------------------------
