@@ -102,6 +102,7 @@ std::atomic<uint64_t> g_game_waits{0}, g_game_wait_ns{0};
 uint64_t g_staging_count = 0, g_staging_bytes = 0;  // staging_alloc's buffers, per log period (PHASE4.md U1)  // the game's waits that blocked (NX_ASYNC_GPU only)
 std::atomic<uint64_t> g_image_mem_live{0}, g_image_mem_peak{0}, g_image_mem_live_count{0};
 std::atomic<uint64_t> g_image_mem_allocations{0}, g_image_mem_frees{0};
+std::atomic<uint64_t> g_image_mem_shared_live{0}, g_image_mem_shared_count{0};
 
 // The upload ring (the synchronous path's upload buffer). Positions only grow; position p is byte p % size. What
 // lies before g_tail belongs to retired submits; g_begin is where the submit being recorded started.
@@ -300,24 +301,48 @@ VkCommandBuffer next_part(Slot& s) {
 
 }  // namespace
 
-void gpu_image_memory_allocated(uint64_t bytes) {
+void gpu_image_memory_allocated(uint64_t bytes, bool shared) {
     const uint64_t live = g_image_mem_live.fetch_add(bytes, std::memory_order_relaxed) + bytes;
     g_image_mem_live_count.fetch_add(1, std::memory_order_relaxed);
     g_image_mem_allocations.fetch_add(1, std::memory_order_relaxed);
+    if (shared) {
+        g_image_mem_shared_live.fetch_add(bytes, std::memory_order_relaxed);
+        g_image_mem_shared_count.fetch_add(1, std::memory_order_relaxed);
+    }
     uint64_t peak = g_image_mem_peak.load(std::memory_order_relaxed);
     while (live > peak && !g_image_mem_peak.compare_exchange_weak(peak, live, std::memory_order_relaxed)) {}
 }
 
-void gpu_image_memory_freed(uint64_t bytes) {
+void gpu_image_memory_freed(uint64_t bytes, bool shared) {
     g_image_mem_live.fetch_sub(bytes, std::memory_order_relaxed);
     g_image_mem_live_count.fetch_sub(1, std::memory_order_relaxed);
     g_image_mem_frees.fetch_add(1, std::memory_order_relaxed);
+    if (shared) {
+        g_image_mem_shared_live.fetch_sub(bytes, std::memory_order_relaxed);
+        g_image_mem_shared_count.fetch_sub(1, std::memory_order_relaxed);
+    }
 }
 
 GpuImageMemoryStats gpu_image_memory_stats() {
     return {g_image_mem_live.load(std::memory_order_relaxed), g_image_mem_peak.load(std::memory_order_relaxed),
             g_image_mem_live_count.load(std::memory_order_relaxed),
-            g_image_mem_allocations.load(std::memory_order_relaxed), g_image_mem_frees.load(std::memory_order_relaxed)};
+            g_image_mem_allocations.load(std::memory_order_relaxed), g_image_mem_frees.load(std::memory_order_relaxed),
+            g_image_mem_shared_live.load(std::memory_order_relaxed),
+            g_image_mem_shared_count.load(std::memory_order_relaxed)};
+}
+
+static void destroy_gpu_image(GpuImage& img) {
+    if (!img.image) return;
+    forget_image_views(img);
+    if (img.view) p_vkDestroyImageView(vk_device(), img.view, nullptr);
+    p_vkDestroyImage(vk_device(), img.image, nullptr);
+    if (img.memory) {
+        p_vkFreeMemory(vk_device(), img.memory, nullptr);
+        gpu_image_memory_freed(img.allocation_size, img.shared_memory);
+    }
+    img.image = VK_NULL_HANDLE, img.memory = VK_NULL_HANDLE, img.view = VK_NULL_HANDLE;
+    img.allocation_size = 0;
+    img.shared_memory = false;
 }
 
 uint64_t trim_reusable_image_cache() {
@@ -338,6 +363,34 @@ uint64_t trim_reusable_image_cache() {
         log("nvn/vk: queued %zu released images (%.1f MiB) for safe freeing after an allocation failure", count,
             double(released) / (1ull << 20));
     return released;
+}
+
+uint64_t reclaim_reusable_images_now() {
+    if (async_gpu()) {
+        const uint64_t released = trim_reusable_image_cache();
+        free_retired_images(frame_completed());
+        return released;
+    }
+    std::vector<std::shared_ptr<GpuImage>> dead;
+    {
+        std::lock_guard lk(g_grave_lock);
+        for (auto& [key, entry] : g_reusable)
+            if (entry.second) dead.push_back(std::move(entry.second));
+        g_reusable.clear();
+        g_reusable_bytes = 0;
+    }
+    uint64_t freed_bytes = 0;
+    size_t freed_count = 0;
+    for (auto& img : dead) {
+        if (!img || !img->image || img.use_count() > 1) continue;
+        freed_bytes += img->allocation_size;
+        ++freed_count;
+        destroy_gpu_image(*img);
+    }
+    if (freed_count)
+        log("nvn/vk: freed %zu cached released images (%.1f MiB) immediately on VRAM pressure", freed_count,
+            double(freed_bytes) / (1ull << 20));
+    return freed_bytes;
 }
 
 // On by default on macOS only (course 1-1 headless: ~50 -> ~59 fps there; DEBUG.md #61): MoltenVK encodes Metal inside
@@ -653,15 +706,7 @@ void free_retired_images(uint64_t completed) {
     for (auto& img : dead) {
         if (!img || !img->image) continue;
         if (img.use_count() > 1) continue;  // another live texture shares it (image_of): freed with the last one
-        forget_image_views(*img);
-        if (img->view) p_vkDestroyImageView(vk_device(), img->view, nullptr);
-        p_vkDestroyImage(vk_device(), img->image, nullptr);
-        if (img->memory) {
-            p_vkFreeMemory(vk_device(), img->memory, nullptr);
-            gpu_image_memory_freed(img->allocation_size);
-        }
-        img->image = VK_NULL_HANDLE, img->memory = VK_NULL_HANDLE, img->view = VK_NULL_HANDLE;
-        img->allocation_size = 0;
+        destroy_gpu_image(*img);
     }
 }
 

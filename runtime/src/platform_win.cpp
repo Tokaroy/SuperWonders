@@ -1043,7 +1043,7 @@ static void scan_gamepads_locked() {
     SDL_free(ids);
 }
 
-static PlayerInputs sample_players() {
+static PlayerInputs sample_players_uncached() {
     PlayerInputs result;
     std::array<PadState, 4> physical{};
     std::array<bool, 4> present{};
@@ -1089,19 +1089,21 @@ static PlayerInputs sample_players() {
         }
     }
     PadState keyboard{};
-    if (!overlay::wants_keyboard() && !pc_menu_open()) {
+    const bool focused = g_window && GetForegroundWindow() == g_window;
+    auto key_focused = [focused](int vk) { return focused && vk > 0 && (GetAsyncKeyState(vk) & 0x8000); };
+    if (focused && !overlay::wants_keyboard() && !pc_menu_open()) {
         for (size_t action = 0; action < kPcControlCount; ++action) {
-            if (!key(g_keyboard_bindings[action].load())) continue;
+            if (!key_focused(g_keyboard_bindings[action].load())) continue;
             keyboard.buttons |= kPadActionBits[action];
             if (action == PcDpadLeft) keyboard.lx = -kStickMax;
             else if (action == PcDpadRight) keyboard.lx = kStickMax;
             else if (action == PcDpadUp) keyboard.ly = kStickMax;
             else if (action == PcDpadDown) keyboard.ly = -kStickMax;
         }
-        if (key('A')) keyboard.lx = -kStickMax;
-        if (key('D')) keyboard.lx = kStickMax;
-        if (key('W')) keyboard.ly = kStickMax;
-        if (key('S')) keyboard.ly = -kStickMax;
+        if (key_focused('A')) keyboard.lx = -kStickMax;
+        if (key_focused('D')) keyboard.lx = kStickMax;
+        if (key_focused('W')) keyboard.ly = kStickMax;
+        if (key_focused('S')) keyboard.ly = -kStickMax;
     }
     std::array<int, 4> assignment{};
     bool manual = false;
@@ -1142,6 +1144,18 @@ static PlayerInputs sample_players() {
         }
     }
     return result;
+}
+
+static PlayerInputs sample_players() {
+    static std::mutex g_player_sample_lock;
+    static PlayerInputs g_cached_players{};
+    static uint64_t g_last_player_sample_ns = 0;
+    std::lock_guard lk(g_player_sample_lock);
+    const uint64_t now = monotonic_ns();
+    if (g_last_player_sample_ns && now - g_last_player_sample_ns < 2'000'000ull) return g_cached_players;
+    g_cached_players = sample_players_uncached();
+    g_last_player_sample_ns = now;
+    return g_cached_players;
 }
 
 std::array<std::string, 4> controller_names() {
