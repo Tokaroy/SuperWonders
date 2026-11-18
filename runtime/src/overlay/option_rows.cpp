@@ -12,6 +12,7 @@
 #include "imgui_internal.h"  // SetKeyOwner, SetFocusID, NavCursorVisible
 
 #include "overlay/overlay_ui.h"
+#include "overlay/overlay.h"
 
 namespace nx::overlay::rows {
 
@@ -145,7 +146,13 @@ void section(const char* title) {
 }
 
 bool toggle(const char* label, bool* v, bool def, const char* desc) {
-    if (!row(label, *v ? "On" : "Off", *v != def, desc)) return false;  // (any step flips it)
+    static constexpr const char* values[13][2] = {
+        {"Off", "On"}, {"Disattivato", "Attivato"}, {"Aus", "Ein"}, {"Désactivé", "Activé"},
+        {"Desactivado", "Activado"}, {"끔", "켬"}, {"オフ", "オン"}, {"إيقاف", "تشغيل"},
+        {"Выкл.", "Вкл."}, {"Kapalı", "Açık"}, {"Uit", "Aan"}, {"关闭", "开启"}, {"關閉", "開啟"},
+    };
+    const int language = std::clamp(overlay::menu_language(), 0, 12);
+    if (!row(label, values[language][*v ? 1 : 0], *v != def, desc)) return false;  // (any step flips it)
     *v = !*v;
     return true;
 }
