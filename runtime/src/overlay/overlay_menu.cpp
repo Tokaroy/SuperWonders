@@ -700,7 +700,7 @@ void controls(MenuContext& c, const Labels& l) {
     const InputText& t = kInputText[lang];
     rows::begin("##controls", c.height);
     rows::section(kHeaders[lang][1]);
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
     if (rows::toggle(t.separate, &s.keyboard_separate, false, t.separate_help)) settings_changed(true);
     const auto device_names = plat::controller_names();
     std::array<std::string, 4> device_labels;

@@ -67,7 +67,7 @@ PadState read(unsigned player = 0) {
         read_pad(p);
         play::pad(p);
     }
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
     else read_pad_player(player, p);
 #endif  // NX_INPUT_FRAMES / NX_INPUT_REPLAY / NX_INPUT_RECORD (play.cpp)
     // Stick directions as buttons, like the hid sysmodule reports them.
@@ -97,7 +97,7 @@ void GetNpadState(CPU& c) {
         std::lock_guard lk(m);
         if (seen.insert({id, hle_current_name()}).second) log("hid: reads id %#x via %s", id, hle_current_name());
     }
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
     if (id >= 4 || !player_connected(id)) return;
 #else
     if (id != 0) return;
@@ -138,7 +138,7 @@ void GetNpadStatesFullKey(CPU& c) {
     GetNpadState(c);  // the new sample, into out[0]
     const uint32_t id = ld<uint32_t>(id_ref);
     if (id >= histories.size()) { c.x[0] = 1; return; }
-#if !defined(__linux__) || defined(__ANDROID__)
+#if (!defined(__linux__) || defined(__ANDROID__)) && !defined(_WIN32)
     if (id != 0) { c.x[0] = 1; return; }
 #endif
     auto& history = histories[id];
@@ -192,7 +192,7 @@ void one(CPU& c) { c.x[0] = 1; }
 void GetNpadStyleSet(CPU& c) {
     static int logged = 0;
     if (logged++ < 4) log("hid: GetNpadStyleSet id %#x", ld<uint32_t>(c.x[0]));
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
     c.x[0] = player_connected(ld<uint32_t>(c.x[0])) ? kStyleFullKey : 0;
 #else
     c.x[0] = ld<uint32_t>(c.x[0]) == 0 ? kStyleFullKey : 0;
@@ -263,7 +263,7 @@ void vibrate(uint32_t h, uint64_t value) {
     if (!rumble_on()) return;
     const unsigned player = (h >> 8) & 0xFF;
     if ((h & 0xFF) != kVibrationType || player >= 4) return;
-#if !defined(__linux__) || defined(__ANDROID__)
+#if (!defined(__linux__) || defined(__ANDROID__)) && !defined(_WIN32)
     if (player != 0) return;
 #endif
     int side = (h >> 16 & 0xFF) ? 1 : 0;
@@ -281,7 +281,7 @@ void vibrate(uint32_t h, uint64_t value) {
             log("hid: vibration values: %llu sent, %llu not zero", (unsigned long long)g_vibration_sends,
                 (unsigned long long)g_vibration_nonzero);
     }
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
     plat::rumble_player(player, low, high);
 #else
     plat::rumble(low, high);
@@ -307,7 +307,7 @@ ServiceRegistrar r_hid("hid", [] {
 });
 void ShowControllerSupport(CPU& c) {                     // (ControllerSupportResultInfo*, const Arg&)
     int count = 1;
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
     const int max_players = c.x[1] ? std::clamp<int>(ld<int8_t>(c.x[1] + 1), 1, 4) : 4;
     while (count < max_players && player_connected(unsigned(count))) ++count;
 #endif

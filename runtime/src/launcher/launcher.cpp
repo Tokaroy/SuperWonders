@@ -1122,7 +1122,8 @@ void screen(float w, float h) {
     // The controller, by the player's own bindings (the pad as the overlay saw it: NpadButton bits), and the keys.
     const uint64_t pad = overlay::pad_buttons(), pressed = pad & ~g->pad_before;
     g->pad_before = pad;
-    if (menu_open) return;
+    // A modal or active text field owns the input; Backspace and mapped controller keys must not move launcher focus.
+    if (menu_open || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup) || ImGui::GetIO().WantTextInput) return;
     const bool right = ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false) ||
                        ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight, false) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
     const bool back = (pressed & plat::kB) || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||

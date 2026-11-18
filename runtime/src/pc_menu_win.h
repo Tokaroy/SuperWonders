@@ -40,6 +40,10 @@ struct PcMenuState {
     int language = 0;  // English, Italian, German, French
     int game_language = 0;  // Language returned to the game at startup: en-US, it, de, fr, pt-BR
     int memory_limit_gb = 8;  // Process private-commit guard; not a dedicated VRAM budget
+    std::array<int, 4> player_devices{{0, 0, 0, 0}};
+    std::array<std::array<int, kPcControlCount>, 4> pad_bindings{};
+    std::array<uint32_t, 4> pad_custom_mask{};
+    bool keyboard_separate = false;
     int controller_preset = 0;  // Xbox / DualSense, Nintendo
     bool muted = false;
     bool fullscreen = false;
