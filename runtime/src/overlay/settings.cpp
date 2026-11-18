@@ -24,6 +24,12 @@ int controller_binding(const Settings& s, size_t action) {
                                                      : default_controller_binding(action, s.controller_preset);
 }
 
+int controller_binding_for_slot(const Settings& s, size_t slot, size_t action) {
+    if (slot == 0 || slot >= 4 || action >= kControlCount) return controller_binding(s, action);
+    return s.pad_custom_mask[slot] & (1u << action) ? std::clamp(s.pad_bindings[slot][action], 0, int(kControlCount) - 1)
+                                                     : default_controller_binding(action, s.controller_preset);
+}
+
 bool load_settings(const std::string& path, Settings& s) {
     std::ifstream file(path);
     if (!file) return false;
@@ -46,6 +52,7 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "game_language_version=%d", &v) == 1) game_language_version = v;
         else if (std::sscanf(l, "memory_limit_gb=%d", &v) == 1) s.memory_limit_gb = std::clamp(v, 2, 32);
         else if (std::sscanf(l, "low_vram_profile=%d", &v) == 1) s.low_vram_profile = v != 0;
+        else if (std::sscanf(l, "keyboard_separate=%d", &v) == 1) s.keyboard_separate = v != 0;
         else if (std::sscanf(l, "controller_preset=%d", &v) == 1) s.controller_preset = std::clamp(v, 0, 1);
         else if (std::sscanf(l, "metrics_enabled=%d", &v) == 1) s.metrics_enabled = v != 0;
         else if (std::sscanf(l, "metric_fps=%d", &v) == 1) s.metric_fps = v != 0;
@@ -63,8 +70,15 @@ bool load_settings(const std::string& path, Settings& s) {
             s.frame_cap = v == 30 || v == 60 || v == 90 || v == 120 || v == 144 ? v : 60;
         else if (std::sscanf(l, "controller_custom_mask=%u", &u) == 1) s.controller_custom_mask = u;
         else {
-            int index = -1, binding = -1;
-            if (std::sscanf(l, "keyboard_%d=%d", &index, &binding) == 2 && index >= 0 && index < int(kControlCount) &&
+            int index = -1, binding = -1, slot = -1;
+            unsigned mask = 0;
+            if (std::sscanf(l, "player_device_%d=%d", &index, &binding) == 2 && index >= 0 && index < 4 && binding >= 0 && binding <= 6)
+                s.player_devices[size_t(index)] = binding;
+            else if (std::sscanf(l, "pad_mask_%d=%u", &slot, &mask) == 2 && slot > 0 && slot < 4)
+                s.pad_custom_mask[size_t(slot)] = mask;
+            else if (std::sscanf(l, "pad_%d_%d=%d", &slot, &index, &binding) == 3 && slot > 0 && slot < 4 && index >= 0 && index < int(kControlCount) && binding >= 0 && binding < int(kControlCount))
+                s.pad_bindings[size_t(slot)][size_t(index)] = binding;
+            else if (std::sscanf(l, "keyboard_%d=%d", &index, &binding) == 2 && index >= 0 && index < int(kControlCount) &&
                 binding >= 0 && binding <= 511)
                 s.keyboard_bindings[size_t(index)] = binding;
             else if (std::sscanf(l, "controller_%d=%d", &index, &binding) == 2 && index >= 0 &&
@@ -87,6 +101,7 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\nalways_on_top=" << s.always_on_top << "\nlanguage=" << s.language << "\ngame_language=" << s.game_language
       << "\ngame_language_version=2"
       << "\nmemory_limit_gb=" << s.memory_limit_gb << "\nlow_vram_profile=" << s.low_vram_profile
+      << "\nkeyboard_separate=" << s.keyboard_separate
       << "\ncontroller_preset=" << s.controller_preset << "\nmetrics_enabled=" << s.metrics_enabled
       << "\nmetric_fps=" << s.metric_fps << "\nmetric_one_percent_low=" << s.metric_one_percent_low
       << "\nmetric_game_speed=" << s.metric_game_speed << "\nmetric_frametime_graph=" << s.metric_frametime_graph
@@ -94,6 +109,14 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\nupscaler=" << s.upscaler << "\nfsr_sharpness=" << s.fsr_sharpness << "\nantialiasing=" << s.antialiasing
       << "\nanisotropy=" << s.anisotropy << "\nrumble=" << s.rumble << "\nvsync=" << s.vsync
       << "\nframe_cap=" << s.frame_cap << '\n';
+    for (size_t slot = 0; slot < 4; ++slot) {
+        f << "player_device_" << slot << '=' << s.player_devices[slot] << '\n';
+        if (slot) {
+            f << "pad_mask_" << slot << '=' << s.pad_custom_mask[slot] << '\n';
+            for (size_t action = 0; action < kControlCount; ++action)
+                f << "pad_" << slot << '_' << action << '=' << s.pad_bindings[slot][action] << '\n';
+        }
+    }
     for (size_t i = 0; i < kControlCount; ++i)
         f << "keyboard_" << i << '=' << s.keyboard_bindings[i] << '\n'
           << "controller_" << i << '=' << s.controller_bindings[i] << '\n';

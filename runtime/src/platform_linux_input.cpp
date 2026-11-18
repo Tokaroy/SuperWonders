@@ -31,12 +31,18 @@ using linux_host::g_window;
 
 std::mutex g_pad_lock;
 PadState g_pad;
+std::array<PadState, 4> g_players{};
+std::array<bool, 4> g_connected{true, false, false, false};
+std::atomic<bool> g_keyboard_separate{false};
 
 // Player settings (overlay/settings.h). Keyboard bindings are SDL scancodes. g_settings_lock guards g_settings; the
 // bindings are copied into atomics for the input sampling.
 std::mutex g_settings_lock;
 overlay::Settings g_settings;
-std::array<std::atomic<int>, overlay::kControlCount> g_key_binding{}, g_pad_binding{};
+std::array<std::atomic<int>, overlay::kControlCount> g_key_binding{};
+std::array<std::array<std::atomic<int>, overlay::kControlCount>, 4> g_pad_binding{};
+std::array<std::atomic<int>, 4> g_assignments{};
+std::array<int, 4> g_player_slots{{0, -1, -1, -1}};
 constexpr uint64_t kActionBits[overlay::kControlCount] = {
     kA, kB, kX, kY, kL, kR, kZL, kZR, kPlus, kMinus, kStickL, kStickR, kLeft, kUp, kRight, kDown,
 };
@@ -44,7 +50,7 @@ constexpr uint64_t kActionBits[overlay::kControlCount] = {
 std::atomic<bool> g_fast_forward{false};  // Tab held (sampled on the main thread)
 // The open gamepad: sampled on the main thread, rumbled from the game's (both under g_gamepad_lock).
 std::mutex g_gamepad_lock;
-SDL_Gamepad* g_gamepad = nullptr;
+std::array<SDL_Gamepad*, 4> g_gamepads{};
 std::atomic<int> g_rumble_strength{100};  // percent
 
 std::mutex g_posted_lock;
@@ -64,8 +70,11 @@ void apply_settings(const overlay::Settings& s, bool persist) {
         before = g_settings;
         g_settings = s;
     }
-    for (size_t a = 0; a < overlay::kControlCount; ++a)
-        g_key_binding[a] = s.keyboard_bindings[a], g_pad_binding[a] = overlay::controller_binding(s, a);
+    for (size_t a = 0; a < overlay::kControlCount; ++a) {
+        g_key_binding[a] = s.keyboard_bindings[a];
+        for (size_t slot = 0; slot < 4; ++slot) g_pad_binding[slot][a] = overlay::controller_binding_for_slot(s, slot, a);
+    }
+    for (size_t i = 0; i < 4; ++i) g_assignments[i] = s.player_devices[i];
     if (g_stream) {
         const int percent = std::clamp(s.volume, 0, 200);
         const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
@@ -82,6 +91,7 @@ void apply_settings(const overlay::Settings& s, bool persist) {
     nvn::set_vsync(s.vsync);
     nvn::set_frame_cap(s.frame_cap);
     g_rumble_strength = std::clamp(s.rumble, 0, 100);
+    g_keyboard_separate = s.keyboard_separate;
     if (s.fullscreen != before.fullscreen || s.width != before.width || s.height != before.height ||
         s.always_on_top != before.always_on_top)
         post_to_main([s] {
@@ -126,14 +136,17 @@ overlay::Key menu_key(SDL_Keycode k) {
 
 bool fast_forward() { return g_fast_forward.load(std::memory_order_relaxed); }
 
-void rumble(float low, float high) {
+void rumble_player(unsigned player, float low, float high) {
+    int slot = -1;
+    { std::lock_guard lk(g_pad_lock); if (player < g_player_slots.size()) slot = g_player_slots[player]; }
+    if (slot < 0 || slot >= int(g_gamepads.size())) return;
     float k = float(g_rumble_strength.load()) / 100.0f;
     std::lock_guard lk(g_gamepad_lock);
-    if (!g_gamepad) return;
-    // 250 ms at most: the game sends a value every few milliseconds while it vibrates, and zero to stop.
-    SDL_RumbleGamepad(g_gamepad, Uint16(std::clamp(low * k, 0.0f, 1.0f) * 65535.0f),
+    if (!g_gamepads[slot]) return;
+    SDL_RumbleGamepad(g_gamepads[slot], Uint16(std::clamp(low * k, 0.0f, 1.0f) * 65535.0f),
                       Uint16(std::clamp(high * k, 0.0f, 1.0f) * 65535.0f), 250);
 }
+void rumble(float low, float high) { rumble_player(0, low, high); }
 
 void read_pad(PadState& p) {
     {
@@ -146,6 +159,25 @@ void read_pad(PadState& p) {
     }
     input_script(p);
     overlay::filter_pad(p);  // controller navigation of the menu; the game sees nothing while it is open
+}
+
+std::array<std::string, 4> controller_names() {
+    std::array<std::string, 4> names;
+    std::lock_guard lk(g_gamepad_lock);
+    for (size_t i = 0; i < g_gamepads.size(); ++i) if (g_gamepads[i]) {
+        const char* name = SDL_GetGamepadName(g_gamepads[i]);
+        names[i] = name ? name : "Controller";
+    }
+    return names;
+}
+bool player_connected(unsigned player) {
+    std::lock_guard lk(g_pad_lock);
+    return player < g_connected.size() && g_connected[player];
+}
+void read_pad_player(unsigned player, PadState& p) {
+    if (player == 0) { read_pad(p); return; }
+    std::lock_guard lk(g_pad_lock);
+    if (player < g_players.size() && !overlay::wants_keyboard()) p = g_players[player];
 }
 
 namespace linux_host {
@@ -247,19 +279,30 @@ bool handle_event(const SDL_Event& e) {
 
 void sample_input() {
     PadState p;
-    std::unique_lock gamepad_lock(g_gamepad_lock);
-    SDL_Gamepad*& pad = g_gamepad;
-    if (!pad) {
-        int n = 0;
-        SDL_JoystickID* ids = SDL_GetGamepads(&n);
-        if (ids && n > 0) pad = SDL_OpenGamepad(ids[0]);
+    std::array<PadState, 4> players{}, physical_pads{};
+    std::array<bool, 4> connected{}, pad_connected{};
+    std::array<int, 4> player_slots{{-1, -1, -1, -1}};
+    {
+    std::lock_guard gamepad_lock(g_gamepad_lock);
+    for (auto& pad : g_gamepads) if (pad && !SDL_GamepadConnected(pad)) SDL_CloseGamepad(pad), pad = nullptr;
+    static uint64_t last_scan = 0;
+    const uint64_t now = SDL_GetTicks();
+    if (!last_scan || now - last_scan >= 500) {
+        last_scan = now;
+        int count = 0; SDL_JoystickID* ids = SDL_GetGamepads(&count);
+        for (int i = 0; ids && i < count; ++i) {
+            bool known = false;
+            for (auto* open : g_gamepads) if (open && SDL_GetGamepadID(open) == ids[i]) known = true;
+            if (known) continue;
+            for (auto& open : g_gamepads) if (!open) { open = SDL_OpenGamepad(ids[i]); break; }
+        }
         SDL_free(ids);
     }
-    if (pad && !SDL_GamepadConnected(pad)) {
-        SDL_CloseGamepad(pad);
-        pad = nullptr;
-    }
-    if (pad) {
+    for (unsigned slot = 0; slot < g_gamepads.size(); ++slot) {
+        SDL_Gamepad* pad = g_gamepads[slot];
+        if (!pad) continue;
+        PadState& q = physical_pads[slot];
+        pad_connected[slot] = true;
         // Physical buttons by position (overlay::Physical order), then each action takes its bound button
         // (the menu's preset or remapping; the default preset puts A at the bottom, as on Windows).
         static const SDL_GamepadButton physical[] = {
@@ -276,19 +319,19 @@ void sample_input() {
         down[overlay::PhyTriggerL] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000;
         down[overlay::PhyTriggerR] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000;
         for (size_t a = 0; a < overlay::kControlCount; ++a)
-            if (down[std::clamp(g_pad_binding[a].load(), 0, int(overlay::kControlCount) - 1)]) p.buttons |= kActionBits[a];
+            if (down[std::clamp(g_pad_binding[slot][a].load(), 0, int(overlay::kControlCount) - 1)]) q.buttons |= kActionBits[a];
         auto axis = [&](SDL_GamepadAxis a, bool invert) {
             int v = SDL_GetGamepadAxis(pad, a);
             if (v > -7849 && v < 7849) return 0;
             v = std::clamp(v, -kStickMax, kStickMax);
             return invert ? -v : v;
         };
-        p.lx = axis(SDL_GAMEPAD_AXIS_LEFTX, false);
-        p.ly = axis(SDL_GAMEPAD_AXIS_LEFTY, true);  // SDL: down is positive; Horizon: up is positive
-        p.rx = axis(SDL_GAMEPAD_AXIS_RIGHTX, false);
-        p.ry = axis(SDL_GAMEPAD_AXIS_RIGHTY, true);
+        q.lx = axis(SDL_GAMEPAD_AXIS_LEFTX, false);
+        q.ly = axis(SDL_GAMEPAD_AXIS_LEFTY, true);  // SDL: down is positive; Horizon: up is positive
+        q.rx = axis(SDL_GAMEPAD_AXIS_RIGHTX, false);
+        q.ry = axis(SDL_GAMEPAD_AXIS_RIGHTY, true);
     }
-    gamepad_lock.unlock();
+    }
     // Keyboard: WASD / arrows move the stick; the 16 actions follow their bindings (defaults: Space A, Shift B, J X,
     // K Y, Q/E L/R, Z/C ZL/ZR, Enter +, Esc -, M/N stick clicks, arrows D-pad). Not while the menu has the keys.
     bool tab = false;
@@ -306,8 +349,50 @@ void sample_input() {
         if (k[SDL_SCANCODE_RSHIFT] && g_key_binding[overlay::CtlB].load() == SDL_SCANCODE_LSHIFT) p.buttons |= kB;
     }
     g_fast_forward = tab;
+    std::array<int, 4> assignments{};
+    bool manual = false;
+    for (size_t i = 0; i < 4; ++i) { assignments[i] = g_assignments[i].load(); manual |= assignments[i] != 0; }
+    if (!manual) {
+        const bool separate = g_keyboard_separate.load();
+        players[0] = p;
+        connected[0] = true;
+        for (size_t slot = 0; slot < 4; ++slot) {
+            const size_t player = slot + (separate ? 1 : 0);
+            if (player >= 4 || !pad_connected[slot]) continue;
+            player_slots[player] = int(slot); connected[player] = true;
+            players[player].buttons |= physical_pads[slot].buttons;
+            if (physical_pads[slot].lx) players[player].lx = physical_pads[slot].lx;
+            if (physical_pads[slot].ly) players[player].ly = physical_pads[slot].ly;
+            if (physical_pads[slot].rx) players[player].rx = physical_pads[slot].rx;
+            if (physical_pads[slot].ry) players[player].ry = physical_pads[slot].ry;
+        }
+    } else {
+        bool used[7]{};
+        for (int a : assignments) if (a >= 2 && a <= 6) used[a] = true;
+        for (size_t player = 0; player < 4; ++player) {
+            int a = assignments[player];
+            if (a == 0) {
+                if (!used[2]) a = 2;
+                else for (int candidate = 3; candidate <= 6; ++candidate)
+                    if (!used[candidate] && pad_connected[candidate - 3]) { a = candidate; break; }
+                if (a >= 2) used[a] = true;
+            }
+            if (a == 2) players[player] = p, connected[player] = true;
+            else if (a >= 3 && a <= 6 && pad_connected[a - 3]) {
+                players[player] = physical_pads[a - 3]; connected[player] = true; player_slots[player] = a - 3;
+            }
+        }
+    }
+    p = players[0];
     std::lock_guard lk(g_pad_lock);
     g_pad = p;
+    players[0] = p;
+    g_players = players;
+    g_player_slots = player_slots;
+    for (size_t i = 0; i < connected.size(); ++i)
+        if (g_connected[i] != connected[i])
+            log("hid: player %zu %s", i + 1, connected[i] ? "connected" : "disconnected");
+    g_connected = connected;
 }
 
 }  // namespace linux_host

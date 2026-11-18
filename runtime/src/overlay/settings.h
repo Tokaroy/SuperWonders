@@ -32,6 +32,10 @@ struct Settings {
     int language = 0;       // menu language: English, Italian, German, French, Spanish, Korean, Japanese, Arabic, Russian, Turkish, Dutch, Simplified Chinese, Traditional Chinese
     int game_language = 0;  // en-US, it, de, fr, pt-BR, es, ko, ja, nl, ru, zh-CN, zh-TW
     int memory_limit_gb = 8;
+    std::array<int, 4> player_devices{{0, 0, 0, 0}}; // 0 automatic, 1 none, 2 keyboard, 3..6 controller slots
+    std::array<std::array<int, kControlCount>, 4> pad_bindings{};
+    std::array<uint32_t, 4> pad_custom_mask{};
+    bool keyboard_separate = false;  // keyboard is player 1 and controllers start at player 2
     int controller_preset = 1;  // 1 Nintendo positions (the default, as on the Switch: A on the right), 0 Xbox / DualSense
     bool muted = false, fullscreen = false, always_on_top = false;
     bool metrics_enabled = false, low_vram_profile = false;
@@ -53,6 +57,7 @@ struct Settings {
 int default_controller_binding(size_t action, int preset);
 // The physical button an action is bound to now.
 int controller_binding(const Settings& s, size_t action);
+int controller_binding_for_slot(const Settings& s, size_t slot, size_t action);
 
 // Reads `path` over `s` (missing or invalid keys keep their value). False when there is no file.
 bool load_settings(const std::string& path, Settings& s);

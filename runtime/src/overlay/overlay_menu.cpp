@@ -655,33 +655,114 @@ void audio(MenuContext& c, const Labels& l) {
     rows::end();
 }
 
+// Multiplayer input labels and help, in the same language order as kLabels.
+struct InputText {
+    const char *separate, *separate_help, *automatic, *none, *keyboard, *offline,
+               *player, *player_help, *configure, *configure_help, *press_key;
+};
+constexpr InputText kInputText[] = {
+    {"Keyboard as separate player", "Keyboard is player 1; controllers start at player 2.", "Automatic", "None", "Keyboard", "offline", "Player", "Choose this player's input device.", "Configure controller", "Choose which controller to configure.", "Press a key..."},
+    {"Tastiera giocatore separato", "Tastiera: giocatore 1; controller: dal giocatore 2.", "Automatico", "Nessuno", "Tastiera", "non connesso", "Giocatore", "Seleziona il dispositivo assegnato al giocatore.", "Configura controller", "Scegli quale controller modificare.", "Premi un tasto..."},
+    {"Tastatur als eigener Spieler", "Tastatur: Spieler 1; Controller: ab Spieler 2.", "Automatisch", "Keines", "Tastatur", "nicht verbunden", "Spieler", "Eingabegerät für diesen Spieler wählen.", "Controller konfigurieren", "Controller zum Bearbeiten wählen.", "Taste drücken..."},
+    {"Clavier comme joueur séparé", "Clavier : joueur 1 ; manettes : à partir du joueur 2.", "Automatique", "Aucun", "Clavier", "déconnecté", "Joueur", "Choisissez le périphérique de ce joueur.", "Configurer la manette", "Choisissez la manette à modifier.", "Appuyez sur une touche..."},
+    {"Teclado como jugador independiente", "Teclado: jugador 1; mandos: desde el jugador 2.", "Automático", "Ninguno", "Teclado", "desconectado", "Jugador", "Elige el dispositivo de este jugador.", "Configurar mando", "Elige el mando que quieres modificar.", "Pulsa una tecla..."},
+    {"키보드를 별도 플레이어로", "키보드는 플레이어 1, 컨트롤러는 플레이어 2부터 사용합니다.", "자동", "없음", "키보드", "연결 안 됨", "플레이어", "이 플레이어의 입력 장치를 선택하세요.", "컨트롤러 설정", "설정할 컨트롤러를 선택하세요.", "키를 누르세요..."},
+    {"キーボードを別のプレイヤーに", "キーボードはプレイヤー1、コントローラーは2から使用します。", "自動", "なし", "キーボード", "未接続", "プレイヤー", "このプレイヤーの入力機器を選択します。", "コントローラーを設定", "設定するコントローラーを選択します。", "キーを押してください..."},
+    {"لوحة المفاتيح كلاعب منفصل", "لوحة المفاتيح للاعب الأول، ووحدات التحكم بدءاً من اللاعب الثاني.", "تلقائي", "لا شيء", "لوحة المفاتيح", "غير متصل", "اللاعب", "اختر جهاز الإدخال لهذا اللاعب.", "إعداد وحدة التحكم", "اختر وحدة التحكم التي تريد إعدادها.", "اضغط مفتاحاً..."},
+    {"Клавиатура как отдельный игрок", "Клавиатура — игрок 1, контроллеры — начиная с игрока 2.", "Автоматически", "Нет", "Клавиатура", "не подключён", "Игрок", "Выберите устройство ввода для этого игрока.", "Настроить контроллер", "Выберите контроллер для настройки.", "Нажмите клавишу..."},
+    {"Klavye ayrı oyuncu olsun", "Klavye oyuncu 1, kumandalar oyuncu 2'den başlar.", "Otomatik", "Yok", "Klavye", "bağlı değil", "Oyuncu", "Bu oyuncunun giriş cihazını seçin.", "Kumandayı yapılandır", "Yapılandırılacak kumandayı seçin.", "Bir tuşa basın..."},
+    {"Toetsenbord als aparte speler", "Toetsenbord: speler 1; controllers vanaf speler 2.", "Automatisch", "Geen", "Toetsenbord", "niet verbonden", "Speler", "Kies het invoerapparaat voor deze speler.", "Controller instellen", "Kies welke controller je wilt instellen.", "Druk op een toets..."},
+    {"键盘作为独立玩家", "键盘为玩家1，控制器从玩家2开始。", "自动", "无", "键盘", "未连接", "玩家", "选择此玩家使用的输入设备。", "配置控制器", "选择要配置的控制器。", "请按一个键..."},
+    {"鍵盤作為獨立玩家", "鍵盤為玩家1，控制器從玩家2開始。", "自動", "無", "鍵盤", "未連線", "玩家", "選擇此玩家使用的輸入裝置。", "設定控制器", "選擇要設定的控制器。", "請按一個鍵..."},
+};
+static_assert(std::size(kInputText) == std::size(kLabels));
+// Translated directional pad labels and PlayStation face-button names.
+constexpr const char* kInputDirections[13][8] = {
+    {"D-pad Left", "D-pad Up", "D-pad Right", "D-pad Down", "Cross", "Circle", "Square", "Triangle"},
+    {"Croce sinistra", "Croce su", "Croce destra", "Croce giù", "Croce", "Cerchio", "Quadrato", "Triangolo"},
+    {"Steuerkreuz links", "Steuerkreuz hoch", "Steuerkreuz rechts", "Steuerkreuz runter", "Kreuz", "Kreis", "Quadrat", "Dreieck"},
+    {"Croix gauche", "Croix haut", "Croix droite", "Croix bas", "Croix", "Cercle", "Carré", "Triangle"},
+    {"Cruceta izquierda", "Cruceta arriba", "Cruceta derecha", "Cruceta abajo", "Cruz", "Círculo", "Cuadrado", "Triángulo"},
+    {"방향키 왼쪽", "방향키 위", "방향키 오른쪽", "방향키 아래", "십자", "원", "네모", "세모"},
+    {"十字キー左", "十字キー上", "十字キー右", "十字キー下", "クロス", "サークル", "スクエア", "トライアングル"},
+    {"الاتجاه يسار", "الاتجاه أعلى", "الاتجاه يمين", "الاتجاه أسفل", "صليب", "دائرة", "مربع", "مثلث"},
+    {"Крестовина влево", "Крестовина вверх", "Крестовина вправо", "Крестовина вниз", "Крест", "Круг", "Квадрат", "Треугольник"},
+    {"Yön tuşu sol", "Yön tuşu yukarı", "Yön tuşu sağ", "Yön tuşu aşağı", "Çarpı", "Daire", "Kare", "Üçgen"},
+    {"D-pad links", "D-pad omhoog", "D-pad rechts", "D-pad omlaag", "Kruis", "Cirkel", "Vierkant", "Driehoek"},
+    {"方向键左", "方向键上", "方向键右", "方向键下", "叉", "圆", "方块", "三角"},
+    {"方向鍵左", "方向鍵上", "方向鍵右", "方向鍵下", "叉", "圓", "方塊", "三角"},
+};
+
+
 void controls(MenuContext& c, const Labels& l) {
     Settings& s = c.settings;
     const int lang = std::clamp(s.language, 0, 12);
+    const InputText& t = kInputText[lang];
     rows::begin("##controls", c.height);
     rows::section(kHeaders[lang][1]);
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (rows::toggle(t.separate, &s.keyboard_separate, false, t.separate_help)) settings_changed(true);
+    const auto device_names = plat::controller_names();
+    std::array<std::string, 4> device_labels;
+    const char* options[7] = {t.automatic, t.none, t.keyboard, nullptr, nullptr, nullptr, nullptr};
+    for (int i = 0; i < 4; ++i) {
+        device_labels[i] = "Pad " + std::to_string(i + 1) + (device_names[i].empty() ? std::string(" (") + t.offline + ")" : ": " + device_names[i]);
+        options[i + 3] = device_labels[i].c_str();
+    }
+    for (int player = 0; player < 4; ++player) {
+        char label[48]; std::snprintf(label, sizeof label, "%s %d", t.player, player + 1);
+        int old = s.player_devices[player];
+        if (rows::choice(label, &s.player_devices[player], options, 7, 0,
+                         t.player_help)) {
+            const int selected = s.player_devices[player];
+            if (selected >= 2) for (int other = 0; other < 4; ++other)
+                if (other != player && s.player_devices[other] == selected) s.player_devices[other] = old >= 2 ? old : 1;
+            settings_changed(true);
+        }
+    }
+    static int edit_slot = 0;
+    const char* slots[] = {"Pad 1", "Pad 2", "Pad 3", "Pad 4"};
+    rows::choice(t.configure, &edit_slot, slots, 4, 0, t.configure_help);
+#else
+    const int edit_slot = 0;
+#endif
     const char* presets[] = {"Xbox / DualSense", "Nintendo"};
     if (rows::choice(l.control_preset, &s.controller_preset, presets, 2, kDefaults.controller_preset, translated_desc(desc::preset, lang)))
         settings_changed(true);
     if (rows::integer(kCommon[lang][8], &s.rumble, 0, 100, 10, kDefaults.rumble, "%d%%", translated_desc(desc::rumble, lang))) settings_changed(true);
+    std::array<std::string, 4> face_labels;
+    const char* physical[kControlCount];
+    for (size_t i = 0; i < kControlCount; ++i) physical[i] = kPhysical[i];
+    constexpr const char* face_letters[] = {"A", "B", "X", "Y"};
+    for (size_t i = 0; i < 4; ++i) {
+        face_labels[i] = std::string(face_letters[i]) + " / " + kInputDirections[lang][i + 4];
+        physical[i] = face_labels[i].c_str();
+        physical[12 + i] = kInputDirections[lang][i];
+    }
     for (size_t a = 0; a < kControlCount; ++a) {
-        int phys = controller_binding(s, a);
+        int phys = controller_binding_for_slot(s, size_t(edit_slot), a);
         const int def = default_controller_binding(a, s.controller_preset);
-        char id[48];
-        std::snprintf(id, sizeof id, "%s###pad%zu", kActions[a], a);
-        if (rows::choice(id, &phys, kPhysical, int(kControlCount), def, translated_desc(desc::pad, lang))) {
-            s.controller_bindings[a] = phys;
-            s.controller_custom_mask |= 1u << a;
-            if (phys == def) s.controller_custom_mask &= ~(1u << a);
+        char id[128];
+        std::snprintf(id, sizeof id, "%s###pad%zu", a >= 12 ? kInputDirections[lang][a - 12] : kActions[a], a);
+        if (rows::choice(id, &phys, physical, int(kControlCount), def, translated_desc(desc::pad, lang))) {
+            if (edit_slot == 0) {
+                s.controller_bindings[a] = phys;
+                s.controller_custom_mask |= 1u << a;
+                if (phys == def) s.controller_custom_mask &= ~(1u << a);
+            } else {
+                s.pad_bindings[size_t(edit_slot)][a] = phys;
+                s.pad_custom_mask[size_t(edit_slot)] |= 1u << a;
+                if (phys == def) s.pad_custom_mask[size_t(edit_slot)] &= ~(1u << a);
+            }
             settings_changed(true);
         }
     }
     rows::section(kHeaders[lang][0]);
     for (size_t a = 0; a < kControlCount; ++a) {
-        char id[48];
-        std::snprintf(id, sizeof id, "%s###key%zu", kActions[a], a);
+        char id[128];
+        std::snprintf(id, sizeof id, "%s###key%zu", a >= 12 ? kInputDirections[lang][a - 12] : kActions[a], a);
         const bool waiting = c.capture_action == int(a);
-        const char* name = waiting ? "Press a key..." : c.host.key_name ? c.host.key_name(s.keyboard_bindings[a]) : "?";
+        const char* name = waiting ? t.press_key : c.host.key_name ? c.host.key_name(s.keyboard_bindings[a]) : "?";
         if (rows::action(id, name, translated_desc(desc::key, lang), true, waiting)) c.capture_action = int(a);  // overlay.cpp takes the next key
     }
     rows::page_note(s.controller_preset == 1 ? l.nintendo_desc : l.standard_desc);

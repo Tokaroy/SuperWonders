@@ -58,13 +58,18 @@ std::vector<Scripted> input_script() {
     return v;
 }
 
-PadState read() {
+PadState read(unsigned player = 0) {
     PadState p;
     static const std::vector<Scripted> script = input_script();
-    for (const auto& s : script)
-        if (g_frame >= s.frame && g_frame < s.frame + 8) p.buttons |= s.buttons;
-    read_pad(p);
-    play::pad(p);  // NX_INPUT_FRAMES / NX_INPUT_REPLAY / NX_INPUT_RECORD (play.cpp)
+    if (player == 0) {
+        for (const auto& s : script)
+            if (g_frame >= s.frame && g_frame < s.frame + 8) p.buttons |= s.buttons;
+        read_pad(p);
+        play::pad(p);
+    }
+#if defined(__linux__) && !defined(__ANDROID__)
+    else read_pad_player(player, p);
+#endif  // NX_INPUT_FRAMES / NX_INPUT_REPLAY / NX_INPUT_RECORD (play.cpp)
     // Stick directions as buttons, like the hid sysmodule reports them.
     constexpr int32_t t = kStickMax / 2;
     if (p.lx < -t) p.buttons |= kStickLLeft;
@@ -75,7 +80,7 @@ PadState read() {
     if (p.rx > t) p.buttons |= kStickRRight;
     if (p.ry > t) p.buttons |= kStickRUp;
     if (p.ry < -t) p.buttons |= kStickRDown;
-    g_last_buttons.store(p.buttons, std::memory_order_relaxed);
+    if (player == 0) g_last_buttons.store(p.buttons, std::memory_order_relaxed);
     return p;
 }
 
@@ -92,8 +97,12 @@ void GetNpadState(CPU& c) {
         std::lock_guard lk(m);
         if (seen.insert({id, hle_current_name()}).second) log("hid: reads id %#x via %s", id, hle_current_name());
     }
-    if (id != 0) return;  // only player 1 is connected
-    PadState p = read();
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (id >= 4 || !player_connected(id)) return;
+#else
+    if (id != 0) return;
+#endif
+    PadState p = read(id);
     static bool pressed = false;
     if (p.buttons && !pressed) log("hid: first buttons %llx", (unsigned long long)p.buttons), pressed = true;
     st<uint64_t>(out + 8, p.buttons);
@@ -122,15 +131,18 @@ void GetNpadStatesFullKey(CPU& c) {
         return;
     }
     static std::mutex m;
-    static std::deque<std::array<uint8_t, 0x28>> history;
+    static std::array<std::deque<std::array<uint8_t, 0x28>>, 4> histories;
     std::lock_guard lk(m);
     c.x[0] = out;
     c.x[1] = id_ref;
     GetNpadState(c);  // the new sample, into out[0]
-    if (ld<uint32_t>(id_ref) != 0) {
-        c.x[0] = 1;
-        return;
-    }
+    const uint32_t id = ld<uint32_t>(id_ref);
+    if (id >= histories.size()) { c.x[0] = 1; return; }
+#if !defined(__linux__) || defined(__ANDROID__)
+    if (id != 0) { c.x[0] = 1; return; }
+#endif
+    auto& history = histories[id];
+    if (!ld<uint32_t>(out + 32)) history.clear();
     std::array<uint8_t, 0x28> now;
     std::memcpy(now.data(), reinterpret_cast<const void*>(out), now.size());
     history.push_front(now);
@@ -180,7 +192,11 @@ void one(CPU& c) { c.x[0] = 1; }
 void GetNpadStyleSet(CPU& c) {
     static int logged = 0;
     if (logged++ < 4) log("hid: GetNpadStyleSet id %#x", ld<uint32_t>(c.x[0]));
+#if defined(__linux__) && !defined(__ANDROID__)
+    c.x[0] = player_connected(ld<uint32_t>(c.x[0])) ? kStyleFullKey : 0;
+#else
     c.x[0] = ld<uint32_t>(c.x[0]) == 0 ? kStyleFullKey : 0;
+#endif
 }
 
 void BindNpadStyleSetUpdateEvent(CPU& c) {  // (const u32& id, SystemEventType*, EventClearMode)
@@ -217,7 +233,7 @@ bool rumble_on() {
 }
 
 std::mutex g_vibration_lock;
-float g_band[2][2] = {};  // [side][low, high] amplitude
+float g_band[4][2][2] = {};  // [side][low, high] amplitude
 uint64_t g_vibration_sends = 0, g_vibration_nonzero = 0;
 
 void GetVibrationDeviceHandles(CPU& c) {  // (VibrationDeviceHandle* out, int count, const NpadIdType&, NpadStyleSet)
@@ -245,23 +261,31 @@ void GetVibrationDeviceInfo(CPU& c) {  // (VibrationDeviceInfo* out, const Vibra
 // One VibrationValue for a device (from SendVibrationValue, or hid's SendVibrationValues below).
 void vibrate(uint32_t h, uint64_t value) {
     if (!rumble_on()) return;
-    if ((h & 0xFF) != kVibrationType || (h >> 8 & 0xFF) != 0) return;  // player 1's controller only
+    const unsigned player = (h >> 8) & 0xFF;
+    if ((h & 0xFF) != kVibrationType || player >= 4) return;
+#if !defined(__linux__) || defined(__ANDROID__)
+    if (player != 0) return;
+#endif
     int side = (h >> 16 & 0xFF) ? 1 : 0;
     float amp_low = ld<float>(value), amp_high = ld<float>(value + 8);
     float low = 0, high = 0;
     {
         std::lock_guard lk(g_vibration_lock);
-        g_band[side][0] = std::clamp(amp_low, 0.0f, 1.0f);
-        g_band[side][1] = std::clamp(amp_high, 0.0f, 1.0f);
-        low = std::max(g_band[0][0], g_band[1][0]);
-        high = std::max(g_band[0][1], g_band[1][1]);
+        g_band[player][side][0] = std::clamp(amp_low, 0.0f, 1.0f);
+        g_band[player][side][1] = std::clamp(amp_high, 0.0f, 1.0f);
+        low = std::max(g_band[player][0][0], g_band[player][1][0]);
+        high = std::max(g_band[player][0][1], g_band[player][1][1]);
         g_vibration_sends++;
         if (amp_low > 0 || amp_high > 0) g_vibration_nonzero++;
         if (g_vibration_sends % 2000 == 1)
             log("hid: vibration values: %llu sent, %llu not zero", (unsigned long long)g_vibration_sends,
                 (unsigned long long)g_vibration_nonzero);
     }
+#if defined(__linux__) && !defined(__ANDROID__)
+    plat::rumble_player(player, low, high);
+#else
     plat::rumble(low, high);
+#endif
 }
 
 void SendVibrationValue(CPU& c) {  // (const VibrationDeviceHandle&, const VibrationValue&)
@@ -282,7 +306,13 @@ ServiceRegistrar r_hid("hid", [] {
     return s;
 });
 void ShowControllerSupport(CPU& c) {                     // (ControllerSupportResultInfo*, const Arg&)
-    st<int8_t>(c.x[0], 1);        // player count
+    int count = 1;
+#if defined(__linux__) && !defined(__ANDROID__)
+    const int max_players = c.x[1] ? std::clamp<int>(ld<int8_t>(c.x[1] + 1), 1, 4) : 4;
+    while (count < max_players && player_connected(unsigned(count))) ++count;
+#endif
+    log("hid: controller support selects %d players", count);
+    st<int8_t>(c.x[0], int8_t(count));
     st<uint32_t>(c.x[0] + 4, 0);  // selected npad id: No1
     c.x[0] = 0;
 }

@@ -98,7 +98,7 @@ const char kAdditionalLocalizedGlyphs[] = "简体繁體快速设置视频音频�
 const char kLauncherLocalizedGlyphs[] = "开始文件模组更新退出";
 // Korean characters used in the help descriptions as well as the menu labels.
 const char kKoreanHelpGlyphs[] = "가값강계과근꾸끄끕널넘높누느닙단당대된두듬딩록릅린묘미바번범분수습식압약없와유으은의인입있장절접줄중증직질집찢초최축충패할행확환황흐히";
-const char kAdditionalHelpGlyphs[] = "ТЧщёآあえかずせちとどなほぼみめもらりわんギザ不与丢两中为也乱会保個側儲兩关减分切利効卡即压取变可号合后和回围圍圧増壓多够夠失対将將少幀平式強强微応慢或押拡择持换接提換撕擇改数整數斜明是晰替最會板柄染案檔檻次正此毎每毫況消済減渲滑為無状现現电省码确確碼秒稍算節範糊約素細組緣縮繪细缘缩耗脑腦至與节范荷號行裂見認調請變认请调負超足軽較輪较辨边近这进选這通進遅遺邊郭释釋銳門關闭離電需頂高鮮";
+const char kAdditionalHelpGlyphs[] = "三十叉圆圓块塊字角왼향،ヤ一个从入別备家從无機独獨玩立続線自裝连連결끔됨르별연켬ТЧщёآあえかずせちとどなほぼみめもらりわんギザ不与丢两中为也乱会保個側儲兩关减分切利効卡即压取变可号合后和回围圍圧増壓多够夠失対将將少幀平式強强微応慢或押拡择持换接提換撕擇改数整數斜明是晰替最會板柄染案檔檻次正此毎每毫況消済減渲滑為無状现現电省码确確碼秒稍算節範糊約素細組緣縮繪细缘缩耗脑腦至與节范荷號行裂見認調請變认请调負超足軽較輪较辨边近这进选這通進遅遺邊郭释釋銳門關闭離電需頂高鮮";
 
 const char* const kScriptFonts[] = {
 #if defined(_WIN32)

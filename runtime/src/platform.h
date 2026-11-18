@@ -2,6 +2,7 @@
 // platform_linux.cpp implement it.
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -83,6 +84,12 @@ struct PadState {
     int32_t lx = 0, ly = 0, rx = 0, ry = 0;
 };
 void read_pad(PadState& p);  // player 1
+#if defined(__linux__) && !defined(__ANDROID__)
+std::array<std::string, 4> controller_names();
+bool player_connected(unsigned player);
+void read_pad_player(unsigned player, PadState& p);
+void rumble_player(unsigned player, float low, float high);
+#endif
 bool fast_forward();  // held: the game runs unpaced (Tab on PC; false where there is no key for it)
 // Player 1's controller rumble: low (heavy) and high (light) motor, 0..1, scaled by the player's strength setting.
 // Called on every vibration value the game sends; the platform keeps it running until the next.
