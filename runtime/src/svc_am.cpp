@@ -19,19 +19,21 @@ std::atomic<uint32_t> g_native_width{1920};  // preset 6: the window's or screen
 
 void set_internal_resolution_preset(int preset) {
     if (preset < 0) preset = 0;
-    if (preset > 6) preset = 6;
+    if (preset > 9) preset = 9;
     g_internal_resolution_preset.store(preset, std::memory_order_relaxed);
 }
 
 float internal_resolution_scale() {
-    static constexpr float scales[] = {1.0f, 2.0f / 3.0f, 5.0f / 6.0f, 1.0f, 4.0f / 3.0f, 2.0f, 0.0f};
+    // 0: original, 1: 720p, 2: 900p, 3: 1080p, 4: 1440p, 5: 2160p, 6: native, 7: 540p, 8: 480p, 9: 360p
+    static constexpr float scales[] = {1.0f, 2.0f / 3.0f, 5.0f / 6.0f, 1.0f, 4.0f / 3.0f, 2.0f, 0.0f,
+                                       0.5f, 854.0f / 1920.0f, 1.0f / 3.0f};
     const int p = g_internal_resolution_preset.load(std::memory_order_relaxed);
     return p == 6 ? float(g_native_width.load(std::memory_order_relaxed)) / 1920.0f : scales[p];
 }
 
 uint32_t internal_resolution_target_width() {
-    // 5: 3840 (4K); 6: Native, the width the image is shown at (no stretching, so no upscaling filter).
-    static constexpr uint32_t widths[] = {0, 1280, 1600, 1920, 2560, 3840, 0};
+    // 5: 3840 (4K); 6: Native; 7..9: 540p, 480p, 360p (appended to preserve saved 0..6 indices).
+    static constexpr uint32_t widths[] = {0, 1280, 1600, 1920, 2560, 3840, 0, 960, 854, 640};
     const int p = g_internal_resolution_preset.load(std::memory_order_relaxed);
     return p == 6 ? g_native_width.load(std::memory_order_relaxed) : widths[p];
 }
@@ -109,8 +111,8 @@ std::shared_ptr<Service> common_state_getter() {
         s.cmds[9] = [](IpcCtx& c) { c.push<uint8_t>(1); return 0u; };   // GetCurrentFocusState: in focus
         s.cmds[60] = [](IpcCtx& c) {  // GetDefaultDisplayResolution
             const int preset = g_internal_resolution_preset.load(std::memory_order_relaxed);
-            static constexpr uint32_t widths[] = {1920, 1280, 1600, 1920, 2560, 3840, 0};
-            static constexpr uint32_t heights[] = {1080, 720, 900, 1080, 1440, 2160, 0};
+            static constexpr uint32_t widths[] = {1920, 1280, 1600, 1920, 2560, 3840, 0, 960, 854, 640};
+            static constexpr uint32_t heights[] = {1080, 720, 900, 1080, 1440, 2160, 0, 540, 480, 360};
             uint32_t width = preset ? widths[preset] : handheld ? 1280 : 1920;
             const uint32_t height = preset ? heights[preset] : handheld ? 720 : 1080;
             // Optional Hor+ experiment: widen guest-side culling/camera resolution to match the host aspect ratio.

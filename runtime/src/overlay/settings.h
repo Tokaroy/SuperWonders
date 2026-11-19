@@ -27,8 +27,10 @@ enum Physical : int {
 struct Settings {
     int width = 1280, height = 720;
     int aspect_ratio = 0;  // 0 original, 1 21:9, 2 32:9
-    int internal_resolution = 0;  // svc_am.cpp presets: 0 original/dynamic, 720p, 900p, 1080p, 1440p, 2160p, 6 native
+    int internal_resolution = 0;  // svc_am.cpp presets: 0 original/dynamic, 1..5 720p..2160p, 6 native, 7 540p, 8 480p, 9 360p
     int volume = 100;
+    int audio_mode = 0;         // 0 Stereo, 1 Mono, 2 5.1 Surround (PCM)
+    int stereo_separation = 100;  // 0..100% (used in Stereo mode)
     int language = 0;       // menu language: English, Italian, German, French, Spanish, Korean, Japanese, Arabic, Russian, Turkish, Dutch, Simplified Chinese, Traditional Chinese
     int game_language = 0;  // en-US, it, de, fr, pt-BR, es, ko, ja, nl, ru, zh-CN, zh-TW
     int memory_limit_gb = 8;
@@ -58,6 +60,35 @@ int default_controller_binding(size_t action, int preset);
 // The physical button an action is bound to now.
 int controller_binding(const Settings& s, size_t action);
 int controller_binding_for_slot(const Settings& s, size_t slot, size_t action);
+
+// Window size presets per aspect ratio (0: 16:9, 1: 21:9, 2: 32:9).
+inline constexpr int kWindowSizesByAspect[3][4][2] = {
+    {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}},
+    {{1706, 720}, {2134, 900}, {2560, 1080}, {3440, 1440}},
+    {{2560, 720}, {3200, 900}, {3840, 1080}, {5120, 1440}},
+};
+
+inline void adjust_window_size_for_aspect(int new_aspect, int& width, int& height) {
+    const int dst = new_aspect < 0 ? 0 : new_aspect > 2 ? 2 : new_aspect;
+    for (int a = 0; a < 3; ++a) {
+        for (int i = 0; i < 4; ++i) {
+            if (kWindowSizesByAspect[a][i][0] == width && kWindowSizesByAspect[a][i][1] == height) {
+                width = kWindowSizesByAspect[dst][i][0];
+                height = kWindowSizesByAspect[dst][i][1];
+                return;
+            }
+        }
+    }
+    if (height > 0) {
+        const int num = dst == 1 ? 64 : dst == 2 ? 32 : 16;
+        const int den = dst == 1 ? 27 : 9;
+        int w = (height * num + den / 2) / den;
+        w &= ~1;
+        if (w < 640) w = 640;
+        if (w > 7680) w = 7680;
+        width = w;
+    }
+}
 
 // Reads `path` over `s` (missing or invalid keys keep their value). False when there is no file.
 bool load_settings(const std::string& path, Settings& s);

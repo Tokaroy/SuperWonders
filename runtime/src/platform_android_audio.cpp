@@ -85,7 +85,7 @@ aaudio_data_callback_result_t audio_cb(AAudioStream*, void*, void* out, int32_t 
 }
 }  // namespace
 
-bool audio_open(AudioDone done) {
+bool audio_open(AudioDone done, int) {
     g_done = done;
     AAudioStreamBuilder* b = nullptr;
     if (AAudio_createStreamBuilder(&b) != AAUDIO_OK) return false;

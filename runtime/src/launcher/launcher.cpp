@@ -894,11 +894,25 @@ void page_settings() {
     rows::begin("##settings", ImGui::GetContentRegionAvail().y);
     rows::section(lt(LtSettings));
     const bool open_profiles = rows::action("Profiles", "", "Create and select local profiles and set their names or JPEG icons.", true);
-    const char* aspect_names[] = {"16:9 (original)", "21:9", "32:9"};
-    const bool italian = overlay::menu_language() == 1;
-    const char* aspect_desc = italian ? "Si applica al prossimo avvio del gioco." : "Takes effect the next time the game starts.";
+    static constexpr const char* kAspectText[13][3] = {
+        {"Aspect ratio", "Takes effect the next time the game starts.", "16:9 (original)"},
+        {"Formato schermo", "Si applica al prossimo avvio del gioco.", "16:9 (originale)"},
+        {"Seitenverhältnis", "Wird beim nächsten Spielstart wirksam.", "16:9 (Original)"},
+        {"Format d'image", "S'applique au prochain lancement du jeu.", "16:9 (original)"},
+        {"Relación de aspecto", "Se aplica la próxima vez que inicie el juego.", "16:9 (original)"},
+        {"화면 비율", "게임을 다시 시작하면 적용됩니다.", "16:9 (원본)"},
+        {"アスペクト比", "次回ゲーム起動時に適用されます。", "16:9 (オリジナル)"},
+        {"نسبة العرض إلى الارتفاع", "يتم تطبيقه عند تشغيل اللعبة في المرة القادمة.", "16:9 (أصلي)"},
+        {"Соотношение сторон", "Вступит в силу при следующем запуске игры.", "16:9 (оригинал)"},
+        {"En-boy oranı", "Oyun bir sonraki başlatıldığında geçerli olur.", "16:9 (özgün)"},
+        {"Beeldverhouding", "Wordt toegepast bij de volgende keer dat het spel start.", "16:9 (origineel)"},
+        {"画面比例", "将在下次启动游戏时生效。", "16:9 (原始)"},
+        {"畫面比例", "將在下次啟動遊戲時生效。", "16:9 (原始)"},
+    };
+    const int lang = std::clamp(overlay::menu_language(), 0, 12);
+    const char* aspect_names[] = {kAspectText[lang][2], "21:9", "32:9"};
     int aspect = overlay::aspect_ratio();
-    if (rows::choice(italian ? "Formato schermo" : "Aspect ratio", &aspect, aspect_names, 3, 0, aspect_desc))
+    if (rows::choice(kAspectText[lang][0], &aspect, aspect_names, 3, 0, kAspectText[lang][1]))
         overlay::set_aspect_ratio(aspect);
     if (rows::action(lt(LtOpenSettings), "", "Display, graphics, audio, controls and the overlay: the same settings as "
                                           "the in-game menu (F1, or Minus + Plus held). Saved in pc-settings.ini.",

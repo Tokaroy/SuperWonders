@@ -369,14 +369,14 @@ void SDLCALL audio_cb(void*, SDL_AudioStream* s, int additional, int) {
 }
 }  // namespace
 
-bool audio_open(AudioDone done) {
+bool audio_open(AudioDone done, int channels) {
     g_done = done;
     // Headless test runs (and NX_MUTE=1) are silent: no device, the callers pace themselves with a timer.
     if (headless() || std::getenv("NX_MUTE")) return false;
-    SDL_AudioSpec spec{SDL_AUDIO_S16LE, 2, 48000};
+    SDL_AudioSpec spec{SDL_AUDIO_S16LE, channels == 6 ? 6 : 2, 48000};
     g_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, audio_cb, nullptr);
     if (!g_stream) {
-        log("audio: no device (%s)", SDL_GetError());
+        log("audio: no %d-ch device (%s)", spec.channels, SDL_GetError());
         return false;
     }
     SDL_ResumeAudioStreamDevice(g_stream);
