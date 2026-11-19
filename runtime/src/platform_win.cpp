@@ -468,7 +468,9 @@ static void load_pc_settings() {
         g_pc_settings.game_language = 0;
     if (g_pc_settings.aspect_ratio >= 0) {
         const int ratio = g_pc_settings.aspect_ratio;
-        if (g_pc_settings.width > 0)
+        const double target_aspect = ratio == 1 ? (64.0 / 27.0) : ratio == 2 ? (32.0 / 9.0) : (16.0 / 9.0);
+        const double current_aspect = g_pc_settings.height > 0 ? double(g_pc_settings.width) / double(g_pc_settings.height) : 0.0;
+        if (g_pc_settings.width > 0 && std::fabs(current_aspect - target_aspect) / target_aspect > 0.03)
             g_pc_settings.height = std::max(360, ratio == 1 ? g_pc_settings.width * 27 / 64 :
                                                   ratio == 2 ? g_pc_settings.width * 9 / 32 :
                                                                g_pc_settings.width * 9 / 16);

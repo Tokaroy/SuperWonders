@@ -116,7 +116,6 @@ constexpr const char* kInternal[13][10] = {
     {"原始 / 动态", "640 x 360", "854 x 480", "960 x 540", "1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160", "屏幕原生"},
     {"原始 / 動態", "640 x 360", "854 x 480", "960 x 540", "1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160", "螢幕原生"},
 };
-constexpr int kSizes[][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
 constexpr const char* kOverlayLabels[13][6] = {
     {"Metrics overlay", "FPS", "1% lows", "Game speed", "Frametime graph", "Overlay position"},
     {"Overlay metriche", "FPS", "Minimi 1%", "Velocità gioco", "Grafico frametime", "Posizione overlay"},
@@ -587,21 +586,31 @@ void video(MenuContext& c, const Labels& l) {
     const char* aspect_label = lang == 1 ? "Formato schermo" : "Aspect ratio";
     const char* aspect_desc = lang == 1 ? "Si applica al prossimo avvio del gioco." : "Takes effect the next time the game starts.";
     if (rows::choice(aspect_label, &aspect, aspect_names, 3, 0, aspect_desc)) {
+        adjust_window_size_for_aspect(aspect, s.width, s.height);
         s.aspect_ratio = aspect;
         settings_changed(true);
         ui::notify(aspect_desc);
     }
-    // the window's size: one of four, or the size it has now (dragged) as a fifth
-    const char* sizes[5] = {"1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", nullptr};
+    // the window's size: four presets matching the selected aspect ratio, or the current custom size as a fifth
+    const int aspect_idx = std::clamp(s.aspect_ratio, 0, 2);
+    char preset_labels[4][24];
+    const char* sizes[5] = {};
     char custom[32];
     int size = -1;
-    for (int i = 0; i < 4; ++i)
-        if (kSizes[i][0] == s.width && kSizes[i][1] == s.height) size = i;
+    for (int i = 0; i < 4; ++i) {
+        const int pw = kWindowSizesByAspect[aspect_idx][i][0];
+        const int ph = kWindowSizesByAspect[aspect_idx][i][1];
+        std::snprintf(preset_labels[i], sizeof preset_labels[i], "%d x %d", pw, ph);
+        sizes[i] = preset_labels[i];
+        if (pw == s.width && ph == s.height) size = i;
+    }
     int n = 4;
     if (size < 0) std::snprintf(custom, sizeof custom, "%d x %d", s.width, s.height), sizes[4] = custom, size = 4, n = 5;
     if (!c.host.can_resize || s.fullscreen) rows::disable_next();
     if (rows::choice(l.window_size, &size, sizes, n, 0, translated_desc(desc::window_size, lang)) && size < 4)
-        s.width = kSizes[size][0], s.height = kSizes[size][1], settings_changed(true);
+        s.width = kWindowSizesByAspect[aspect_idx][size][0],
+        s.height = kWindowSizesByAspect[aspect_idx][size][1],
+        settings_changed(true);
     if (rows::toggle(l.fullscreen, &s.fullscreen, kDefaults.fullscreen, translated_desc(desc::fullscreen, lang))) settings_changed(true);
     if (!c.host.can_always_on_top) rows::disable_next();
     if (rows::toggle(l.topmost, &s.always_on_top, kDefaults.always_on_top, translated_desc(desc::topmost, lang))) settings_changed(true);
