@@ -408,7 +408,7 @@ static void load_pc_settings() {
         if (std::sscanf(line.c_str(), "width=%d", &value) == 1 && value >= 640 && value <= 7680) g_pc_settings.width = value;
         else if (std::sscanf(line.c_str(), "height=%d", &value) == 1 && value >= 360 && value <= 4320) g_pc_settings.height = value;
         else if (std::sscanf(line.c_str(), "aspect_ratio=%d", &value) == 1) g_pc_settings.aspect_ratio = std::clamp(value, 0, 2);
-        else if (std::sscanf(line.c_str(), "internal_resolution=%d", &value) == 1) g_pc_settings.internal_resolution = std::clamp(value, 0, 6);
+        else if (std::sscanf(line.c_str(), "internal_resolution=%d", &value) == 1) g_pc_settings.internal_resolution = std::clamp(value, 0, 9);
         else if (std::sscanf(line.c_str(), "volume=%d", &value) == 1) g_pc_settings.volume = std::clamp(value, 0, 200);
         else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) g_pc_settings.muted = value != 0;
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) g_pc_settings.fullscreen = value != 0;
@@ -698,7 +698,7 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings.width = std::clamp(g_pc_settings.width, 640, 7680);
     g_pc_settings.height = std::clamp(g_pc_settings.height, 360, 4320);
     g_pc_settings.volume = std::clamp(g_pc_settings.volume, 0, 200);
-    g_pc_settings.internal_resolution = std::clamp(g_pc_settings.internal_resolution, 0, 6);
+    g_pc_settings.internal_resolution = std::clamp(g_pc_settings.internal_resolution, 0, 9);
     g_pc_settings.language = std::clamp(g_pc_settings.language, 0, 12);
     g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 11);
     g_pc_settings.memory_limit_gb = std::clamp(g_pc_settings.memory_limit_gb, 2, 32);

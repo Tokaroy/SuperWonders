@@ -25,20 +25,21 @@ constexpr int kLanguageTop = 31;
 constexpr int kLanguageBottom = 66;
 constexpr int kLanguageItemHeight = 27;
 constexpr int kResolution[][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
-constexpr const wchar_t* kInternalResolution[13][7] = {
-    {L"Original / Dynamic", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Native (screen)"},
-    {L"Originale / dinamica", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativa (schermo)"},
-    {L"Original / Dynamisch", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativ (Bildschirm)"},
-    {L"Originale / dynamique", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Native (écran)"},
-    {L"Original / dinámico", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativa (pantalla)"},
-    {L"원본 / 동적", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"네이티브 (화면)"},
-    {L"オリジナル / 動的", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"ネイティブ (画面)"},
-    {L"أصلية / ديناميكية", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"أصلية (الشاشة)"},
-    {L"Исходное / динамическое", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Экранное"},
-    {L"Özgün / Dinamik", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Doğal (ekran)"},
-    {L"Origineel / dynamisch", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Schermresolutie"},
-    {L"原始 / 动态", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"屏幕原生"},
-    {L"原始 / 動態", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"螢幕原生"},
+constexpr int kInternalOrder[10] = {0, 9, 8, 7, 1, 2, 3, 4, 5, 6};
+constexpr const wchar_t* kInternalResolution[13][10] = {
+    {L"Original / Dynamic", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Native (screen)"},
+    {L"Originale / dinamica", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativa (schermo)"},
+    {L"Original / Dynamisch", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativ (Bildschirm)"},
+    {L"Originale / dynamique", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Native (écran)"},
+    {L"Original / dinámico", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Nativa (pantalla)"},
+    {L"원본 / 동적", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"네이티브 (화면)"},
+    {L"オリジナル / 動的", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"ネイティブ (画面)"},
+    {L"أصلية / ديناميكية", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"أصلية (الشاشة)"},
+    {L"Исходное / динамическое", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Экранное"},
+    {L"Özgün / Dinamik", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Doğal (ekran)"},
+    {L"Origineel / dynamisch", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"Schermresolutie"},
+    {L"原始 / 动态", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"屏幕原生"},
+    {L"原始 / 動態", L"640 x 360", L"854 x 480", L"960 x 540", L"1280 x 720", L"1600 x 900", L"1920 x 1080", L"2560 x 1440", L"3840 x 2160", L"螢幕原生"},
 };
 constexpr const wchar_t* kLanguageNames[] = {L"English", L"Italiano", L"Deutsch", L"Français", L"Español", L"한국어", L"日本語", L"العربية", L"Русский", L"Türkçe", L"Nederlands", L"简体中文", L"繁體中文"};
 constexpr const wchar_t* kGameLanguageNames[] = {
@@ -242,8 +243,10 @@ void paint_video(HDC dc) {
     paint_arrow(dc, 183, resolution);
 
     paint_text(dc, text.internal_resolution, RECT{44, 235, 385, 263}, RGB(214, 222, 238), 16);
-    paint_arrow(dc, 270, kInternalResolution[std::clamp(g_state.language, 0, 12)]
-                                           [std::clamp(g_state.internal_resolution, 0, 6)]);
+    int internal_ui = 0;
+    for (int i = 0; i < 10; ++i)
+        if (kInternalOrder[i] == g_state.internal_resolution) internal_ui = i;
+    paint_arrow(dc, 270, kInternalResolution[std::clamp(g_state.language, 0, 12)][internal_ui]);
 
     paint_text(dc, text.frame_cap, RECT{44, 300, 385, 328}, RGB(214, 222, 238), 16);
     wchar_t cap[32];
@@ -611,8 +614,12 @@ LRESULT CALLBACK menu_proc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                 g_state.height = kResolution[current][1];
                 notify(true);
             } else if (g_section == Section::Video && y >= 270 && y <= 302 && x >= 416 && x <= 504) {
-                const int count = int(std::size(kInternalResolution[0]));
-                g_state.internal_resolution = (g_state.internal_resolution + (x < 460 ? count - 1 : 1)) % count;
+                const int count = int(std::size(kInternalOrder));
+                int current = 0;
+                for (int i = 0; i < count; ++i)
+                    if (kInternalOrder[i] == g_state.internal_resolution) current = i;
+                current = (current + (x < 460 ? count - 1 : 1)) % count;
+                g_state.internal_resolution = kInternalOrder[current];
                 notify(true);
             } else if (g_section == Section::Video && y >= 332 && y <= 364 && x >= 416 && x <= 504) {
                 int index = 1;
