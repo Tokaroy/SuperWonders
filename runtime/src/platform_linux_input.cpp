@@ -82,6 +82,7 @@ void apply_settings(const overlay::Settings& s, bool persist) {
                                           : float(percent) / 100.0f;
         SDL_SetAudioStreamGain(g_stream, s.muted ? 0.0f : gain);
     }
+    nx::set_audio_output(s.audio_mode, s.stereo_separation);
     nx::set_internal_resolution_preset(s.internal_resolution);  // read at the next boot
     nx::set_game_language(s.game_language);
     set_memory_limit_gb(s.memory_limit_gb);

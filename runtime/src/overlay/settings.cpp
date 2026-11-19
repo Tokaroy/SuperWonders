@@ -44,6 +44,8 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "aspect_ratio=%d", &v) == 1) s.aspect_ratio = std::clamp(v, 0, 2);
         else if (std::sscanf(l, "internal_resolution=%d", &v) == 1) s.internal_resolution = std::clamp(v, 0, 9);
         else if (std::sscanf(l, "volume=%d", &v) == 1) s.volume = std::clamp(v, 0, 200);
+        else if (std::sscanf(l, "audio_mode=%d", &v) == 1) s.audio_mode = std::clamp(v, 0, 2);
+        else if (std::sscanf(l, "stereo_separation=%d", &v) == 1) s.stereo_separation = std::clamp(v, 0, 100);
         else if (std::sscanf(l, "muted=%d", &v) == 1) s.muted = v != 0;
         else if (std::sscanf(l, "fullscreen=%d", &v) == 1) s.fullscreen = v != 0;
         else if (std::sscanf(l, "always_on_top=%d", &v) == 1) s.always_on_top = v != 0;
@@ -96,6 +98,7 @@ void save_settings(const std::string& path, const Settings& s) {
     std::ofstream f(path, std::ios::trunc);
     if (!f) return;
     f << "width=" << s.width << "\nheight=" << s.height << "\nvolume=" << s.volume
+      << "\naudio_mode=" << s.audio_mode << "\nstereo_separation=" << s.stereo_separation
       << "\naspect_ratio=" << std::max(0, s.aspect_ratio)
       << "\ninternal_resolution=" << s.internal_resolution << "\nmuted=" << s.muted << "\nfullscreen=" << s.fullscreen
       << "\nalways_on_top=" << s.always_on_top << "\nlanguage=" << s.language << "\ngame_language=" << s.game_language

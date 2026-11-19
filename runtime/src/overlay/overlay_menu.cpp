@@ -581,10 +581,25 @@ void video(MenuContext& c, const Labels& l) {
     const int lang = std::clamp(s.language, 0, 12);
     rows::begin("##video", c.height);
     rows::section(kCommon[lang][0]);
-    const char* aspect_names[] = {"16:9 (original)", "21:9", "32:9"};
+    constexpr const char* kAspectText[13][3] = {
+        {"Aspect ratio", "Takes effect the next time the game starts.", "16:9 (original)"},
+        {"Formato schermo", "Si applica al prossimo avvio del gioco.", "16:9 (originale)"},
+        {"Seitenverhältnis", "Wird beim nächsten Spielstart wirksam.", "16:9 (Original)"},
+        {"Format d'image", "S'applique au prochain lancement du jeu.", "16:9 (original)"},
+        {"Relación de aspecto", "Se aplica la próxima vez que inicie el juego.", "16:9 (original)"},
+        {"화면 비율", "게임을 다시 시작하면 적용됩니다.", "16:9 (원본)"},
+        {"アスペクト比", "次回ゲーム起動時に適用されます。", "16:9 (オリジナル)"},
+        {"نسبة العرض إلى الارتفاع", "يتم تطبيقه عند تشغيل اللعبة في المرة القادمة.", "16:9 (أصلي)"},
+        {"Соотношение сторон", "Вступит в силу при следующем запуске игры.", "16:9 (оригинал)"},
+        {"En-boy oranı", "Oyun bir sonraki başlatıldığında geçerli olur.", "16:9 (özgün)"},
+        {"Beeldverhouding", "Wordt toegepast bij de volgende keer dat het spel start.", "16:9 (origineel)"},
+        {"画面比例", "将在下次启动游戏时生效。", "16:9 (原始)"},
+        {"畫面比例", "將在下次啟動遊戲時生效。", "16:9 (原始)"},
+    };
+    const char* aspect_names[] = {kAspectText[lang][2], "21:9", "32:9"};
     int aspect = std::max(0, s.aspect_ratio);
-    const char* aspect_label = lang == 1 ? "Formato schermo" : "Aspect ratio";
-    const char* aspect_desc = lang == 1 ? "Si applica al prossimo avvio del gioco." : "Takes effect the next time the game starts.";
+    const char* aspect_label = kAspectText[lang][0];
+    const char* aspect_desc = kAspectText[lang][1];
     if (rows::choice(aspect_label, &aspect, aspect_names, 3, 0, aspect_desc)) {
         adjust_window_size_for_aspect(aspect, s.width, s.height);
         s.aspect_ratio = aspect;
@@ -660,6 +675,63 @@ void audio(MenuContext& c, const Labels& l) {
     rows::section(l.audio);
     if (rows::integer(l.volume, &s.volume, 0, 200, 5, kDefaults.volume, "%d%%", translated_desc(desc::volume, lang))) settings_changed(true);
     if (rows::toggle(l.mute, &s.muted, kDefaults.muted, translated_desc(desc::mute, lang))) settings_changed(true);
+    constexpr const char* kAudioOutText[13][8] = {
+        {"Audio output", "Stereo, Mono (same mix on both speakers), or 5.1 PCM Surround (5.1 requires a restart).",
+         "Restart the game to apply 5.1 output.", "Stereo", "Mono", "5.1 Surround (PCM)",
+         "Stereo separation", "Controls how wide sound effects are panned between left and right speakers."},
+        {"Uscita audio", "Stereo, Mono (stesso audio su entrambe le casse) o 5.1 Surround PCM (richiede riavvio).",
+         "Riavvia il gioco per applicare il 5.1.", "Stereo", "Mono", "5.1 Surround (PCM)",
+         "Separazione stereo", "Riduce quanto gli effetti sonori vengono spostati solo su una cassa."},
+        {"Audioausgabe", "Stereo, Mono (gleicher Ton auf beiden Lautsprechern) oder 5.1 PCM Surround (erfordert Neustart).",
+         "Starte das Spiel neu, um 5.1 anzuwenden.", "Stereo", "Mono", "5.1 Surround (PCM)",
+         "Stereotrennung", "Regelt, wie stark Soundeffekte zwischen links und rechts verteilt werden."},
+        {"Sortie audio", "Stéréo, Mono (même son des deux côtés) ou Surround 5.1 PCM (redémarrage requis pour le 5.1).",
+         "Redémarrez le jeu pour appliquer le 5.1.", "Stéréo", "Mono", "Surround 5.1 (PCM)",
+         "Séparation stéréo", "Règle l'amplitude de la spatialisation gauche-droite des effets sonores."},
+        {"Salida de audio", "Estéreo, Mono (misma mezcla en ambos altavoces) o 5.1 PCM Surround (requiere reiniciar).",
+         "Reinicia el juego para aplicar la salida 5.1.", "Estéreo", "Mono", "5.1 Surround (PCM)",
+         "Separación estéreo", "Controla qué tanto se distribuyen los efectos entre izquierda y derecha."},
+        {"오디오 출력", "스테레오, 모노(양쪽 스피커 동일 출력), 또는 5.1 PCM 서라운드(5.1은 재시작 필요).",
+         "5.1 출력을 적용하려면 게임을 다시 시작하세요.", "스테레오", "모노", "5.1 서라운드 (PCM)",
+         "스테레오 분리도", "효과음이 좌우 스피커로 퍼지는 폭을 조절합니다."},
+        {"オーディオ出力", "ステレオ、モノラル（左右同じ音）、または 5.1ch PCM サラウンド（5.1ch は再起動が必要）。",
+         "5.1ch 出力を適用するにはゲームを再起動してください。", "ステレオ", "モノラル", "5.1ch サラウンド (PCM)",
+         "ステレオ分離", "効果音の左右の広がり具合を調整します。"},
+        {"إخراج الصوت", "ستيريو، أحادي (نفس الصوت في السماعتين)، أو محيطي 5.1 PCM (يتطلب إعادة التشغيل).",
+         "أعد تشغيل اللعبة لتطبيق إخراج 5.1.", "ستيريو", "أحادي", "محيطي 5.1 (PCM)",
+         "فصل الستيريو", "يتحكم في مدى توزيع المؤثرات الصوتية بين السماعة اليسرى واليمنى."},
+        {"Вывод звука", "Стерео, Моно (одинаковый звук в обоих каналах) или 5.1 PCM Surround (нужен перезапуск).",
+         "Перезапустите игру для применения 5.1.", "Стерео", "Моно", "5.1 Surround (PCM)",
+         "Разделение стерео", "Регулирует ширину панорамирования эффектов между левым и правым каналами."},
+        {"Ses çıkışı", "Stereo, Mono (iki hoparlörde aynı ses) veya 5.1 PCM Surround (yeniden başlatma gerekir).",
+         "5.1 çıkışı uygulamak için oyunu yeniden başlatın.", "Stereo", "Mono", "5.1 Surround (PCM)",
+         "Stereo ayrımı", "Ses efektlerinin sol ve sağ hoparlörler arasındaki yayılımını ayarlar."},
+        {"Audio-uitvoer", "Stereo, Mono (gelijk geluid op beide speakers) of 5.1 PCM Surround (herstart vereist voor 5.1).",
+         "Herstart het spel om 5.1-uitvoer toe te passen.", "Stereo", "Mono", "5.1 Surround (PCM)",
+         "Stereoscheiding", "Bepaalt hoe breed geluidseffecten tussen links en rechts worden verdeeld."},
+        {"音频输出", "立体声、单声道（左右声道相同）或 5.1 PCM 环绕声（5.1 需要重启）。",
+         "重启游戏以应用 5.1 输出。", "立体声", "单声道", "5.1 环绕声 (PCM)",
+         "立体声分离度", "控制音效在左右声道之间的声像宽度。"},
+        {"音訊輸出", "立體聲、單聲道（左右聲道相同）或 5.1 PCM 環繞聲（5.1 需要重新啟動）。",
+         "重新啟動遊戲以套用 5.1 輸出。", "立體聲", "單聲道", "5.1 環繞聲 (PCM)",
+         "立體聲分離度", "控制音效在左右聲道之間的聲像寬度。"},
+    };
+    const char* audio_modes[] = {kAudioOutText[lang][3], kAudioOutText[lang][4], kAudioOutText[lang][5]};
+    const char* mode_label = kAudioOutText[lang][0];
+    const char* mode_desc = kAudioOutText[lang][1];
+    const int prev_mode = s.audio_mode;
+    if (rows::choice(mode_label, &s.audio_mode, audio_modes, 3, kDefaults.audio_mode, mode_desc)) {
+        settings_changed(true);
+        if ((prev_mode == 2) != (s.audio_mode == 2))
+            ui::notify(kAudioOutText[lang][2]);
+    }
+    rows::indent(1);
+    if (s.audio_mode != 0) rows::disable_next();
+    const char* sep_label = kAudioOutText[lang][6];
+    const char* sep_desc = kAudioOutText[lang][7];
+    if (rows::integer(sep_label, &s.stereo_separation, 0, 100, 5, kDefaults.stereo_separation, "%d%%", sep_desc))
+        settings_changed(true);
+    rows::indent(-1);
     rows::section(l.game_language);
     if (rows::choice(l.game_language, &s.game_language, kGameLanguageNames, int(std::size(kGameLanguageNames)),
                      kDefaults.game_language, translated_desc(desc::game_language, lang)))

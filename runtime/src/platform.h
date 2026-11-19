@@ -131,9 +131,9 @@ uint64_t memguard_overlap_ns(uint64_t from, uint64_t to);
 void thread_counters(uint64_t& cpu_ns, long faults[2], long switches[2]);
 void input_script(PadState& p);  // NX_INPUT_SCRIPT presses (input_script.cpp), for unattended runs
 
-// Audio: s16 stereo 48 kHz. `done` is called (on any thread) when a submitted buffer has been played.
+// Audio: s16 48 kHz (2 channels stereo, or 6 channels 5.1 PCM). `done` is called when a submitted buffer has been played.
 using AudioDone = void (*)(void* ctx);
-bool audio_open(AudioDone done);
+bool audio_open(AudioDone done, int channels = 2);
 bool audio_submit(const void* data, size_t bytes, void* ctx);  // false: no device (caller paces itself)
 uint32_t audio_queued();
 void audio_pause(bool paused);  // app in the background
@@ -145,3 +145,7 @@ const char* vulkan_surface_extension();
 int vulkan_create_surface(void* instance, void* native_window, uint64_t* surface, void* gipa);
 
 }  // namespace nx::plat
+
+namespace nx {
+void set_audio_output(int mode, int stereo_separation);  // mode: 0 Stereo, 1 Mono, 2 5.1 Surround (PCM)
+}  // namespace nx

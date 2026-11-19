@@ -249,6 +249,7 @@ static void metrics_reposition();
 static overlay::Settings to_overlay(const PcMenuState& s) {
     overlay::Settings o;
     o.width = s.width, o.height = s.height, o.aspect_ratio = s.aspect_ratio, o.internal_resolution = s.internal_resolution, o.volume = s.volume;
+    o.audio_mode = s.audio_mode, o.stereo_separation = s.stereo_separation;
     o.language = s.language, o.game_language = s.game_language, o.memory_limit_gb = s.memory_limit_gb;
     o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask;
     o.keyboard_separate = s.keyboard_separate;
@@ -267,6 +268,7 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
 static PcMenuState from_overlay(const overlay::Settings& o) {
     PcMenuState s = g_pc_settings;
     s.width = o.width, s.height = o.height, s.aspect_ratio = o.aspect_ratio, s.internal_resolution = o.internal_resolution, s.volume = o.volume;
+    s.audio_mode = o.audio_mode, s.stereo_separation = o.stereo_separation;
     s.language = o.language, s.game_language = o.game_language, s.memory_limit_gb = o.memory_limit_gb;
     s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask;
     s.keyboard_separate = o.keyboard_separate;
@@ -367,6 +369,7 @@ static void save_pc_settings() {
     std::ofstream file(data_root() + "/pc-settings.ini", std::ios::trunc);
     if (!file) return;
     file << "width=" << g_pc_settings.width << "\nheight=" << g_pc_settings.height << "\nvolume=" << g_pc_settings.volume
+         << "\naudio_mode=" << g_pc_settings.audio_mode << "\nstereo_separation=" << g_pc_settings.stereo_separation
          << "\naspect_ratio=" << std::max(0, g_pc_settings.aspect_ratio)
          << "\ninternal_resolution=" << g_pc_settings.internal_resolution << "\nmuted=" << g_pc_settings.muted << "\nfullscreen=" << g_pc_settings.fullscreen
          << "\nalways_on_top=" << g_pc_settings.always_on_top << "\nlanguage=" << g_pc_settings.language
@@ -410,6 +413,9 @@ static void load_pc_settings() {
         else if (std::sscanf(line.c_str(), "aspect_ratio=%d", &value) == 1) g_pc_settings.aspect_ratio = std::clamp(value, 0, 2);
         else if (std::sscanf(line.c_str(), "internal_resolution=%d", &value) == 1) g_pc_settings.internal_resolution = std::clamp(value, 0, 9);
         else if (std::sscanf(line.c_str(), "volume=%d", &value) == 1) g_pc_settings.volume = std::clamp(value, 0, 200);
+        else if (std::sscanf(line.c_str(), "audio_mode=%d", &value) == 1) g_pc_settings.audio_mode = std::clamp(value, 0, 2);
+        else if (std::sscanf(line.c_str(), "stereo_separation=%d", &value) == 1)
+            g_pc_settings.stereo_separation = std::clamp(value, 0, 100);
         else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) g_pc_settings.muted = value != 0;
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) g_pc_settings.fullscreen = value != 0;
         else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) g_pc_settings.always_on_top = value != 0;
@@ -483,6 +489,7 @@ static void load_pc_settings() {
         for (const char* flag : flags) _putenv_s(flag, ratio ? "1" : "0");
     }
     nx::set_internal_resolution_preset(g_pc_settings.internal_resolution);
+    nx::set_audio_output(g_pc_settings.audio_mode, g_pc_settings.stereo_separation);
     nx::set_game_language(g_pc_settings.game_language);
     apply_input_bindings(g_pc_settings);
     set_memory_limit_gb(g_pc_settings.memory_limit_gb);
@@ -700,6 +707,8 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings.width = std::clamp(g_pc_settings.width, 640, 7680);
     g_pc_settings.height = std::clamp(g_pc_settings.height, 360, 4320);
     g_pc_settings.volume = std::clamp(g_pc_settings.volume, 0, 200);
+    g_pc_settings.audio_mode = std::clamp(g_pc_settings.audio_mode, 0, 2);
+    g_pc_settings.stereo_separation = std::clamp(g_pc_settings.stereo_separation, 0, 100);
     g_pc_settings.internal_resolution = std::clamp(g_pc_settings.internal_resolution, 0, 9);
     g_pc_settings.language = std::clamp(g_pc_settings.language, 0, 12);
     g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 11);
@@ -722,6 +731,7 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
         SetWindowPos(g_window, g_pc_settings.always_on_top ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     set_game_volume();
+    nx::set_audio_output(g_pc_settings.audio_mode, g_pc_settings.stereo_separation);
     if (persist) save_pc_settings();
     pc_menu_sync(g_pc_settings);
 }
@@ -1269,7 +1279,7 @@ Voice g_callback;
 
 }  // namespace
 
-bool audio_open(AudioDone done) {
+bool audio_open(AudioDone done, int channels) {
     g_done = done;
     // Headless test runs (and NX_MUTE=1) are silent: no device, the callers pace themselves with a timer.
     if (headless() || std::getenv("NX_MUTE")) return false;
@@ -1279,6 +1289,21 @@ bool audio_open(AudioDone done) {
     if (FAILED(g_xa->CreateMasteringVoice(&master))) return false;
     g_master_voice = master;
     set_game_volume();
+    if (channels == 6) {
+        WAVEFORMATEXTENSIBLE wfx{};
+        wfx.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+        wfx.Format.nChannels = 6;
+        wfx.Format.nSamplesPerSec = 48000;
+        wfx.Format.wBitsPerSample = 16;
+        wfx.Format.nBlockAlign = 12;
+        wfx.Format.nAvgBytesPerSec = 48000 * 12;
+        wfx.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+        wfx.Samples.wValidBitsPerSample = 16;
+        wfx.dwChannelMask = 0x3F;  // FL | FR | FC | LFE | BL | BR (5.1)
+        wfx.SubFormat = GUID{0x00000001, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+        return SUCCEEDED(g_xa->CreateSourceVoice(&g_voice, &wfx.Format, 0, 2.0f, &g_callback)) &&
+               SUCCEEDED(g_voice->Start());
+    }
     WAVEFORMATEX wf{};
     wf.wFormatTag = WAVE_FORMAT_PCM;
     wf.nChannels = 2;

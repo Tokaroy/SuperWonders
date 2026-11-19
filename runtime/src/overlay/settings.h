@@ -29,6 +29,8 @@ struct Settings {
     int aspect_ratio = 0;  // 0 original, 1 21:9, 2 32:9
     int internal_resolution = 0;  // svc_am.cpp presets: 0 original/dynamic, 1..5 720p..2160p, 6 native, 7 540p, 8 480p, 9 360p
     int volume = 100;
+    int audio_mode = 0;         // 0 Stereo, 1 Mono, 2 5.1 Surround (PCM)
+    int stereo_separation = 100;  // 0..100% (used in Stereo mode)
     int language = 0;       // menu language: English, Italian, German, French, Spanish, Korean, Japanese, Arabic, Russian, Turkish, Dutch, Simplified Chinese, Traditional Chinese
     int game_language = 0;  // en-US, it, de, fr, pt-BR, es, ko, ja, nl, ru, zh-CN, zh-TW
     int memory_limit_gb = 8;
