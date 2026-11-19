@@ -433,6 +433,9 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
         SupportBuffer out = support_buffer_defaults();
         support_buffer_set_viewport(out, vw, vh, false, target_scale);
         out.render_scale[0][0] = target_scale;
+        // Horizontal render scale for gl_FragCoord.x (read by patch_fragcoord_x_scale on ultrawide targets):
+        // widened targets stretch X by uw_factor(), non-widened targets keep target_scale so FragCoord.x is unchanged.
+        out.viewport_size[2] = g_uw_wide ? (target_scale * uw_factor()) : target_scale;
         uint32_t fragment_count = 0;
         for (const auto& [stage, binding] : g_textures.bindings)
             if (stage->stage == ShaderStage::Fragment) fragment_count = std::max(fragment_count, binding->binding % 128 + 1);
@@ -526,7 +529,7 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
                         map_test = value && std::strcmp(value, "1") == 0;
                         flag_frame = frame;
                     }
-                    if (map_test && g_uw_wide && p && size >= 68 &&
+                    if (map_test && !uw_fragcoord_x_on() && g_uw_wide && p && size >= 68 &&
                         s->stage == ShaderStage::Fragment && s->hash == "0bebd775cd1a4238" && b.nvn.index == 0 &&
                         !written_overlaps(p, size)) {
                         std::vector<uint8_t> copy(p, p + size);

@@ -11,6 +11,8 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "nvn.h"
@@ -250,6 +252,12 @@ bool uw_vs_scaled(const ShaderInfo* vs) {
     return scaled;
 }
 
+bool uw_fragcoord_x_on() {
+    if (!uw_on()) return false;
+    static const bool off = std::getenv("NX_UW_FRAGCOORD_X") && std::getenv("NX_UW_FRAGCOORD_X")[0] == '0';
+    return !off;
+}
+
 
 // ---- gl_Position.x * spec constant (modelled on patch_clip_z, nvn_spirv_clip.cpp) -----------------------------------
 
@@ -258,8 +266,10 @@ enum : uint32_t {
     OpEntryPoint = 15, OpTypeInt = 21, OpTypeFloat = 22, OpTypeVector = 23, OpTypePointer = 32, OpSpecConstant = 50,
     OpFunction = 54, OpFunctionEnd = 56, OpVariable = 59, OpLoad = 61, OpStore = 62, OpAccessChain = 65,
     OpDecorate = 71, OpMemberDecorate = 72, OpCompositeExtract = 81, OpCompositeInsert = 82, OpConstant = 43,
-    OpFAdd = 129, OpFMul = 133, OpReturn = 253, OpStructType = 30,
-    DecorationBuiltIn = 11, DecorationSpecId = 1, BuiltInPosition = 0, StorageOutput = 3, ModelVertex = 0,
+    OpFAdd = 129, OpFMul = 133, OpFDiv = 136, OpReturn = 253, OpStructType = 30,
+    DecorationBuiltIn = 11, DecorationSpecId = 1, DecorationBinding = 33, DecorationDescriptorSet = 34,
+    BuiltInPosition = 0, BuiltInFragCoord = 15, StorageUniform = 2, StorageOutput = 3,
+    ModelVertex = 0, ModelFragment = 4,
 };
 bool is_header_op(uint32_t op) {  // before the types: capabilities .. annotations
     switch (op) {
@@ -355,6 +365,151 @@ bool patch_x_scale(const std::vector<uint32_t>& in, std::vector<uint32_t>& out, 
     }
     if (!returns) return false;
     out[3] = bound;
+    return true;
+}
+
+bool patch_fragcoord_x_scale(const std::vector<uint32_t>& in, std::vector<uint32_t>& out) {
+    if (in.size() < 5) return false;
+    struct Inst { size_t at; uint32_t op, len; };
+    std::vector<Inst> insts;
+    insts.reserve(in.size() / 3);
+    for (size_t i = 5; i < in.size();) {
+        const uint32_t len = in[i] >> 16;
+        if (!len || i + len > in.size()) return false;
+        insts.push_back({i, in[i] & 0xffff, len});
+        i += len;
+    }
+
+    uint32_t bound = in[3], fc_var = 0, f32 = 0, i32 = 0, u32 = 0, v4f = 0, ptr_uniform_f32 = 0;
+    bool is_fragment = false;
+    std::unordered_map<uint32_t, uint32_t> dec_set, dec_bind, int_const, i32_const;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> struct_members;
+    std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> ptr_pointee;
+    size_t first_function = in.size();
+
+    for (const Inst& n : insts) {
+        const uint32_t* w = &in[n.at];
+        if (n.op == OpEntryPoint && n.len >= 3 && w[1] == ModelFragment) {
+            is_fragment = true;
+        } else if (n.op == OpDecorate && n.len >= 4) {
+            if (w[2] == DecorationBuiltIn && w[3] == BuiltInFragCoord) fc_var = w[1];
+            else if (w[2] == DecorationDescriptorSet) dec_set[w[1]] = w[3];
+            else if (w[2] == DecorationBinding) dec_bind[w[1]] = w[3];
+        } else if (n.op == OpTypeFloat && n.len == 3 && w[2] == 32) {
+            f32 = w[1];
+        } else if (n.op == OpTypeInt && n.len == 4 && w[2] == 32) {
+            if (w[3] == 1) i32 = w[1];
+            else if (w[3] == 0) u32 = w[1];
+        } else if (n.op == OpTypeVector && n.len == 4 && f32 && w[2] == f32 && w[3] == 4) {
+            v4f = w[1];
+        } else if (n.op == OpStructType && n.len >= 2) {
+            struct_members.emplace(w[1], std::vector<uint32_t>(w + 2, w + n.len));
+        } else if (n.op == OpTypePointer && n.len == 4) {
+            ptr_pointee[w[1]] = {w[2], w[3]};
+            if (w[2] == StorageUniform && f32 && w[3] == f32) ptr_uniform_f32 = w[1];
+        } else if (n.op == OpConstant && n.len == 4 && ((i32 && w[1] == i32) || (u32 && w[1] == u32))) {
+            int_const[w[2]] = w[3];
+            if (i32 && w[1] == i32) i32_const[w[3]] = w[2];
+        } else if (n.op == OpFunction && first_function == in.size()) {
+            first_function = n.at;
+        }
+    }
+    if (!is_fragment || !fc_var || !f32 || !v4f || first_function == in.size()) return false;
+
+    uint32_t sb_var = 0;
+    for (const Inst& n : insts) {
+        const uint32_t* w = &in[n.at];
+        if (n.op != OpVariable || n.len < 4 || w[3] != StorageUniform) continue;
+        auto b = dec_bind.find(w[2]);
+        if (b == dec_bind.end() || b->second != 0) continue;
+        auto s = dec_set.find(w[2]);
+        if (s != dec_set.end() && s->second != 0) continue;
+        auto pt = ptr_pointee.find(w[1]);
+        if (pt == ptr_pointee.end() || pt->second.first != StorageUniform) continue;
+        auto sm = struct_members.find(pt->second.second);
+        if (sm != struct_members.end() && sm->second.size() > 3 && sm->second[3] == v4f) {
+            sb_var = w[2];
+            break;
+        }
+    }
+    if (!sb_var) return false;
+
+    struct AccessChain {
+        uint32_t base = 0;
+        uint32_t count = 0;
+        uint32_t idx[2] = {};
+    };
+    std::unordered_map<uint32_t, AccessChain> ac;
+    std::unordered_map<uint32_t, uint32_t> ld;
+    std::unordered_set<uint32_t> fc_x_vals;
+    std::unordered_set<size_t> target_fdivs;
+    for (const Inst& n : insts) {
+        const uint32_t* w = &in[n.at];
+        if (n.op == OpAccessChain && (n.len == 5 || n.len == 6)) {
+            auto i0 = int_const.find(w[4]);
+            if (i0 == int_const.end()) continue;
+            AccessChain chain{w[3], n.len - 4, {i0->second, 0}};
+            if (n.len == 6) {
+                auto i1 = int_const.find(w[5]);
+                if (i1 == int_const.end()) continue;
+                chain.idx[1] = i1->second;
+            }
+            ac[w[2]] = chain;
+        } else if (n.op == OpLoad && n.len >= 4) {
+            ld[w[2]] = w[3];
+            auto a = ac.find(w[3]);
+            if (a != ac.end() && a->second.base == fc_var && a->second.count == 1 && a->second.idx[0] == 0)
+                fc_x_vals.insert(w[2]);
+        } else if (n.op == OpFDiv && n.len == 5 && w[1] == f32 && fc_x_vals.count(w[3])) {
+            auto l = ld.find(w[4]);
+            if (l == ld.end()) continue;
+            auto a = ac.find(l->second);
+            if (a != ac.end() && a->second.base == sb_var && a->second.count == 2 && a->second.idx[0] == 5 &&
+                a->second.idx[1] == 0) {
+                target_fdivs.insert(n.at);
+            }
+        }
+    }
+    if (target_fdivs.empty()) return false;
+
+    std::vector<uint32_t> globals;
+    if (!i32) {
+        i32 = bound++;
+        globals.insert(globals.end(), {(4u << 16) | OpTypeInt, i32, 32, 1});
+    }
+    if (!ptr_uniform_f32) {
+        ptr_uniform_f32 = bound++;
+        globals.insert(globals.end(), {(4u << 16) | OpTypePointer, ptr_uniform_f32, StorageUniform, f32});
+    }
+    auto find_or_add_i32 = [&](uint32_t val) {
+        if (auto it = i32_const.find(val); it != i32_const.end()) return it->second;
+        const uint32_t id = bound++;
+        globals.insert(globals.end(), {(4u << 16) | OpConstant, i32, id, val});
+        return id;
+    };
+    const uint32_t c3 = find_or_add_i32(3);
+    const uint32_t c2 = find_or_add_i32(2);
+
+    out.clear();
+    out.reserve(in.size() + globals.size() + target_fdivs.size() * 10);
+    out.insert(out.end(), in.begin(), in.begin() + 5);
+    for (const Inst& n : insts) {
+        if (n.at == first_function && !globals.empty()) out.insert(out.end(), globals.begin(), globals.end());
+        const uint32_t* w = &in[n.at];
+        if (target_fdivs.count(n.at)) {
+            const uint32_t ptr_id = bound++;
+            const uint32_t scale_id = bound++;
+            out.insert(out.end(), {(6u << 16) | OpAccessChain, ptr_uniform_f32, ptr_id, sb_var, c3, c2,
+                                   (4u << 16) | OpLoad, f32, scale_id, ptr_id,
+                                   w[0], w[1], w[2], w[3], scale_id});
+        } else {
+            out.insert(out.end(), w, w + n.len);
+        }
+    }
+    out[3] = bound;
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true, std::memory_order_relaxed))
+        log("nvn: ultrawide: fragment gl_FragCoord.x scaling enabled (NX_UW_FRAGCOORD_X=0 to disable)");
     return true;
 }
 

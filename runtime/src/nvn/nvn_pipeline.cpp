@@ -217,8 +217,9 @@ VkShaderModule module_of(const ShaderInfo* s, const uint8_t* kinds = nullptr, ui
     static const char* int_env = std::getenv("NX_INT_ATTRIBS");
     static const bool off = int_env && int_env[0] == '0';
     std::string k = kinds && !off ? std::string(reinterpret_cast<const char*>(kinds), 16) : std::string(16, '\0');
+    const bool uw_frag_x = s->stage == ShaderStage::Fragment && uw_fragcoord_x_on();
     std::string variant = int_texture_key(s);
-    variant.push_back(uw_x > 0.0f ? '\1' : '\0');
+    variant.push_back(uw_x > 0.0f ? '\1' : uw_frag_x ? '\2' : '\0');
     if (uw_x > 0.0f) {
         variant.append(reinterpret_cast<const char*>(&uw_x), sizeof uw_x);
         variant.append(reinterpret_cast<const char*>(&uw_x_offset), sizeof uw_x_offset);
@@ -258,6 +259,10 @@ VkShaderModule module_of(const ShaderInfo* s, const uint8_t* kinds = nullptr, ui
         if (uw_x > 0.0f && s->stage == ShaderStage::Vertex) {
             std::vector<uint32_t> scaled;
             if (patch_x_scale(code, scaled, uw_x, uw_x_offset)) code.swap(scaled);
+        }
+        if (uw_frag_x) {
+            std::vector<uint32_t> scaled;
+            if (patch_fragcoord_x_scale(code, scaled)) code.swap(scaled);
         }
         VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         ci.codeSize = code.size() * 4;
@@ -663,6 +668,8 @@ std::shared_ptr<PipelineBuild> make_build(const PipelineKey& key, const ProgramL
         if (s == key.vs) {
             id.append(reinterpret_cast<const char*>(&key.uw_x), sizeof key.uw_x);
             id.append(reinterpret_cast<const char*>(&key.uw_x_offset), sizeof key.uw_x_offset);
+        } else if (uw_fragcoord_x_on()) {
+            id.push_back('\x01');
         }
     }
 

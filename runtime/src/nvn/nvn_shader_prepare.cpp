@@ -17,6 +17,7 @@
 #include "nvn_pipeline.h"
 #include "nvn_pipeline_async.h"
 #include "nvn_shader_prepare.h"
+#include "nvn_ultrawide.h"
 #include "platform.h"
 
 namespace nx::nvn {
@@ -143,6 +144,10 @@ std::unique_ptr<ShaderInfo> load_catalog_shader(const StageRec& rec) {
 VkShaderModule make_module(const ShaderInfo* shader, uint32_t unwritten = 0) {
     std::vector<uint32_t> code = patched_spirv(shader, nullptr, unwritten, nullptr);
     if (shader->stage == ShaderStage::Vertex) clip_z_module(shader, code);
+    if (shader->stage == ShaderStage::Fragment && uw_fragcoord_x_on()) {
+        std::vector<uint32_t> scaled;
+        if (patch_fragcoord_x_scale(code, scaled)) code.swap(scaled);
+    }
     VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     ci.codeSize = code.size() * sizeof(uint32_t);
     ci.pCode = code.data();
@@ -320,7 +325,8 @@ void prepare_shader_catalog() {
     // With GPL (nvn_pipeline.cpp) the preparation makes each program's shader libraries instead of a whole pipeline:
     // its own marker, so switching modes prepares again.
     const bool gpl = vk_gpl() && !render_pass_objects();  // as gpl_program_job decides
-    std::snprintf(marker_name, sizeof marker_name, "/shader_prepare_%s%04x_%04x_%08x_%016llx.done", gpl ? "gpl_" : "",
+    std::snprintf(marker_name, sizeof marker_name, "/shader_prepare_%s%s%04x_%04x_%08x_%016llx.done",
+                  gpl ? "gpl_" : "", uw_fragcoord_x_on() ? "uw_" : "",
                   props.vendorID, props.deviceID, props.driverVersion, (unsigned long long)fingerprint);
     const std::string marker = plat::data_root() + marker_name;
     if (marker_exists(marker)) return;
