@@ -121,6 +121,7 @@ SupportBuffer support_buffer_defaults() {
     SupportBuffer sb;
     std::memset(&sb, 0, sizeof sb);
     for (auto& s : sb.render_scale) s[0] = 1.0f;  // Ryujinx's SupportBufferUpdater: (1, 0, 0, 0) for all 73
+    sb.viewport_size[2] = 1.0f;  // horizontal render scale default (read by ultrawide gl_FragCoord.x patch)
     return sb;
 }
 

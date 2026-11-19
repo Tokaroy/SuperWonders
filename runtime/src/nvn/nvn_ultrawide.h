@@ -31,5 +31,9 @@ bool uw_is_ui_vertex_shader(const ShaderInfo* vs);
 bool uw_vs_scaled(const ShaderInfo* vs);  // does this vertex shader's x get scaled by 1/k (world and UI geometry)
 // A copy of a vertex module whose gl_Position.x is multiplied by specialization constant 0 (default 1.0).
 bool patch_x_scale(const std::vector<uint32_t>& in, std::vector<uint32_t>& out, float scale, float offset);
+bool uw_fragcoord_x_on();  // ultrawide horizontal gl_FragCoord.x scaling (on when uw_on(); NX_UW_FRAGCOORD_X=0 disables)
+// Rewrites OpFDiv(gl_FragCoord.x, support_buffer.render_scale[0]) in fragment shaders to divide by
+// support_buffer.viewport_size.z (target_scale * uw_factor() on widened targets, target_scale otherwise).
+bool patch_fragcoord_x_scale(const std::vector<uint32_t>& in, std::vector<uint32_t>& out);
 
 }  // namespace nx::nvn
