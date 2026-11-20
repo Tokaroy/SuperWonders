@@ -48,7 +48,7 @@ def ensure(data):
     required = [os.path.join(HERE, x) for x in ('wonder_menu_mod.py', 'wonder_uw_map_hud.py',
                 'wonder_uw_screen_backgrounds.py', 'wonder_uw_prepare.py')]
     required += [table, os.path.join(menu, 'Layout', 'Title.Nin_NX_NVN.blarc.zs')]
-    names = set(wonder_uw_screen_backgrounds.PANES) | {'WorldMapDisplay'}
+    names = set(wonder_uw_screen_backgrounds.PANES) | set(wonder_uw_map_hud.HUD_WRAPS)
     required += [os.path.join(rom, 'Layout', n + '.Nin_NX_NVN.blarc.zs') for n in sorted(names) if n != 'Title']
     digest = hashlib.sha256()
     for path in required:
@@ -81,7 +81,10 @@ def ensure(data):
         for index, (_, aspect, map_name, screen_name) in enumerate(PROFILES):
             map_out, screen_out = os.path.join(work, map_name), os.path.join(work, screen_name)
             wonder_uw_map_hud.main(['--romfs', rom, '--rstb', table, '--out', map_out, '--aspect', aspect])
-            wonder_uw_screen_backgrounds.main(['--romfs', rom, '--menu-mod', menu, '--out', screen_out, '--aspect', aspect])
+            wonder_uw_screen_backgrounds.main([
+                '--romfs', rom, '--menu-mod', menu, '--out', screen_out, '--aspect', aspect,
+                '--skip', *sorted(wonder_uw_map_hud.HUD_WRAPS),
+            ])
             for subindex, source in enumerate((map_out, screen_out)):
                 dest_index = index * 2 + subindex
                 for base, dirs, names in os.walk(source):

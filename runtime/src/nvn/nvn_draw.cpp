@@ -581,10 +581,10 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                     flower_direction = flags.alt && std::fabs(f[16] - 0.95f) < 0.005f ? 2.0f : 1.0f;
                     flower_offset = (flower_x - (flower_direction == 2.0f ? 384.0f : 0.0f)) * (uw_factor() - 1.0f);
                 }
-                else if (flower_seen && std::fabs(f[19] - flower_x) < 8.0f && std::fabs(f[23] - flower_y) < 100.0f)
+                else if (flower_seen && std::fabs(f[19] - flower_x) < 160.0f && std::fabs(f[23] - flower_y) < 100.0f)
                     flower_offset = (flower_x - (flower_direction == 2.0f ? 384.0f : 0.0f)) * (uw_factor() - 1.0f);
             }
-            if (flower_seen && vs->hash == "2fc962d8d063c1c9" &&
+            if (flower_seen && (vs->hash == "2fc962d8d063c1c9" || vs->hash == "a106c763cf05f818") &&
                 (fs->hash == "46841c209865a1c0" || fs->hash == "49add6de02fe8180") &&
                 std::fabs(f[3] - flower_x * flower_proj_x) < 32.0f && std::fabs(f[7] - flower_y * flower_proj_y) < 100.0f)
                 flower_offset = (flower_x - (flower_direction == 2.0f ? 384.0f : 0.0f)) * (uw_factor() - 1.0f);

@@ -604,9 +604,10 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         _putenv_s("NX_ULTRAWIDE", ratio ? uw_res : "0");
         _putenv_s("NX_RESOLUTION", ratio ? uw_res : "1920x1080");
         const char* flags[] = {"NX_TERRAIN_MOD_ASPECT_TEST", "NX_UW_POWERUP_TEST", "NX_UW_FLOWER_TEST",
-            "NX_UW_FLOWER_ALT_TEST", "NX_UW_MAP_ALIGN_TEST", "NX_UW_MAP_COMPOSITE_TEST", "NX_UW_MAP_CARD_TEST",
+            "NX_UW_MAP_ALIGN_TEST", "NX_UW_MAP_COMPOSITE_TEST", "NX_UW_MAP_CARD_TEST",
             "NX_UW_MAP_MARKERS_TEST", "NX_UW_MAP_DETAIL_TEST", "NX_UW_SETTINGS_SCISSOR_TEST"};
         for (const char* flag : flags) _putenv_s(flag, ratio ? "1" : "0");
+        _putenv_s("NX_UW_FLOWER_ALT_TEST", "0");
     }
     return true;
 }
