@@ -41,13 +41,16 @@ bool pressed(ImGuiKey a, ImGuiKey b, ImGuiKey c) {
 }
 
 // One row: draws it, handles A / click and left / right while selected. Returns 2 (A / click), -1 / +1 (left /
-// right) or 0. arrows: ◀ value ▶ (a choice of several, or a stepper), the arrows click too.
+// right) or 0. arrows: ◀ value ▶, dropdown_arrow: ▾.
 int row(const char* label, const std::string& value, bool changed, const char* desc, bool up = true, bool arrows = false,
-        bool highlight = false) {
+        bool highlight = false, bool dropdown_arrow = false, ImVec2* out_p = nullptr, float* out_w = nullptr, float* out_h = nullptr) {
     ImGui::PushID(label);
     if (g_indent) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + g_indent * 28 * g_k);
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float w = ImGui::GetContentRegionAvail().x, h = ImGui::GetFontSize() * 1.9f;
+    if (out_p) *out_p = p;
+    if (out_w) *out_w = w;
+    if (out_h) *out_h = h;
     ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));  // (the row's own border shows the selection)
     const bool clicked = ImGui::InvisibleButton("##row", ImVec2(w, h), ImGuiButtonFlags_EnableNav);
     ImGui::PopStyleColor();
@@ -77,16 +80,25 @@ int row(const char* label, const std::string& value, bool changed, const char* d
     // the highlight eases in (and out) over about a tenth of a second
     const float t = ui::eased(id + 1, hov || foc ? 1.0f : 0.0f, 22.0f);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float r = 9 * g_k, pad = 16 * g_k, fs = ImGui::GetFontSize();
+    const float r = 10 * g_k, pad = 18 * g_k, fs = ImGui::GetFontSize();
     const ImVec2 q(p.x + w, p.y + h);
-    dl->AddRectFilled(p, q, ui::fade(ui::mix(IM_COL32(0, 0, 0, 46), IM_COL32(255, 255, 255, 24), t)), r);
-    const ImU32 border = ui::mix(IM_COL32(255, 255, 255, off ? 18 : 34), off ? ((ui::theme().accent) & ~IM_COL32_A_MASK) | IM_COL32(0, 0, 0, 120) : ui::theme().accent, t);
-    dl->AddRect(p, q, ui::fade(border), r, 0, (1.0f + t) * std::max(1.0f, g_k));
+    const ImU32 base_bg = ui::mix(IM_COL32(255, 255, 255, 7), IM_COL32(255, 255, 255, 22), t);
+    dl->AddRectFilled(p, q, ui::fade(base_bg), r);
+    const ImU32 border = ui::mix(IM_COL32(255, 255, 255, off ? 10 : 18),
+                                 off ? IM_COL32(255, 255, 255, 36) : ui::theme().accent, t * 0.75f);
+    dl->AddRect(p, q, ui::fade(border), r, 0, std::max(1.0f, g_k));
+    if (t > 0.02f && !off) {
+        const float bar_h = h * (0.45f + 0.15f * t);
+        const float by0 = p.y + (h - bar_h) * 0.5f;
+        dl->AddRectFilled(ImVec2(p.x, by0), ImVec2(p.x + 3.5f * g_k, by0 + bar_h),
+                          ui::fade(ui::theme().accent, t), 2 * g_k);
+    }
     if (highlight) {  // (a row waiting for something, e.g. a key press: a slow pulse in the accent colour)
-        const float a = 0.25f + 0.2f * std::sin(float(ImGui::GetTime()) * 6.0f);
+        const float a = 0.18f + 0.14f * std::sin(float(ImGui::GetTime()) * 6.0f);
         dl->AddRectFilled(p, q, ui::fade(ui::theme().accent, a), r);
     }
-    std::string text = up ? upper(label) : std::string(label);
+    (void)up;
+    std::string text(label);
     if (const size_t cut = text.find("##"); cut != std::string::npos) text.resize(cut);  // (the ID part)
     const float ty = p.y + (h - fs) * 0.5f;
     dl->AddText(ImVec2(p.x + pad, ty), ui::fade(off ? ui::theme().text_off : ui::theme().text), text.c_str());
@@ -103,6 +115,14 @@ int row(const char* label, const std::string& value, bool changed, const char* d
             else if (mx >= rx - gap && mx <= rx + aw + gap) step = 1;
         }
         right = rx - gap;
+    }
+    if (dropdown_arrow && !value.empty()) {
+        const float aw = fs * 0.42f, gap = fs * 0.55f, cy = ty + fs * 0.52f;
+        const float dx = right - aw * 1.6f;
+        const ImU32 ac = off ? ui::theme().text_off : ui::mix(ui::mix(ui::theme().text_off, ui::theme().text_dim, 0.5f), ui::theme().accent, t);
+        dl->AddTriangleFilled(ImVec2(dx, cy - aw * 0.45f), ImVec2(dx + aw * 1.6f, cy - aw * 0.45f),
+                              ImVec2(dx + aw * 0.8f, cy + aw * 0.55f), ui::fade(ac));
+        right = dx - gap;
     }
     if (!value.empty()) {
         const float vx = right - ImGui::CalcTextSize(value.c_str()).x;
@@ -137,12 +157,17 @@ void begin(const char* id, float height) {
 
 void section(const char* title) {
     const std::string t = upper(title);
-    if (ImGui::GetCursorPosY() > ImGui::GetStyle().WindowPadding.y + 1) ImGui::Dummy(ImVec2(0, 12 * g_k));
-    ImGui::SetWindowFontScale(0.82f);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ui::theme().accent2));
+    if (ImGui::GetCursorPosY() > ImGui::GetStyle().WindowPadding.y + 1) ImGui::Dummy(ImVec2(0, 14 * g_k));
+    ImGui::SetWindowFontScale(0.76f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ui::theme().text_dim));
     ImGui::TextUnformatted(t.c_str());
     ImGui::PopStyleColor();
     ImGui::SetWindowFontScale(1.0f);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y - 2 * g_k), ImVec2(p.x + w, p.y - 2 * g_k),
+                                        ui::fade(IM_COL32(255, 255, 255, 18)), std::max(1.0f, g_k));
+    ImGui::Dummy(ImVec2(0, 4 * g_k));
 }
 
 bool toggle(const char* label, bool* v, bool def, const char* desc) {
@@ -166,6 +191,37 @@ bool choice(const char* label, int* v, const char* const* names, int n, int def,
     if (nv == cur) return false;
     *v = nv;
     return true;
+}
+
+bool dropdown(const char* label, int* v, const char* const* names, int n, const char* desc) {
+    if (n <= 0) return false;
+    const int cur = *v >= 0 && *v < n ? *v : 0;
+    ImVec2 p{};
+    float w = 0, h = 0;
+    const int act = row(label, names[cur], cur != 0, desc, false, false, false, true, &p, &w, &h);
+    ImGui::PushID(label);
+    if (act == 2) ImGui::OpenPopup("##dropdown");
+    bool changed = false;
+    ImGui::SetNextWindowPos(ImVec2(p.x, p.y + h + 4 * g_k));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(w, 0), ImVec2(w, h * 6.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8 * g_k, 8 * g_k));
+    if (ImGui::BeginPopup("##dropdown")) {
+        for (int i = 0; i < n; ++i) {
+            const bool selected = i == cur;
+            if (ImGui::Selectable(names[i], selected, ImGuiSelectableFlags_None, ImVec2(0, h * 0.85f))) {
+                if (i != *v) {
+                    *v = i;
+                    changed = true;
+                }
+                ImGui::CloseCurrentPopup();
+            }
+            if (selected && ImGui::IsWindowAppearing()) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleVar();
+    ImGui::PopID();
+    return changed;
 }
 
 bool integer(const char* label, int* v, int lo, int hi, int step, int def, const char* fmt, const char* desc) {
@@ -195,24 +251,28 @@ void end() {
     g_desc_alpha = ui::approach(g_desc_alpha, 1.0f, 16.0f);
     ImGui::SameLine(0, 0);
     const ImVec2 p = ImGui::GetCursorScreenPos(), avail = ImGui::GetContentRegionAvail();
-    const float gap = 26 * g_k;
-    ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x + gap * 0.5f, p.y), ImVec2(p.x + gap * 0.5f, p.y + avail.y),
-                                        ui::fade(ui::theme().accent, 0.45f), std::max(1.0f, g_k));
-    ImGui::SetCursorScreenPos(ImVec2(p.x + gap, p.y));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14 * g_k, 6 * g_k));
+    const float gap = 24 * g_k;
+    const ImVec2 card_p0(p.x + gap, p.y), card_p1(p.x + avail.x, p.y + avail.y);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(card_p0, card_p1, ui::fade(ui::theme().card, 0.55f), 12 * g_k);
+    dl->AddRect(card_p0, card_p1, ui::fade(IM_COL32(255, 255, 255, 18)), 12 * g_k, 0, std::max(1.0f, g_k));
+    ImGui::SetCursorScreenPos(card_p0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24 * g_k, 22 * g_k));
     ImGui::BeginChild("##desc", ImVec2(0, avail.y), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoNav);
     ImGui::PopStyleVar();
     // (the new text rises a few pixels as it fades in)
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (1.0f - ui::smoothstep(g_desc_alpha)) * 8 * g_k);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (1.0f - ui::smoothstep(g_desc_alpha)) * 6 * g_k);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * g_desc_alpha);
-    ImGui::SetWindowFontScale(1.12f);  // (the description reads at a glance)
+    ImGui::SetWindowFontScale(1.04f);  // (the description reads at a glance)
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ui::theme().text_dim));
     ImGui::PushTextWrapPos(0);
     ImGui::TextUnformatted(g_desc_shown.c_str());
     ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
     ImGui::SetWindowFontScale(1.0f);
     ImGui::PopStyleVar();
     if (!g_note.empty()) {
-        ImGui::Dummy(ImVec2(0, 10 * g_k));
+        ImGui::Dummy(ImVec2(0, 14 * g_k));
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ui::theme().accent));
         ImGui::PushTextWrapPos(0);
         ImGui::TextUnformatted(g_note.c_str());

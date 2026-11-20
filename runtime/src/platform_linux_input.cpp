@@ -312,6 +312,7 @@ void load_player_settings() {
     overlay::Host host;
     host.apply = apply_settings;
     host.key_name = key_name;
+    for (size_t a = 0; a < overlay::kControlCount; ++a) host.default_keyboard_bindings[a] = keys[a];
     // Wayland has no "always on top" for clients; X11 does.
     const char* driver = SDL_GetCurrentVideoDriver();
     host.can_always_on_top = !driver || std::strcmp(driver, "wayland") != 0;

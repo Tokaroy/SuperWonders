@@ -21,7 +21,14 @@ struct Theme {
     ImU32 back_top, back_mid;  // the compile screen's backdrop
     ImU32 good, warn, bad;     // the metrics panel's numbers
 };
-const Theme& theme();  // "Wonder Night" (overlay_ui.cpp)
+const Theme& theme();  // current active theme (overlay_ui.cpp)
+int theme_count();
+int theme_index();
+const char* theme_name(int index);
+void set_theme(int index);
+void cycle_theme();
+// Minimalist pill button showing the current accent dot and theme name; returns true when clicked/activated.
+bool theme_button(float k);
 
 // A colour with its alpha times `a` (0..1) and the style's Alpha (the menu's fade), for hand-drawn shapes.
 ImU32 fade(ImU32 c, float a = 1.0f);

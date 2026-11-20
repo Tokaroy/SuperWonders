@@ -564,13 +564,11 @@ float g_k = 1;
 
 void backdrop(ImDrawList* dl, ImVec2 ds) {
     const ui::Theme& th = ui::theme();
-    dl->AddRectFilledMultiColor({0, 0}, {ds.x, ds.y * 0.5f}, th.back_top, th.back_top, th.back_mid, th.back_mid);
-    dl->AddRectFilledMultiColor({0, ds.y * 0.5f}, ds, th.back_mid, th.back_mid, th.back_top, th.back_top);
-    // a slow glow drifting behind the pages (the compile screen's, overlay_progress.cpp)
-    const float t = float(ImGui::GetTime());
-    const float gx = ds.x * (0.62f + 0.18f * std::sin(t * 0.3f)), gy = ds.y * 0.42f, r = ds.y * 0.6f;
-    const ImU32 in = (th.accent2 & ~IM_COL32_A_MASK) | IM_COL32(0, 0, 0, 30), out = in & ~IM_COL32_A_MASK;
-    constexpr int kSeg = 64;
+    dl->AddRectFilledMultiColor({0, 0}, ds, th.back_top, th.back_top, th.back_mid, th.back_mid);
+    // Subtle ambient accent glow in the upper right, kept stationary for a clean minimalist look.
+    const float gx = ds.x * 0.78f, gy = ds.y * 0.16f, r = ds.y * 0.65f;
+    const ImU32 in = (th.accent & ~IM_COL32_A_MASK) | IM_COL32(0, 0, 0, 16), out = in & ~IM_COL32_A_MASK;
+    constexpr int kSeg = 48;
     dl->PrimReserve(kSeg * 3, kSeg + 1);
     const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
     const ImDrawIdx base = ImDrawIdx(dl->_VtxCurrentIdx);
@@ -586,7 +584,7 @@ void backdrop(ImDrawList* dl, ImVec2 ds) {
     }
 }
 
-// The setup's progress: a card with the gliding bar and its sheen (the compile screen's look), in `area`.
+// The setup's progress: a minimalist card matching the in-game settings aesthetic.
 void progress_card(ImDrawList* dl, ImVec2 p0, ImVec2 p1) {
     const ui::Theme& th = ui::theme();
     const float k = g_k;
@@ -600,13 +598,13 @@ void progress_card(ImDrawList* dl, ImVec2 p0, ImVec2 p1) {
     }
     ImFont* tf = ui::title();
     ImFont* bf = ui::body();
-    const float tfs = 46 * k, sfs = 26 * k;
+    const float tfs = 42 * k, sfs = 25 * k;
     dl->AddRectFilled(p0, p1, th.card, 14 * k);
-    dl->AddRect(p0, p1, ui::fade(th.accent, 0.55f), 14 * k, 0, 1.5f * k);
+    dl->AddRect(p0, p1, ui::fade(IM_COL32(255, 255, 255, 22)), 14 * k, 0, std::max(1.0f, k));
     const char* title = "Setting up your game";
     const ImVec2 ts = tf->CalcTextSizeA(tfs, FLT_MAX, 0, title);
-    dl->AddText(tf, tfs, {(p0.x + p1.x - ts.x) * 0.5f, p0.y + 36 * k}, th.accent, title);
-    const ImVec2 ba(p0.x + 48 * k, p0.y + 36 * k + ts.y + 30 * k), bb(p1.x - 48 * k, ba.y + 24 * k);
+    dl->AddText(tf, tfs, {(p0.x + p1.x - ts.x) * 0.5f, p0.y + 40 * k}, th.text, title);
+    const ImVec2 ba(p0.x + 48 * k, p0.y + 40 * k + ts.y + 28 * k), bb(p1.x - 48 * k, ba.y + 18 * k);
     ui::progress_bar(dl, ba, bb, shown);
     char line[640];
     const double secs = double(plat::monotonic_ns() - g->job.started_ns) / 1e9;
@@ -1161,24 +1159,54 @@ void screen(float w, float h) {
     menu_was_open = menu_open;
     ImGui::Begin("##launcher", nullptr, f);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float margin = 56 * k, nav_w = std::max(300 * k, w * 0.24f);
+    const float margin = 52 * k, nav_w = std::clamp(w * 0.22f, 260 * k, 320 * k);
 
-    // the title
-    ImGui::SetCursorPos({margin, margin * 0.8f});
+    // Header: brand on the left, status pill + theme toggle button on the right, separated by a clean 1px rule.
+    ImGui::SetCursorPos({margin, margin * 0.68f});
+    ImGui::BeginGroup();
     ImGui::PushFont(ui::title());
-    ImGui::SetWindowFontScale(1.25f);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.accent));
+    ImGui::SetWindowFontScale(1.05f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text));
     ImGui::TextUnformatted("SUPERWONDERS");
     ImGui::PopStyleColor();
     ImGui::SetWindowFontScale(1.0f);
     ImGui::PopFont();
-    ImGui::SetCursorPosX(margin);
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text_dim));
-    ImGui::TextUnformatted(g->config_mode ? "Super Mario Bros. Wonder  -  Configuration" : "Super Mario Bros. Wonder");
+    ImGui::SetWindowFontScale(0.86f);
+    ImGui::TextUnformatted(g->config_mode ? "Super Mario Bros. Wonder  ·  Configuration" : "Super Mario Bros. Wonder");
+    ImGui::SetWindowFontScale(1.0f);
     ImGui::PopStyleColor();
-    const float top = ImGui::GetCursorPosY() + 40 * k;
+    ImGui::EndGroup();
+    const float header_bottom = ImGui::GetItemRectMax().y;
 
-    // the pages: a column on the left, the highlight easing in under the selected one
+    {
+        const Ready r = g->status.ready;
+        const ImU32 sc = r == Ready::Yes ? th.good : r == Ready::Rebuild ? th.warn : th.bad;
+        const char* st = r == Ready::Yes ? lt(LtFilesReady) : r == Ready::Rebuild ? lt(LtNeedsRebuild) : lt(LtFilesNotSetUp);
+        const float pill_h = 38 * k, btn_fs = ImGui::GetFontSize() * 0.84f;
+        const ImVec2 sts = ui::body()->CalcTextSizeA(btn_fs, FLT_MAX, 0, st);
+        const ImVec2 tts = ui::body()->CalcTextSizeA(btn_fs, FLT_MAX, 0, th.name);
+        const float status_w = 14 * k * 2 + 10 * k + 8 * k + sts.x;
+        const float theme_w = 14 * k * 2 + 11 * k + 8 * k + tts.x;
+        const float right_y = margin * 0.78f;
+        const float theme_x = w - margin - theme_w;
+        const float status_x = theme_x - 12 * k - status_w;
+        dl->AddRectFilled({status_x, right_y}, {status_x + status_w, right_y + pill_h},
+                          ui::fade(th.card, 0.75f), pill_h * 0.5f);
+        dl->AddRect({status_x, right_y}, {status_x + status_w, right_y + pill_h},
+                    ui::fade(IM_COL32(255, 255, 255, 22)), pill_h * 0.5f, 0, std::max(1.0f, k));
+        dl->AddCircleFilled({status_x + 14 * k + 5 * k, right_y + pill_h * 0.5f}, 5 * k, sc);
+        dl->AddText(ui::body(), btn_fs, {status_x + 14 * k + 10 * k + 8 * k, right_y + (pill_h - sts.y) * 0.5f},
+                    ui::fade(th.text_dim), st);
+        ImGui::SetCursorPos({theme_x, right_y});
+        if (ui::theme_button(k)) overlay::set_theme_index(ui::theme_index());
+    }
+
+    const float divider_y = header_bottom + 18 * k;
+    dl->AddLine({margin, divider_y}, {w - margin, divider_y}, ui::fade(IM_COL32(255, 255, 255, 18)), std::max(1.0f, k));
+    const float top = divider_y + 24 * k;
+
+    // Sidebar navigation: clean Sentence/Title Case labels with left accent indicator, matching the settings rows.
     const bool busy = g->job.running || g->demo_progress;
     ImGui::SetCursorPos({margin, top});
     ImGui::BeginGroup();
@@ -1187,24 +1215,23 @@ void screen(float w, float h) {
         ImGui::PushID(i);
         const bool sel = g->page == i;
         const ImVec2 at = ImGui::GetCursorScreenPos();
-        const float row_h = 64 * k;
-        const float a = ui::eased(ImGui::GetID("hl"), sel ? 1.0f : 0.0f, 14.0f);
+        const float row_h = 54 * k;
+        const float a = ui::eased(ImGui::GetID("hl"), sel ? 1.0f : 0.0f, 16.0f);
         if (a > 0.01f) {
-            dl->AddRectFilled(at, {at.x + nav_w, at.y + row_h}, ui::fade(th.accent, 0.16f * a), 10 * k);
-            dl->AddRectFilled(at, {at.x + 5 * k, at.y + row_h}, ui::fade(th.accent, a), 3 * k);
+            dl->AddRectFilled(at, {at.x + nav_w, at.y + row_h}, ui::fade(IM_COL32(255, 255, 255, 18), a), 10 * k);
+            const float bh = row_h * 0.52f;
+            dl->AddRectFilled({at.x, at.y + (row_h - bh) * 0.5f}, {at.x + 3.5f * k, at.y + (row_h + bh) * 0.5f},
+                              ui::fade(th.accent, a), 2 * k);
         }
         const bool disabled = busy && i != g->page;
         if (disabled) ImGui::BeginDisabled();
         ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ui::fade(th.accent, 0.10f));
-        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ui::fade(th.accent, 0.20f));
-        ImGui::PushFont(ui::title());
-        ImGui::SetWindowFontScale(0.62f);
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ui::fade(IM_COL32(255, 255, 255, 10)));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ui::fade(IM_COL32(255, 255, 255, 16)));
         char label[64];
         std::snprintf(label, sizeof label, "   %s", lt(static_cast<LauncherText>(LtPlay + i)));
-        for (char* c = label; *c; ++c) *c = char(std::toupper(static_cast<unsigned char>(*c)));
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(sel ? th.text : th.text_dim));
-        ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));  // (in the middle of the highlight)
+        ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
         if (sel && g->focus_list && !menu_open) ImGui::SetKeyboardFocusHere(), g->focus_list = false;
         const bool clicked = ImGui::Selectable(label, sel, ImGuiSelectableFlags_None, {nav_w, row_h});
         ImGui::PopStyleVar();
@@ -1216,13 +1243,11 @@ void screen(float w, float h) {
             if (i != g->page) g->page = i, g->browse = 0, log("launcher: page %s", kPageNames[i]);
             rows::focus_first();
         }
-        if (focused && !menu_open) {  // the cursor, always visible: an outline on the page's name
+        if (focused && !menu_open) {
             const ImVec2 b0 = ImGui::GetItemRectMin(), b1 = ImGui::GetItemRectMax();
-            dl->AddRect(b0, b1, ui::fade(th.accent, 0.9f), 10 * k, 0, 2.5f * k);
+            dl->AddRect(b0, b1, ui::fade(th.accent, 0.7f), 10 * k, 0, std::max(1.0f, 1.4f * k));
         }
         ImGui::PopStyleColor();
-        ImGui::SetWindowFontScale(1.0f);
-        ImGui::PopFont();
         ImGui::PopStyleColor(3);
         if (disabled) ImGui::EndDisabled();
         ImGui::PopID();
@@ -1230,25 +1255,24 @@ void screen(float w, float h) {
     ImGui::EndGroup();
     g->in_list = list_focused;
 
-    // the status, lower left
+    // Detailed status note, lower left
     {
-        const Ready r = g->status.ready;
-        const ImU32 c = r == Ready::Yes ? th.good : r == Ready::Rebuild ? th.warn : th.bad;
-        const char* s = r == Ready::Yes ? lt(LtFilesReady) : r == Ready::Rebuild ? lt(LtNeedsRebuild) : lt(LtFilesNotSetUp);
-        const float y = h - margin - 80 * k;
-        dl->AddCircleFilled({margin + 8 * k, y + 15 * k}, 7 * k, c);
-        ImGui::SetCursorPos({margin + 26 * k, y});
-        ImGui::TextUnformatted(s);
-        ImGui::SetCursorPosX(margin + 26 * k);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text_off));
-        ImGui::PushTextWrapPos(margin + nav_w);
-        ImGui::TextUnformatted(!g->note.empty() ? g->note.c_str() : g->status.why.c_str());
-        ImGui::PopTextWrapPos();
-        ImGui::PopStyleColor();
+        const std::string& note = !g->note.empty() ? g->note : g->status.why;
+        if (!note.empty()) {
+            const float y = h - margin - 92 * k;
+            ImGui::SetCursorPos({margin + 8 * k, y});
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text_off));
+            ImGui::SetWindowFontScale(0.86f);
+            ImGui::PushTextWrapPos(margin + nav_w - 8 * k);
+            ImGui::TextUnformatted(note.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::SetWindowFontScale(1.0f);
+            ImGui::PopStyleColor();
+        }
     }
 
     // the page, on the right
-    const float px = margin + nav_w + 48 * k, pw = w - px - margin, ph = h - top - margin - 70 * k;
+    const float px = margin + nav_w + 40 * k, pw = w - px - margin, ph = h - top - margin - 64 * k;
     ImGui::SetCursorPos({px, top});
     if (busy || (g->job.result > 0 && !g->job.was_cancelled() && g->page == PageFiles)) {
         ImGui::BeginChild("##job", {pw, ph}, ImGuiChildFlags_NavFlattened);

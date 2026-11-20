@@ -235,12 +235,14 @@ void init(const Host& host, const Settings& s) {
     g_host = host;
     g_pending = s, g_has_pending = true;
     g_metrics = s.metrics_enabled;
+    ui::set_theme(s.theme);
 }
 
 void sync(const Settings& s) {
     std::lock_guard lk(g_lock);
     g_pending = s, g_has_pending = true;
     g_metrics = s.metrics_enabled;
+    ui::set_theme(s.theme);
 }
 
 void settings_changed(bool persist) {
@@ -261,6 +263,13 @@ void set_aspect_ratio(int ratio) {
         adjust_window_size_for_aspect(clamped, g_settings.width, g_settings.height);
         g_settings.aspect_ratio = clamped;
     }
+    settings_changed(true);
+}
+
+void set_theme_index(int index) {
+    const int clamped = std::clamp(index, 0, ui::theme_count() - 1);
+    ui::set_theme(clamped);
+    g_settings.theme = clamped;
     settings_changed(true);
 }
 

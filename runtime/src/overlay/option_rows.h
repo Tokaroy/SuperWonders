@@ -18,6 +18,8 @@ void section(const char* title);
 bool toggle(const char* label, bool* v, bool def, const char* desc);
 // wrap: past the last value back to the first (and the other way); false: stops at the ends
 bool choice(const char* label, int* v, const char* const* names, int n, int def, const char* desc, bool wrap = true);
+// Opens a dropdown popup list at the row; returns true when the selection changes.
+bool dropdown(const char* label, int* v, const char* const* names, int n, const char* desc);
 // whole numbers lo..hi in steps of `step` (holding left / right speeds up); fmt formats the value (e.g. "%d%%")
 bool integer(const char* label, int* v, int lo, int hi, int step, int def, const char* fmt, const char* desc);
 // an action row with a value on the right; true when activated. upper: the label in capitals.
