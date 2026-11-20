@@ -4,12 +4,14 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <functional>
 #include <mutex>
 #include <string>
+#include <string_view>
 
 #include <SDL3/SDL.h>
 
@@ -43,6 +45,9 @@ std::array<std::atomic<int>, overlay::kControlCount> g_key_binding{};
 std::array<std::array<std::atomic<int>, overlay::kControlCount>, 4> g_pad_binding{};
 std::array<std::atomic<int>, 4> g_assignments{};
 std::array<int, 4> g_player_slots{{0, -1, -1, -1}};
+std::array<int, 4> g_pad_styles{};
+std::atomic<int> g_button_icons{0};
+std::atomic<int> g_controller_preset{1};
 constexpr uint64_t kActionBits[overlay::kControlCount] = {
     kA, kB, kX, kY, kL, kR, kZL, kZR, kPlus, kMinus, kStickL, kStickR, kLeft, kUp, kRight, kDown,
 };
@@ -94,6 +99,8 @@ void apply_settings(const overlay::Settings& s, bool persist) {
     nvn::set_frame_cap(s.frame_cap);
     g_rumble_strength = std::clamp(s.rumble, 0, 100);
     g_keyboard_separate = s.keyboard_separate;
+    g_button_icons = std::clamp(s.button_icons, 0, 3);
+    g_controller_preset = std::clamp(s.controller_preset, 0, 1);
     if (s.fullscreen != before.fullscreen || s.width != before.width || s.height != before.height ||
         s.always_on_top != before.always_on_top)
         post_to_main([s] {
@@ -132,6 +139,42 @@ overlay::Key menu_key(SDL_Keycode k) {
         case SDLK_F1: return overlay::KeyF1;
         default: return overlay::KeyNone;
     }
+}
+
+int detect_gamepad_style(SDL_Gamepad* pad) {
+    if (!pad) return 0;
+    switch (SDL_GetGamepadType(pad)) {
+        case SDL_GAMEPAD_TYPE_PS3:
+        case SDL_GAMEPAD_TYPE_PS4:
+        case SDL_GAMEPAD_TYPE_PS5:
+            return 3;
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+        case SDL_GAMEPAD_TYPE_GAMECUBE:
+            return 1;
+        case SDL_GAMEPAD_TYPE_XBOX360:
+        case SDL_GAMEPAD_TYPE_XBOXONE:
+            return 2;
+        default:
+            break;
+    }
+    if (const char* name = SDL_GetGamepadName(pad)) {
+        std::string lower;
+        lower.reserve(std::strlen(name));
+        for (const unsigned char ch : std::string_view(name)) lower.push_back(char(std::tolower(ch)));
+        if (lower.find("dualsense") != std::string::npos || lower.find("dualshock") != std::string::npos ||
+            lower.find("playstation") != std::string::npos || lower.find("ps5") != std::string::npos ||
+            lower.find("ps4") != std::string::npos)
+            return 3;
+        if (lower.find("nintendo") != std::string::npos || lower.find("switch") != std::string::npos ||
+            lower.find("joy-con") != std::string::npos || lower.find("pro controller") != std::string::npos)
+            return 1;
+        if (lower.find("xbox") != std::string::npos || lower.find("xinput") != std::string::npos)
+            return 2;
+    }
+    return 0;
 }
 
 }  // namespace
@@ -180,6 +223,36 @@ void read_pad_player(unsigned player, PadState& p) {
     if (player == 0) { read_pad(p); return; }
     std::lock_guard lk(g_pad_lock);
     if (player < g_players.size() && !overlay::wants_keyboard()) p = g_players[player];
+}
+ButtonPromptConfig button_prompt_config() {
+    std::array<int, 4> styles{};
+    int active_slot = -1;
+    {
+        std::lock_guard lk(g_pad_lock);
+        styles = g_pad_styles;
+        active_slot = g_player_slots[0];
+    }
+    const int assigned = g_assignments[0].load();
+    int slot = assigned >= 3 && assigned <= 6 ? assigned - 3 : (active_slot >= 0 ? active_slot : 0);
+    slot = std::clamp(slot, 0, 3);
+    ButtonPromptConfig cfg;
+    for (size_t a = 0; a < overlay::kControlCount; ++a) cfg.bindings[a] = g_pad_binding[slot][a].load();
+    const int pref = g_button_icons.load();
+    if (pref >= 1 && pref <= 3) {
+        cfg.style = pref;
+    } else if (styles[slot] >= 1 && styles[slot] <= 3) {
+        cfg.style = styles[slot];
+    } else {
+        int found = 0;
+        for (int s : styles) {
+            if (s >= 1 && s <= 3) {
+                found = s;
+                break;
+            }
+        }
+        cfg.style = found ? found : (g_controller_preset.load() == 1 ? 1 : 2);
+    }
+    return cfg;
 }
 
 namespace linux_host {
@@ -284,6 +357,7 @@ void sample_input() {
     std::array<PadState, 4> players{}, physical_pads{};
     std::array<bool, 4> connected{}, pad_connected{};
     std::array<int, 4> player_slots{{-1, -1, -1, -1}};
+    std::array<int, 4> pad_styles{};
     {
     std::lock_guard gamepad_lock(g_gamepad_lock);
     bool any_connected = false;
@@ -316,6 +390,7 @@ void sample_input() {
         if (!pad) continue;
         PadState& q = physical_pads[slot];
         pad_connected[slot] = true;
+        pad_styles[slot] = detect_gamepad_style(pad);
         // Physical buttons by position (overlay::Physical order), then each action takes its bound button
         // (the menu's preset or remapping; the default preset puts A at the bottom, as on Windows).
         static const SDL_GamepadButton physical[] = {
@@ -402,6 +477,7 @@ void sample_input() {
     players[0] = p;
     g_players = players;
     g_player_slots = player_slots;
+    g_pad_styles = pad_styles;
     for (size_t i = 0; i < connected.size(); ++i)
         if (g_connected[i] != connected[i])
             log("hid: player %zu %s", i + 1, connected[i] ? "connected" : "disconnected");

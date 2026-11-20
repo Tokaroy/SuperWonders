@@ -13,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -224,6 +225,8 @@ std::string data_root() {
 static PcMenuState g_pc_settings;
 static std::array<std::atomic<int>, 4> g_player_devices{};
 static std::atomic<bool> g_keyboard_separate{false};
+static std::atomic<int> g_button_icons{0};
+static std::atomic<int> g_controller_preset{0};
 static std::array<std::array<std::atomic<int>, kPcControlCount>, 4> g_device_bindings{};
 static std::atomic<IXAudio2MasteringVoice*> g_master_voice{nullptr};
 static std::array<std::atomic<int>, kPcControlCount> g_keyboard_bindings{};
@@ -253,7 +256,7 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.language = s.language, o.game_language = s.game_language, o.memory_limit_gb = s.memory_limit_gb;
     o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask;
     o.keyboard_separate = s.keyboard_separate;
-    o.controller_preset = s.controller_preset, o.muted = s.muted, o.fullscreen = s.fullscreen;
+    o.controller_preset = s.controller_preset, o.button_icons = s.button_icons, o.muted = s.muted, o.fullscreen = s.fullscreen;
     o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile;
     o.metric_fps = s.metric_fps, o.metric_one_percent_low = s.metric_one_percent_low;
     o.metric_game_speed = s.metric_game_speed, o.metric_frametime_graph = s.metric_frametime_graph;
@@ -272,7 +275,7 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.language = o.language, s.game_language = o.game_language, s.memory_limit_gb = o.memory_limit_gb;
     s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask;
     s.keyboard_separate = o.keyboard_separate;
-    s.controller_preset = o.controller_preset, s.muted = o.muted, s.fullscreen = o.fullscreen;
+    s.controller_preset = o.controller_preset, s.button_icons = o.button_icons, s.muted = o.muted, s.fullscreen = o.fullscreen;
     s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile;
     s.metric_fps = o.metric_fps, s.metric_one_percent_low = o.metric_one_percent_low;
     s.metric_game_speed = o.metric_game_speed, s.metric_frametime_graph = o.metric_frametime_graph;
@@ -349,6 +352,8 @@ static void apply_metrics_settings(const PcMenuState& state) {
 
 static void apply_input_bindings(const PcMenuState& state) {
     g_keyboard_separate.store(state.keyboard_separate);
+    g_button_icons.store(std::clamp(state.button_icons, 0, 3));
+    g_controller_preset.store(std::clamp(state.controller_preset, 0, 1));
     for (size_t slot = 0; slot < 4; ++slot) g_player_devices[slot].store(state.player_devices[slot]);
     for (size_t i = 0; i < kPcControlCount; ++i) {
         for (size_t slot = 0; slot < 4; ++slot) {
@@ -378,6 +383,7 @@ static void save_pc_settings() {
          << "\nmemory_limit_gb=" << g_pc_settings.memory_limit_gb
          << "\nlow_vram_profile=" << g_pc_settings.low_vram_profile
          << "\ncontroller_preset=" << g_pc_settings.controller_preset
+         << "\nbutton_icons=" << g_pc_settings.button_icons
          << "\nmetrics_enabled=" << g_pc_settings.metrics_enabled << "\nmetric_fps=" << g_pc_settings.metric_fps
          << "\nmetric_one_percent_low=" << g_pc_settings.metric_one_percent_low
          << "\nmetric_game_speed=" << g_pc_settings.metric_game_speed
@@ -429,6 +435,8 @@ static void load_pc_settings() {
         else if (std::sscanf(line.c_str(), "keyboard_separate=%d", &value) == 1) g_pc_settings.keyboard_separate = value != 0;
         else if (std::sscanf(line.c_str(), "controller_preset=%d", &value) == 1)
             g_pc_settings.controller_preset = std::clamp(value, 0, 1);
+        else if (std::sscanf(line.c_str(), "button_icons=%d", &value) == 1)
+            g_pc_settings.button_icons = std::clamp(value, 0, 3);
         else if (std::sscanf(line.c_str(), "metrics_enabled=%d", &value) == 1) g_pc_settings.metrics_enabled = value != 0;
         else if (std::sscanf(line.c_str(), "metric_fps=%d", &value) == 1) g_pc_settings.metric_fps = value != 0;
         else if (std::sscanf(line.c_str(), "metric_one_percent_low=%d", &value) == 1)
@@ -714,6 +722,7 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 11);
     g_pc_settings.memory_limit_gb = std::clamp(g_pc_settings.memory_limit_gb, 2, 32);
     g_pc_settings.controller_preset = std::clamp(g_pc_settings.controller_preset, 0, 1);
+    g_pc_settings.button_icons = std::clamp(g_pc_settings.button_icons, 0, 3);
     g_pc_settings.overlay_position = std::clamp(g_pc_settings.overlay_position, 0, 3);
     apply_input_bindings(g_pc_settings);
     nx::set_game_language(g_pc_settings.game_language);
@@ -1041,14 +1050,56 @@ struct PlayerInputs {
     std::array<PadState, 4> players{};
     std::array<bool, 4> connected{};
     std::array<int, 4> slots{{-1, -1, -1, -1}};
+    std::array<int, 4> styles{};  // 0 unknown, 1 Nintendo, 2 Xbox, 3 PlayStation
     std::array<std::string, 4> names{};
 };
+
+static int detect_gamepad_style(SDL_Gamepad* pad) {
+    if (!pad) return 0;
+    switch (SDL_GetGamepadType(pad)) {
+        case SDL_GAMEPAD_TYPE_PS3:
+        case SDL_GAMEPAD_TYPE_PS4:
+        case SDL_GAMEPAD_TYPE_PS5:
+            return 3;
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+        case SDL_GAMEPAD_TYPE_GAMECUBE:
+            return 1;
+        case SDL_GAMEPAD_TYPE_XBOX360:
+        case SDL_GAMEPAD_TYPE_XBOXONE:
+            return 2;
+        default:
+            break;
+    }
+    if (const char* name = SDL_GetGamepadName(pad)) {
+        std::string lower;
+        lower.reserve(std::strlen(name));
+        for (const unsigned char ch : std::string_view(name)) lower.push_back(char(std::tolower(ch)));
+        if (lower.find("dualsense") != std::string::npos || lower.find("dualshock") != std::string::npos ||
+            lower.find("playstation") != std::string::npos || lower.find("ps5") != std::string::npos ||
+            lower.find("ps4") != std::string::npos)
+            return 3;
+        if (lower.find("nintendo") != std::string::npos || lower.find("switch") != std::string::npos ||
+            lower.find("joy-con") != std::string::npos || lower.find("pro controller") != std::string::npos)
+            return 1;
+        if (lower.find("xbox") != std::string::npos || lower.find("xinput") != std::string::npos)
+            return 2;
+    }
+    return 0;
+}
 
 static void scan_gamepads_locked() {
     SDL_UpdateGamepads();
     bool any_connected = false;
-    for (auto& pad : g_gamepads) {
-        if (pad && !SDL_GamepadConnected(pad)) SDL_CloseGamepad(pad), pad = nullptr;
+    for (size_t slot = 0; slot < g_gamepads.size(); ++slot) {
+        auto& pad = g_gamepads[slot];
+        if (pad && !SDL_GamepadConnected(pad)) {
+            log("hid: gamepad slot %zu disconnected", slot);
+            SDL_CloseGamepad(pad);
+            pad = nullptr;
+        }
         if (pad) any_connected = true;
     }
     const uint64_t now = SDL_GetTicks();
@@ -1061,7 +1112,17 @@ static void scan_gamepads_locked() {
         bool known = false;
         for (auto* pad : g_gamepads) if (pad && SDL_GetGamepadID(pad) == ids[i]) known = true;
         if (known) continue;
-        for (auto& pad : g_gamepads) if (!pad) { pad = SDL_OpenGamepad(ids[i]); break; }
+        for (size_t slot = 0; slot < g_gamepads.size(); ++slot) {
+            if (!g_gamepads[slot]) {
+                g_gamepads[slot] = SDL_OpenGamepad(ids[i]);
+                if (g_gamepads[slot]) {
+                    const char* name = SDL_GetGamepadName(g_gamepads[slot]);
+                    log("hid: gamepad slot %zu connected: %s (type %d)", slot,
+                        name ? name : "Controller", int(SDL_GetGamepadType(g_gamepads[slot])));
+                }
+                break;
+            }
+        }
     }
     SDL_free(ids);
 }
@@ -1092,6 +1153,7 @@ static PlayerInputs sample_players_uncached() {
             present[slot] = true;
             const char* name = SDL_GetGamepadName(pad);
             result.names[slot] = name ? name : "Controller";
+            result.styles[slot] = detect_gamepad_style(pad);
             bool down[kPcControlCount]{};
             for (size_t i = 0; i < kPcControlCount; ++i)
                 down[i] = buttons[i] != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(pad, buttons[i]);
@@ -1188,22 +1250,41 @@ static PlayerInputs g_cached_players = [] {
 static void ensure_input_poller() {
     static std::once_flag once;
     std::call_once(once, [] {
-        PlayerInputs first = sample_players_uncached();
-        {
-            std::lock_guard lk(g_player_sample_lock);
-            g_cached_players = std::move(first);
-        }
+        static std::atomic<bool> ready{false};
         std::thread([] {
             set_thread_name("win-input");
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+            if (!SDL_Init(SDL_INIT_GAMEPAD))
+                log("hid: SDL gamepad input unavailable: %s", SDL_GetError());
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev)) {}
+            PlayerInputs first = sample_players_uncached();
+            {
+                std::lock_guard lk(g_player_sample_lock);
+                g_cached_players = std::move(first);
+            }
+            ready.store(true, std::memory_order_release);
             for (;;) {
+                while (SDL_PollEvent(&ev)) {
+                    if (ev.type == SDL_EVENT_GAMEPAD_ADDED || ev.type == SDL_EVENT_GAMEPAD_REMOVED ||
+                        ev.type == SDL_EVENT_JOYSTICK_ADDED || ev.type == SDL_EVENT_JOYSTICK_REMOVED) {
+                        std::lock_guard glk(g_gamepad_lock);
+                        g_last_scan_ms = 0;
+                    }
+                }
                 PlayerInputs next = sample_players_uncached();
                 {
                     std::lock_guard lk(g_player_sample_lock);
+                    for (size_t i = 0; i < 4; ++i)
+                        if (g_cached_players.connected[i] != next.connected[i])
+                            log("hid: player %zu %s", i + 1, next.connected[i] ? "connected" : "disconnected");
                     g_cached_players = std::move(next);
                 }
                 sleep_ns(2'000'000ll);
             }
         }).detach();
+        while (!ready.load(std::memory_order_acquire)) Sleep(1);
     });
 }
 
@@ -1240,6 +1321,30 @@ void read_pad_player(unsigned player, PadState& p) {
         if (overlay::enabled()) overlay::filter_pad(p);
         if (pc_menu_open()) p = {};
     } else if (overlay::wants_keyboard() || pc_menu_open()) p = {};
+}
+ButtonPromptConfig button_prompt_config() {
+    const PlayerInputs inputs = sample_players();
+    const int assigned = g_player_devices[0].load();
+    int slot = assigned >= 3 && assigned <= 6 ? assigned - 3 : (inputs.slots[0] >= 0 ? inputs.slots[0] : 0);
+    slot = std::clamp(slot, 0, 3);
+    ButtonPromptConfig cfg;
+    for (size_t a = 0; a < kPcControlCount; ++a) cfg.bindings[a] = g_device_bindings[slot][a].load();
+    const int pref = g_button_icons.load();
+    if (pref >= 1 && pref <= 3) {
+        cfg.style = pref;
+    } else if (inputs.styles[slot] >= 1 && inputs.styles[slot] <= 3) {
+        cfg.style = inputs.styles[slot];
+    } else {
+        int found = 0;
+        for (int s : inputs.styles) {
+            if (s >= 1 && s <= 3) {
+                found = s;
+                break;
+            }
+        }
+        cfg.style = found ? found : (g_controller_preset.load() == 1 ? 1 : 2);
+    }
+    return cfg;
 }
 void read_pad(PadState& p) {
     PadState mapped{};
@@ -1466,7 +1571,6 @@ int main() {
     nx::plat::make_dirs(nx::plat::data_root());
     nx::plat::load_pc_settings();
     nx::plat::start_memory_guard();  // before anything can grow: a leak must never freeze the machine (memguard_win.cpp)
-    if (!SDL_Init(SDL_INIT_GAMEPAD)) std::fprintf(stderr, "SDL gamepad input unavailable: %s\n", SDL_GetError());
     SetUnhandledExceptionFilter(crash_handler);
     if (const char* t = std::getenv("NX_THROW_TRACE"); t && *t == '1') AddVectoredExceptionHandler(1, throw_tracer);
     if (const char* w = std::getenv("NX_WATCH")) {
@@ -1573,6 +1677,40 @@ std::vector<std::string> program_args() {
     }
     if (argv) LocalFree(argv);
     return out;
+}
+
+bool upgrade_button_font(const std::string& out_path) {
+    std::wstring exe_path(32768, L'\0');
+    const DWORD len = GetModuleFileNameW(nullptr, exe_path.data(), DWORD(exe_path.size()));
+    if (len == 0 || len >= exe_path.size()) return false;
+    exe_path.resize(len);
+    const auto exe_dir = std::filesystem::path(exe_path).parent_path();
+    std::error_code ec;
+    const auto script = exe_dir / L"game-build" / L"tools" / L"fonts" / L"make_button_font.py";
+    if (!std::filesystem::is_regular_file(script, ec)) return false;
+    const auto bundled_py = exe_dir / L"game-build" / L"python" / L"python.exe";
+    const std::wstring py = std::filesystem::is_regular_file(bundled_py, ec) ? bundled_py.wstring() : L"python.exe";
+    std::wstring base;
+    for (const wchar_t* cand : {L"C:/Windows/Fonts/arialuni.ttf", L"C:/Windows/Fonts/arial.ttf"}) {
+        if (std::filesystem::is_regular_file(cand, ec)) {
+            base = cand;
+            break;
+        }
+    }
+    if (base.empty()) return false;
+    std::wstring cmd = L"\"" + py + L"\" \"" + script.wstring() + L"\" --base \"" + base +
+                       L"\" --out \"" + utf16(out_path) + L"\"";
+    STARTUPINFOW si{sizeof si};
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                        nullptr, exe_dir.c_str(), &si, &pi))
+        return false;
+    const DWORD waited = WaitForSingleObject(pi.hProcess, 15000);
+    DWORD code = 1;
+    if (waited == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return waited == WAIT_OBJECT_0 && code == 0;
 }
 
 }  // namespace nx::plat

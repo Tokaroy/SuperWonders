@@ -89,6 +89,12 @@ std::array<std::string, 4> controller_names();
 bool player_connected(unsigned player);
 void read_pad_player(unsigned player, PadState& p);
 void rumble_player(unsigned player, float low, float high);
+struct ButtonPromptConfig {
+    int style = 1;                  // 1 Nintendo, 2 Xbox, 3 PlayStation
+    std::array<int, 16> bindings{}; // overlay::Control -> overlay::Physical
+};
+ButtonPromptConfig button_prompt_config();
+bool upgrade_button_font(const std::string& out_path);
 #endif
 bool fast_forward();  // held: the game runs unpaced (Tab on PC; false where there is no key for it)
 // Player 1's controller rumble: low (heavy) and high (light) motor, 0..1, scaled by the player's strength setting.

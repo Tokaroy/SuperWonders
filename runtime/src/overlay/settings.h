@@ -39,6 +39,7 @@ struct Settings {
     std::array<uint32_t, 4> pad_custom_mask{};
     bool keyboard_separate = false;  // keyboard is player 1 and controllers start at player 2
     int controller_preset = 1;  // 1 Nintendo positions (the default, as on the Switch: A on the right), 0 Xbox / DualSense
+    int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation (applies after a restart)
     bool muted = false, fullscreen = false, always_on_top = false;
     bool metrics_enabled = false, low_vram_profile = false;
     bool metric_fps = true, metric_one_percent_low = true, metric_game_speed = true, metric_frametime_graph = true;

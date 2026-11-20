@@ -56,6 +56,7 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "low_vram_profile=%d", &v) == 1) s.low_vram_profile = v != 0;
         else if (std::sscanf(l, "keyboard_separate=%d", &v) == 1) s.keyboard_separate = v != 0;
         else if (std::sscanf(l, "controller_preset=%d", &v) == 1) s.controller_preset = std::clamp(v, 0, 1);
+        else if (std::sscanf(l, "button_icons=%d", &v) == 1) s.button_icons = std::clamp(v, 0, 3);
         else if (std::sscanf(l, "metrics_enabled=%d", &v) == 1) s.metrics_enabled = v != 0;
         else if (std::sscanf(l, "metric_fps=%d", &v) == 1) s.metric_fps = v != 0;
         else if (std::sscanf(l, "metric_one_percent_low=%d", &v) == 1) s.metric_one_percent_low = v != 0;
@@ -105,7 +106,8 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\ngame_language_version=2"
       << "\nmemory_limit_gb=" << s.memory_limit_gb << "\nlow_vram_profile=" << s.low_vram_profile
       << "\nkeyboard_separate=" << s.keyboard_separate
-      << "\ncontroller_preset=" << s.controller_preset << "\nmetrics_enabled=" << s.metrics_enabled
+      << "\ncontroller_preset=" << s.controller_preset << "\nbutton_icons=" << s.button_icons
+      << "\nmetrics_enabled=" << s.metrics_enabled
       << "\nmetric_fps=" << s.metric_fps << "\nmetric_one_percent_low=" << s.metric_one_percent_low
       << "\nmetric_game_speed=" << s.metric_game_speed << "\nmetric_frametime_graph=" << s.metric_frametime_graph
       << "\noverlay_position=" << s.overlay_position << "\ncontroller_custom_mask=" << s.controller_custom_mask

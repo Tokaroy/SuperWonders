@@ -84,6 +84,9 @@ if(NX_TESTS AND NOT ANDROID)
     add_executable(input_settings_test tests/input_settings_test.cpp runtime/src/overlay/settings.cpp)
     target_include_directories(input_settings_test PRIVATE runtime/src)
     add_test(NAME input_settings COMMAND input_settings_test)
+    add_executable(button_font_remap_test tests/button_font_remap_test.cpp runtime/src/ttf_cmap_remap.cpp)
+    target_include_directories(button_font_remap_test PRIVATE runtime/src)
+    add_test(NAME button_font_remap COMMAND button_font_remap_test)
     add_executable(user_profiles_test tests/user_profiles_test.cpp runtime/src/user_profiles.cpp runtime/src/profile_image.cpp)
     target_include_directories(user_profiles_test PRIVATE runtime/src)
     add_test(NAME user_profiles COMMAND user_profiles_test)
@@ -238,6 +241,7 @@ set(NX_RUNTIME_SOURCES
     runtime/src/hle_net.cpp
     runtime/src/hle_audio.cpp
     runtime/src/hle_pl.cpp
+    runtime/src/ttf_cmap_remap.cpp
     runtime/src/input_script.cpp
     runtime/src/play.cpp
     runtime/src/touch_layout.cpp
