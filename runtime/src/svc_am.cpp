@@ -1,13 +1,19 @@
 // am services (appletOE): application proxy, focus/operation-mode state, launch parameters.
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <iterator>
+#include <string_view>
 
 #include "ipc.h"
 #include "platform.h"
 #include "svc_am.h"
+#if NX_GAME_LIBRARY
+#include "launcher/game_version.h"
+#endif
 
 namespace nx {
 
@@ -190,6 +196,28 @@ std::shared_ptr<Service> application_functions() {
                 logged_code = code;
             }
             c.push<uint64_t>(code);
+            return 0u;
+        };
+        s.cmds[23] = [](IpcCtx& c) {  // GetDisplayVersion -> nn::oe::DisplayVersion { char name[16]; }
+            static const std::string ver = []() -> std::string {
+#if NX_GAME_LIBRARY
+                const std::string root = plat::data_root();
+                const std::filesystem::path p(
+                    std::u8string_view(reinterpret_cast<const char8_t*>(root.data()), root.size()));
+                const auto info = launcher::inspect_output_dir(p, "", "");
+                if (!info.installed_version.empty() && info.installed_version.size() < 16)
+                    return info.installed_version;
+#endif
+                return "1.0.0";
+            }();
+            char out[16] = {};
+            std::memcpy(out, ver.data(), std::min(ver.size(), sizeof(out) - 1));
+            for (char ch : out) c.push<char>(ch);
+            static bool logged = false;
+            if (!logged) {
+                logged = true;
+                log("oe: GetDisplayVersion -> %s", out);
+            }
             return 0u;
         };
         s.cmds[40] = [](IpcCtx& c) { c.push<uint8_t>(0); return 0u; };  // NotifyRunning

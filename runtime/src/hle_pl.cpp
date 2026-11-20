@@ -82,6 +82,7 @@ const Font& font(uint32_t type) {
         bool remapped = remap_button_font_cmap(ttf, cfg.style, cfg.bindings);
         if (!remapped) {
             log("pl: shared_5.ttf lacks dynamic button icons; regenerating...");
+            plat::make_dirs(root);
             const std::string target = root + "shared_5.ttf";
             if (plat::upgrade_button_font(target)) {
                 std::vector<uint8_t> upgraded = read_file(target);

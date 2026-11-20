@@ -314,7 +314,9 @@ int frame_cap_setting() {
 // longer between presents alone would halve its speed (its step follows the interval it chose, not wall time).
 void frame_time_probe(CPU& c) {
     const LoadedModule* m = module_at(c.x[30]);
-    if (!m || c.x[30] - m->base != 0xe16ac || !c.x[19]) return;
+    if (!m || !c.x[19]) return;
+    const uint64_t lr_off = c.x[30] - m->base;
+    if (lr_off != 0xe16ac && lr_off != 0xcfde4) return;  // 1.0.0, 1.2.1 (sead::GameFramework::procFrame_)
     plat::perf_hint_thread();  // the game's main thread makes the frame too (ADPF, PLAN.md R2)
     plat::frame_thread_tick(1);
     static const char* max_env = std::getenv("NX_MAX_INTERVAL");

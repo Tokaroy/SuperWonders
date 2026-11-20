@@ -26,6 +26,7 @@ import hashlib
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -35,6 +36,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WIN = os.name == "nt"
 LIB = f"{GAME}_game.dll" if WIN else f"lib{GAME}_game.so"
 MODULES = (("main", "0x4000000000"), ("sdk", "0x4010000000"))
+WONDER_PROGRAM_ID = 0x010015100B514000
+# Full 40-hex (or 16-hex prefix for known unsupported patches) NSO0 main Build ID -> (version, expected_romfs_product, compatible)
+EXEFS_BUILD_IDS = {
+    "CD6E42AEE7934F4D8393CD43893AE25EDC83D338": ("1.0.0", 100, True),
+    "FF773E90972D544EB79406EAA65396D53C43EFB9": ("1.2.1", 120, True),
+    "F91868B88F60D3D5": ("1.0.1", 101, False),
+    "B37398A1B68747B7": ("1.2.0", 120, False),
+}
 WARN = ["-Wno-unused-label", "-Wno-unused-value", "-Wno-parentheses-equality", "-Wno-unused-variable",
         "-Wno-unused-but-set-variable", "-Wno-constant-logical-operand", "-Wno-unused-function"]
 # The same flags as CMakeLists.txt gives game_main / game_sdk and <game>_game (keep them in step).
@@ -121,14 +130,74 @@ def progress(fraction, what):
     print(f"progress {max(0.0, min(1.0, fraction)):.3f} {what}", flush=True)
 
 
-def check_exefs(exefs):
+def read_npdm_program_id(exefs):
+    p = os.path.join(exefs, "main.npdm")
+    if not os.path.isfile(p):
+        return None
+    with open(p, "rb") as f:
+        raw = f.read()
+    k = raw.find(b"ACI0")
+    if k >= 0 and k + 0x18 <= len(raw):
+        return struct.unpack_from("<Q", raw, k + 0x10)[0]
+    return None
+
+
+def inspect_exefs(exefs):
+    """Identify the Super Mario Bros. Wonder ExeFS version and whether it is supported."""
+    info = {
+        "version": None,
+        "compatible": False,
+        "build_id": "",
+        "program_id": None,
+        "expected_romfs_product": None,
+        "error": None,
+    }
     for name, _ in MODULES:
         p = os.path.join(exefs, name)
         if not os.path.isfile(p):
-            raise SystemExit(f"error: {p} not found: pick the ExeFS folder of your own copy of the game (it holds main and sdk)")
+            info["error"] = f"error: {p} not found: pick the ExeFS folder of your own copy of the game (it holds main and sdk)"
+            return info
         with open(p, "rb") as f:
-            if f.read(4) != b"NSO0":
-                raise SystemExit(f"error: {p} is not an NSO module (an extracted ExeFS has main and sdk as NSO files)")
+            hdr = f.read(0x60)
+        if len(hdr) < 0x60 or hdr[:4] != b"NSO0":
+            info["error"] = f"error: {p} is not an NSO module (an extracted ExeFS has main and sdk as NSO files)"
+            return info
+        if name == "main":
+            info["build_id"] = hdr[0x40:0x54].hex().upper()
+
+    pid = read_npdm_program_id(exefs)
+    info["program_id"] = pid
+    if pid is not None and pid != WONDER_PROGRAM_ID:
+        info["error"] = f"error: ExeFS belongs to title ID {pid:016X}, expected Super Mario Bros. Wonder ({WONDER_PROGRAM_ID:016X})"
+        return info
+
+    bid = info["build_id"]
+    match = EXEFS_BUILD_IDS.get(bid)
+    if match is None:
+        match = EXEFS_BUILD_IDS.get(bid[:16])
+    if match is not None:
+        ver, expected_romfs, compatible = match
+        info["version"] = ver
+        info["expected_romfs_product"] = expected_romfs
+        info["compatible"] = compatible
+        if not compatible:
+            info["error"] = (
+                f"error: ExeFS is Super Mario Bros. Wonder {ver} (Build ID {bid[:16]}), "
+                f"which is not supported (supported versions: 1.0.0 and 1.2.1)"
+            )
+    else:
+        info["error"] = (
+            f"error: ExeFS has unknown main Build ID {bid[:16]} "
+            f"(supported versions: 1.0.0 and 1.2.1)"
+        )
+    return info
+
+
+def check_exefs(exefs):
+    info = inspect_exefs(exefs)
+    if info["error"] or not info["compatible"]:
+        raise SystemExit(info["error"] or "error: incompatible ExeFS")
+    return info
 
 
 def default_data_root():
@@ -251,35 +320,46 @@ def build(a):
     if not kit.cxx:
         raise SystemExit("error: no C++ compiler (clang++) found: this build of SuperWonders is missing game-build/toolchain")
     exefs = os.path.abspath(a.exefs)
-    check_exefs(exefs)
+    info = check_exefs(exefs)
     game_dir = os.path.join(os.path.abspath(a.data_root or default_data_root()), "game")
     reason = why_build(kit, exefs, game_dir)
     if not reason and not a.force:
         progress(1.0, "The game code is up to date")
         return 0
-    print(f"building the game code: {reason or 'forced'}", flush=True)
+    print(f"building the game code (Wonder {info['version']}): {reason or 'forced'}", flush=True)
     t0 = time.time()
     work = os.path.join(game_dir, "work")
     gen, obj = os.path.join(work, "gen"), os.path.join(work, "obj")
     os.makedirs(work, exist_ok=True)
-    # Objects from another kit (other headers, flags or compiler) can't be reused.
+    # Objects from another kit (other headers, flags or compiler) or another game version can't be reused.
     stamp = os.path.join(work, "kit-id.txt")
+    inp_stamp = os.path.join(work, "input-id.txt")
     kit_id = kit.id()
+    inp_id = input_id(exefs)
     try:
         old = open(stamp).read().strip()
     except OSError:
         old = ""
-    if old != kit_id:
+    try:
+        old_inp = open(inp_stamp).read().strip()
+    except OSError:
+        old_inp = ""
+    if old_inp != inp_id:
+        shutil.rmtree(gen, ignore_errors=True)
+        shutil.rmtree(obj, ignore_errors=True)
+    elif old != kit_id:
         shutil.rmtree(obj, ignore_errors=True)
     with open(stamp, "w") as f:
         f.write(kit_id + "\n")
+    with open(inp_stamp, "w") as f:
+        f.write(inp_id + "\n")
 
     recompile(kit, exefs, gen, 0.0, 0.25)
     objs = compile_all(kit, gen, obj, a.jobs, 0.25, 0.70)
     progress(0.96, "Linking the game code")
     link(kit, objs, game_dir, work)
     with open(os.path.join(game_dir, "build-id.txt"), "w") as f:
-        f.write(f"kit {kit_id}\ninput {input_id(exefs)}\n")
+        f.write(f"kit {kit_id}\ninput {inp_id}\nversion {info['version']}\n")
     if not a.keep_work:
         shutil.rmtree(work, ignore_errors=True)
     progress(1.0, f"The game code is built ({time.time() - t0:.0f} s)")

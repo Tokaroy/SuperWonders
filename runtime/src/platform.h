@@ -46,7 +46,10 @@ bool make_dirs(const std::string& path);
 
 // ---- output ----
 void log_line(const char* line);  // stderr / logcat
+std::string default_data_root();
 std::string data_root();
+bool set_data_root(const std::string& path);
+void reload_pc_settings();
 std::string setting(const std::string& key);  // a player setting: config.txt (Android), NX_<KEY> (PC); "" if unset          // where private/ lives ("private" on PC, the app's external files dir on Android)
 
 // ---- the launcher (launcher/launcher.cpp; Windows and Linux) ----

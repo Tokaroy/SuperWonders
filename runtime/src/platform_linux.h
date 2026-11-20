@@ -11,6 +11,7 @@ extern SDL_AudioStream* g_stream;   // null when muted or headless
 
 // Main thread.
 void load_player_settings();  // after SDL_Init: pc-settings.ini, applied, handed to the overlay
+void reload_player_settings();  // reload when the launcher changes data_root (no-op if no ini in new root)
 void sample_input();          // every loop: the pad snapshot read_pad() copies
 bool handle_event(const SDL_Event& e);  // keys and mouse (F11, the overlay menu); true when used
 void run_posted();            // settings work posted by other threads (window size, fullscreen)

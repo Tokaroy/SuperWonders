@@ -26,6 +26,7 @@
 #include <nx/runtime.h>
 
 #include "imgui.h"
+#include "launcher/game_version.h"
 #include "launcher/test_pad.h"
 #include "launcher/updates.h"
 #include "nvn/nvn_vk.h"
@@ -128,27 +129,30 @@ Kit find_kit() {
 enum class Ready { Yes, NotSetUp, Rebuild };
 struct Status {
     Ready ready = Ready::NotSetUp;
+    bool kit_outdated = false;
+    std::string installed_version;
     std::string why;
 };
 
 Status check_status(const Kit& kit) {
     const fs::path d = u8(plat::data_root());
+    const OutputInfo out = inspect_output_dir(d, NX_GAMELIB_FILE, game_lib_path());
     Status s;
-    const char* missing = nullptr;
-    if (game_lib_path().empty()) missing = "The game code isn't built yet.";
-    else if (!file(d / "analysis" / "main.bin") || !file(d / "analysis" / "sdk.bin")) missing = "The game's executable isn't read yet.";
-    else if (!file(d / "shader_programs.bin") || !file(d / "spirv" / "results.tsv")) missing = "The shaders aren't translated yet.";
-    else if (!fs::exists(d / "extract" / "romfs")) missing = "The game's files aren't set up yet.";
-    if (missing) {
-        s.why = missing;
+    s.installed_version = out.installed_version;
+    if (!out.ready) {
+        s.why = out.missing_reason;
         return s;
     }
-    // A release whose kit builds the game code differently (an update): build it again before playing.
     const std::string built = read_line(d / "game" / "build-id.txt", "kit");
-    if (!kit.id.empty() && !built.empty() && built != kit.id && game_lib_path() == str(d / "game" / NX_GAMELIB_FILE)) {
-        s.ready = Ready::Rebuild;
-        s.why = "This version of SuperWonders builds the game code differently.";
-        return s;
+    const std::string local_lib = str(d / "game" / NX_GAMELIB_FILE);
+    if (!kit.id.empty() && !built.empty() && built != kit.id && game_lib_path() == local_lib) {
+        std::string abi_why;
+        if (!probe_game_lib(local_lib, abi_why)) {
+            s.ready = Ready::Rebuild;
+            s.why = abi_why.empty() ? "This version of SuperWonders requires rebuilding the game code." : abi_why;
+            return s;
+        }
+        s.kit_outdated = true;
     }
     s.ready = Ready::Yes;
     return s;
@@ -337,85 +341,95 @@ enum Page { PagePlay, PageFiles, PageSettings, PageMods, PageUpdates, PageQuit, 
 const char* const kPageNames[kPages] = {"Play", "Game files", "Settings", "Mods", "Updates", "Quit"};
 
 enum LauncherText {
-    LtPlay, LtGameFiles, LtSettings, LtMods, LtUpdates, LtQuit, LtSuperWonders, LtAbout, LtYourGameFiles, LtExeFS,
-    LtRomFSFolder, LtChoose, LtUseInPlace, LtCopyIt, LtSetUp, LtSetUpGameFiles, LtOpenDataFolder, LtOpenSettings,
-    LtFolder, LtOpenModsFolder, LtRefresh, LtQuitSuperWonders, LtFilesReady, LtNeedsRebuild, LtFilesNotSetUp,
-    LtSelect, LtBack, LtPages, LtPlayHint, LtStart, LtSetUpFirst, LtVersion, LtChooseExeFS, LtChooseRomFS, LtUseFolder,
-    LtUpFolder, LtHomeFolder, LtDrives, LtFoldersHere, LtOtherWays, LtSystemPicker, LtCancel, LtSetUpAgain, LtTextCount
+    LtPlay, LtGameFiles, LtSettings, LtMods, LtUpdates, LtQuit, LtSuperWonders, LtAbout, LtYourGameFiles,
+    LtOutputFolder, LtExeFS, LtRomFSFolder, LtGameVersion, LtChoose, LtUseInPlace, LtCopyIt, LtSetUp, LtSetUpGameFiles,
+    LtOpenDataFolder, LtOpenSettings, LtFolder, LtOpenModsFolder, LtRefresh, LtQuitSuperWonders, LtFilesReady,
+    LtNeedsRebuild, LtFilesNotSetUp, LtSelect, LtBack, LtPages, LtPlayHint, LtStart, LtSetUpFirst, LtVersion,
+    LtChooseOutput, LtChooseExeFS, LtChooseRomFS, LtUseFolder, LtResetDefault, LtUpFolder, LtHomeFolder, LtDrives,
+    LtFoldersHere, LtOtherWays, LtSystemPicker, LtCancel, LtSetUpAgain, LtTextCount
 };
 
 // These short labels follow the language selected in F1 > System; the detailed tool output stays in its original language.
 const char* const kLauncherText[10][LtTextCount] = {
     {"Play", "Game files", "Settings", "Mods", "Updates", "Quit", "SuperWonders", "About", "Your game files",
-     "ExeFS folder", "RomFS folder", "Choose...", "Use it in place", "Copy it", "Set up", "Set up game files",
-     "Open the data folder", "Open settings", "Folder", "Open the mods folder", "Refresh", "Quit SuperWonders",
-     "Game files ready", "Game code needs building again", "Game files not set up", "Select", "Back", "Pages", "Play",
-     "Start", "Set up first", "Version", "Choose your ExeFS folder", "Choose your RomFS folder", "Use this folder",
-     "Up one folder", "Home folder", "Drives", "Folders here", "Other ways", "The system's folder picker", "Cancel",
-     "Set up again"},
+     "Output folder", "ExeFS folder", "RomFS folder", "Game version", "Choose...", "Use it in place", "Copy it",
+     "Set up", "Set up game files", "Open output folder", "Open settings", "Folder", "Open the mods folder", "Refresh",
+     "Quit SuperWonders", "Game files ready", "Game code needs building again", "Game files not set up", "Select", "Back",
+     "Pages", "Play", "Start", "Set up first", "Version", "Choose your output folder", "Choose your ExeFS folder",
+     "Choose your RomFS folder", "Use this folder", "Use default folder", "Up one folder", "Home folder", "Drives",
+     "Folders here", "Other ways", "The system's folder picker", "Cancel", "Set up again"},
     {"Gioca", "File di gioco", "Impostazioni", "Mod", "Aggiornamenti", "Esci", "SuperWonders", "Informazioni",
-     "File del gioco", "Cartella ExeFS", "Cartella RomFS", "Scegli...", "Usa nella posizione", "Copia", "Configurazione",
-     "Configura i file di gioco", "Apri cartella dati", "Apri impostazioni", "Cartella", "Apri cartella mod", "Aggiorna",
-     "Esci da SuperWonders", "File di gioco pronti", "Ricompila il codice di gioco", "File di gioco non configurati",
-     "Seleziona", "Indietro", "Pagine", "Gioca", "Avvia", "Configura prima", "Versione", "Scegli la cartella ExeFS",
-     "Scegli la cartella RomFS", "Usa questa cartella", "Cartella superiore", "Cartella home", "Unità", "Cartelle qui",
-     "Altri metodi", "Selettore cartelle di sistema", "Annulla", "Configura di nuovo"},
+     "File del gioco", "Cartella di output", "Cartella ExeFS", "Cartella RomFS", "Versione gioco", "Scegli...",
+     "Usa nella posizione", "Copia", "Configurazione", "Configura i file di gioco", "Apri cartella di output",
+     "Apri impostazioni", "Cartella", "Apri cartella mod", "Aggiorna", "Esci da SuperWonders", "File di gioco pronti",
+     "Ricompila il codice di gioco", "File di gioco non configurati", "Seleziona", "Indietro", "Pagine", "Gioca",
+     "Avvia", "Configura prima", "Versione", "Scegli cartella di output", "Scegli la cartella ExeFS",
+     "Scegli la cartella RomFS", "Usa questa cartella", "Usa cartella predefinita", "Cartella superiore",
+     "Cartella home", "Unità", "Cartelle qui", "Altri metodi", "Selettore cartelle di sistema", "Annulla",
+     "Configura di nuovo"},
     {"Spielen", "Spieldateien", "Einstellungen", "Mods", "Updates", "Beenden", "SuperWonders", "Info",
-     "Deine Spieldateien", "ExeFS-Ordner", "RomFS-Ordner", "Auswählen...", "Am Ort verwenden", "Kopieren", "Einrichten",
-     "Spieldateien einrichten", "Datenordner öffnen", "Einstellungen öffnen", "Ordner", "Mods-Ordner öffnen", "Aktualisieren",
-     "SuperWonders beenden", "Spieldateien bereit", "Spielcode muss neu erstellt werden", "Spieldateien nicht eingerichtet",
-     "Auswählen", "Zurück", "Seiten", "Spielen", "Starten", "Zuerst einrichten", "Version", "ExeFS-Ordner auswählen",
-     "RomFS-Ordner auswählen", "Diesen Ordner verwenden", "Übergeordneter Ordner", "Benutzerordner", "Laufwerke",
-     "Ordner hier", "Weitere Möglichkeiten", "System-Dateiauswahl", "Abbrechen", "Erneut einrichten"},
+     "Deine Spieldateien", "Ausgabeordner", "ExeFS-Ordner", "RomFS-Ordner", "Spielversion", "Auswählen...",
+     "Am Ort verwenden", "Kopieren", "Einrichten", "Spieldateien einrichten", "Ausgabeordner öffnen",
+     "Einstellungen öffnen", "Ordner", "Mods-Ordner öffnen", "Aktualisieren", "SuperWonders beenden",
+     "Spieldateien bereit", "Spielcode muss neu erstellt werden", "Spieldateien nicht eingerichtet", "Auswählen",
+     "Zurück", "Seiten", "Spielen", "Starten", "Zuerst einrichten", "Version", "Ausgabeordner auswählen",
+     "ExeFS-Ordner auswählen", "RomFS-Ordner auswählen", "Diesen Ordner verwenden", "Standardordner verwenden",
+     "Übergeordneter Ordner", "Benutzerordner", "Laufwerke", "Ordner hier", "Weitere Möglichkeiten",
+     "System-Dateiauswahl", "Abbrechen", "Erneut einrichten"},
     {"Jouer", "Fichiers du jeu", "Paramètres", "Mods", "Mises à jour", "Quitter", "SuperWonders", "À propos",
-     "Fichiers du jeu", "Dossier ExeFS", "Dossier RomFS", "Choisir...", "Utiliser sur place", "Copier", "Configurer",
-     "Configurer les fichiers du jeu", "Ouvrir le dossier de données", "Ouvrir les paramètres", "Dossier",
-     "Ouvrir le dossier des mods", "Actualiser", "Quitter SuperWonders", "Fichiers du jeu prêts",
-     "Le code du jeu doit être recompilé", "Fichiers du jeu non configurés", "Sélectionner", "Retour", "Pages", "Jouer",
-     "Démarrer", "Configurer d'abord", "Version", "Choisir le dossier ExeFS", "Choisir le dossier RomFS",
-     "Utiliser ce dossier", "Dossier parent", "Dossier personnel", "Lecteurs", "Dossiers ici", "Autres méthodes",
+     "Fichiers du jeu", "Dossier de sortie", "Dossier ExeFS", "Dossier RomFS", "Version du jeu", "Choisir...",
+     "Utiliser sur place", "Copier", "Configurer", "Configurer les fichiers du jeu", "Ouvrir le dossier de sortie",
+     "Ouvrir les paramètres", "Dossier", "Ouvrir le dossier des mods", "Actualiser", "Quitter SuperWonders",
+     "Fichiers du jeu prêts", "Le code du jeu doit être recompilé", "Fichiers du jeu non configurés", "Sélectionner",
+     "Retour", "Pages", "Jouer", "Démarrer", "Configurer d'abord", "Version", "Choisir le dossier de sortie",
+     "Choisir le dossier ExeFS", "Choisir le dossier RomFS", "Utiliser ce dossier", "Dossier par défaut",
+     "Dossier parent", "Dossier personnel", "Lecteurs", "Dossiers ici", "Autres méthodes",
      "Sélecteur de dossiers système", "Annuler", "Reconfigurer"},
     {"Jugar", "Archivos del juego", "Ajustes", "Mods", "Actualizaciones", "Salir", "SuperWonders", "Acerca de",
-     "Archivos del juego", "Carpeta ExeFS", "Carpeta RomFS", "Elegir...", "Usar en su ubicación", "Copiar", "Configurar",
-     "Configurar archivos del juego", "Abrir carpeta de datos", "Abrir ajustes", "Carpeta", "Abrir carpeta de mods",
-     "Actualizar", "Salir de SuperWonders", "Archivos del juego listos", "Hay que recompilar el código del juego",
-     "Archivos del juego sin configurar", "Seleccionar", "Atrás", "Páginas", "Jugar", "Iniciar", "Configura primero",
-     "Versión", "Elegir carpeta ExeFS", "Elegir carpeta RomFS", "Usar esta carpeta", "Carpeta superior", "Carpeta de inicio",
-     "Unidades", "Carpetas aquí", "Otras opciones", "Selector de carpetas del sistema", "Cancelar", "Configurar de nuevo"},
-    {"플레이", "게임 파일", "설정", "모드", "업데이트", "종료", "SuperWonders", "정보", "게임 파일", "ExeFS 폴더",
-     "RomFS 폴더", "선택...", "현재 위치에서 사용", "복사", "설정", "게임 파일 설정", "데이터 폴더 열기",
-     "설정 열기", "폴더", "모드 폴더 열기", "새로고침", "SuperWonders 종료", "게임 파일 준비 완료",
+     "Archivos del juego", "Carpeta de salida", "Carpeta ExeFS", "Carpeta RomFS", "Versión del juego", "Elegir...",
+     "Usar en su ubicación", "Copiar", "Configurar", "Configurar archivos del juego", "Abrir carpeta de salida",
+     "Abrir ajustes", "Carpeta", "Abrir carpeta de mods", "Actualizar", "Salir de SuperWonders",
+     "Archivos del juego listos", "Hay que recompilar el código del juego", "Archivos del juego sin configurar",
+     "Seleccionar", "Atrás", "Páginas", "Jugar", "Iniciar", "Configura primero", "Versión", "Elegir carpeta de salida",
+     "Elegir carpeta ExeFS", "Elegir carpeta RomFS", "Usar esta carpeta", "Carpeta predeterminada", "Carpeta superior",
+     "Carpeta de inicio", "Unidades", "Carpetas aquí", "Otras opciones", "Selector de carpetas del sistema",
+     "Cancelar", "Configurar de nuevo"},
+    {"플레이", "게임 파일", "설정", "모드", "업데이트", "종료", "SuperWonders", "정보", "게임 파일", "출력 폴더",
+     "ExeFS 폴더", "RomFS 폴더", "게임 버전", "선택...", "현재 위치에서 사용", "복사", "설정", "게임 파일 설정",
+     "출력 폴더 열기", "설정 열기", "폴더", "모드 폴더 열기", "새로고침", "SuperWonders 종료", "게임 파일 준비 완료",
      "게임 코드를 다시 빌드해야 합니다", "게임 파일이 설정되지 않음", "선택", "뒤로", "페이지", "플레이", "시작",
-     "먼저 설정", "버전", "ExeFS 폴더 선택", "RomFS 폴더 선택", "이 폴더 사용", "상위 폴더", "홈 폴더", "드라이브",
-     "현재 폴더", "다른 방법", "시스템 폴더 선택기", "취소", "다시 설정"},
+     "먼저 설정", "버전", "출력 폴더 선택", "ExeFS 폴더 선택", "RomFS 폴더 선택", "이 폴더 사용", "기본 폴더 사용",
+     "상위 폴더", "홈 폴더", "드라이브", "현재 폴더", "다른 방법", "시스템 폴더 선택기", "취소", "다시 설정"},
     {"プレイ", "ゲームファイル", "設定", "MOD", "更新", "終了", "SuperWonders", "概要", "ゲームファイル",
-     "ExeFS フォルダー", "RomFS フォルダー", "選択...", "この場所で使う", "コピー", "セットアップ", "ゲームファイルを設定",
-     "データフォルダーを開く", "設定を開く", "フォルダー", "MODフォルダーを開く", "更新", "SuperWondersを終了",
-     "ゲームファイルの準備完了", "ゲームコードを再ビルドしてください", "ゲームファイル未設定", "選択", "戻る", "ページ",
-     "プレイ", "開始", "先に設定", "バージョン", "ExeFSフォルダーを選択", "RomFSフォルダーを選択", "このフォルダーを使う",
-     "上のフォルダー", "ホームフォルダー", "ドライブ", "この場所のフォルダー", "その他の方法", "システムのフォルダー選択",
-     "キャンセル", "再設定"},
+     "出力フォルダー", "ExeFS フォルダー", "RomFS フォルダー", "ゲームバージョン", "選択...", "この場所で使う", "コピー",
+     "セットアップ", "ゲームファイルを設定", "出力フォルダーを開く", "設定を開く", "フォルダー", "MODフォルダーを開く",
+     "更新", "SuperWondersを終了", "ゲームファイルの準備完了", "ゲームコードを再ビルドしてください", "ゲームファイル未設定",
+     "選択", "戻る", "ページ", "プレイ", "開始", "先に設定", "バージョン", "出力フォルダーを選択", "ExeFSフォルダーを選択",
+     "RomFSフォルダーを選択", "このフォルダーを使う", "標準フォルダーを使う", "上のフォルダー", "ホームフォルダー", "ドライブ",
+     "この場所のフォルダー", "その他の方法", "システムのフォルダー選択", "キャンセル", "再設定"},
     {"تشغيل", "ملفات اللعبة", "الإعدادات", "التعديلات", "التحديثات", "خروج", "SuperWonders", "حول",
-     "ملفات اللعبة", "مجلد ExeFS", "مجلد RomFS", "اختيار...", "استخدم في مكانه", "نسخ", "إعداد", "إعداد ملفات اللعبة",
-     "فتح مجلد البيانات", "فتح الإعدادات", "مجلد", "فتح مجلد التعديلات", "تحديث", "إنهاء SuperWonders",
-     "ملفات اللعبة جاهزة", "يجب إعادة بناء كود اللعبة", "لم يتم إعداد ملفات اللعبة", "اختيار", "رجوع", "الصفحات",
-     "تشغيل", "ابدأ", "أعد الإعداد أولاً", "الإصدار", "اختر مجلد ExeFS", "اختر مجلد RomFS", "استخدم هذا المجلد",
-     "المجلد الأعلى", "المجلد الرئيسي", "محركات الأقراص", "المجلدات هنا", "طرق أخرى", "منتقي مجلدات النظام", "إلغاء",
-     "إعادة الإعداد"},
+     "ملفات اللعبة", "مجلد الإخراج", "مجلد ExeFS", "مجلد RomFS", "إصدار اللعبة", "اختيار...", "استخدم في مكانه", "نسخ",
+     "إعداد", "إعداد ملفات اللعبة", "فتح مجلد الإخراج", "فتح الإعدادات", "مجلد", "فتح مجلد التعديلات", "تحديث",
+     "إنهاء SuperWonders", "ملفات اللعبة جاهزة", "يجب إعادة بناء كود اللعبة", "لم يتم إعداد ملفات اللعبة", "اختيار",
+     "رجوع", "الصفحات", "تشغيل", "ابدأ", "أعد الإعداد أولاً", "الإصدار", "اختر مجلد الإخراج", "اختر مجلد ExeFS",
+     "اختر مجلد RomFS", "استخدم هذا المجلد", "استخدام المجلد الافتراضي", "المجلد الأعلى", "المجلد الرئيسي",
+     "محركات الأقراص", "المجلدات هنا", "طرق أخرى", "منتقي مجلدات النظام", "إلغاء", "إعادة الإعداد"},
     {"Играть", "Файлы игры", "Настройки", "Моды", "Обновления", "Выход", "SuperWonders", "О программе",
-     "Файлы игры", "Папка ExeFS", "Папка RomFS", "Выбрать...", "Использовать на месте", "Копировать", "Настройка",
-     "Настроить файлы игры", "Открыть папку данных", "Открыть настройки", "Папка", "Открыть папку модов", "Обновить",
-     "Выйти из SuperWonders", "Файлы игры готовы", "Нужно пересобрать код игры", "Файлы игры не настроены",
-     "Выбрать", "Назад", "Страницы", "Играть", "Запустить", "Сначала настройте", "Версия", "Выберите папку ExeFS",
-     "Выберите папку RomFS", "Использовать эту папку", "На уровень выше", "Домашняя папка", "Диски", "Папки здесь",
-     "Другие способы", "Системный выбор папки", "Отмена", "Настроить снова"},
+     "Файлы игры", "Папка вывода", "Папка ExeFS", "Папка RomFS", "Версия игры", "Выбрать...",
+     "Использовать на месте", "Копировать", "Настройка", "Настроить файлы игры", "Открыть папку вывода",
+     "Открыть настройки", "Папка", "Открыть папку модов", "Обновить", "Выйти из SuperWonders",
+     "Файлы игры готовы", "Нужно пересобрать код игры", "Файлы игры не настроены", "Выбрать", "Назад", "Страницы",
+     "Играть", "Запустить", "Сначала настройте", "Версия", "Выберите папку вывода", "Выберите папку ExeFS",
+     "Выберите папку RomFS", "Использовать эту папку", "Папка по умолчанию", "На уровень выше", "Домашняя папка",
+     "Диски", "Папки здесь", "Другие способы", "Системный выбор папки", "Отмена", "Настроить снова"},
     {"Oyna", "Oyun dosyaları", "Ayarlar", "Modlar", "Güncellemeler", "Çıkış", "SuperWonders", "Hakkında",
-     "Oyun dosyalarınız", "ExeFS klasörü", "RomFS klasörü", "Seç...", "Yerinde kullan", "Kopyala", "Kurulum",
-     "Oyun dosyalarını kur", "Veri klasörünü aç", "Ayarları aç", "Klasör", "Mod klasörünü aç", "Yenile",
-     "SuperWonders'tan çık", "Oyun dosyaları hazır", "Oyun kodu yeniden derlenmeli", "Oyun dosyaları kurulmadı",
-     "Seç", "Geri", "Sayfalar", "Oyna", "Başlat", "Önce kur", "Sürüm", "ExeFS klasörünü seç", "RomFS klasörünü seç",
-     "Bu klasörü kullan", "Üst klasör", "Ana klasör", "Sürücüler", "Buradaki klasörler", "Diğer yollar",
-     "Sistem klasör seçicisi", "İptal", "Yeniden kur"},
+     "Oyun dosyalarınız", "Çıktı klasörü", "ExeFS klasörü", "RomFS klasörü", "Oyun sürümü", "Seç...", "Yerinde kullan",
+     "Kopyala", "Kurulum", "Oyun dosyalarını kur", "Çıktı klasörünü aç", "Ayarları aç", "Klasör",
+     "Mod klasörünü aç", "Yenile", "SuperWonders'tan çık", "Oyun dosyaları hazır", "Oyun kodu yeniden derlenmeli",
+     "Oyun dosyaları kurulmadı", "Seç", "Geri", "Sayfalar", "Oyna", "Başlat", "Önce kur", "Sürüm",
+     "Çıktı klasörünü seç", "ExeFS klasörünü seç", "RomFS klasörünü seç", "Bu klasörü kullan", "Varsayılan klasör",
+     "Üst klasör", "Ana klasör", "Sürücüler", "Buradaki klasörler", "Diğer yollar", "Sistem klasör seçicisi",
+     "İptal", "Yeniden kur"},
 };
 
 const char* lt(LauncherText text) {
@@ -445,7 +459,10 @@ struct State {
     bool config_mode = false;
     Job job;
     std::mutex pick_lock;
-    std::string picked_exefs, picked_romfs;  // from the folder picker's thread
+    std::string picked_exefs, picked_romfs, picked_output;  // from the folder picker's thread
+    ExefsInfo exefs_info;
+    RomfsInfo romfs_info;
+    PairInfo pair_info;
     uint64_t shown_ns = 0;
     std::string note;  // a line under the status (an error of the folder picker, a finished setup...)
     bool demo_progress = false;  // NX_LAUNCHER_TOUR's last step: the setup card, not running anything
@@ -456,17 +473,50 @@ struct State {
     bool in_list = true;      // where it is now
     uint64_t pad_before = 0;  // the pad's buttons last frame (edges)
     // The folder browser (a list a controller can walk; the system's picker needs a mouse): 0 closed, 1 for the
-    // ExeFS, 2 for the RomFS. "" as the folder: the drives (Windows) or / (elsewhere).
+    // ExeFS, 2 for the RomFS, 3 for the Output folder. "" as the folder: the drives (Windows) or / (elsewhere).
     int browse = 0;
     std::string browse_dir;
     std::vector<std::string> browse_list;  // its subfolders, read when it changes
     std::string browse_listed;
+    std::string browse_inspected;
+    ExefsInfo browse_exefs_info;
+    RomfsInfo browse_romfs_info;
+    OutputInfo browse_output_info;
 };
 State* g = nullptr;
+
+void refresh_input_versions() {
+    g->exefs_info = inspect_exefs(u8(g->config.exefs));
+    g->romfs_info = inspect_romfs(u8(g->config.romfs));
+    g->pair_info = evaluate_pair(g->exefs_info, g->romfs_info);
+}
 
 void refresh_status() {
     g->status = check_status(g->kit);
     g->mods = list_mods();
+    refresh_input_versions();
+}
+
+void apply_output_folder(const std::string& dir) {
+    if (!plat::set_data_root(dir)) {
+        g->note = "Couldn't use output folder: " + dir;
+        return;
+    }
+    plat::reload_pc_settings();
+    const Config next = load_config();
+    if (!next.exefs.empty() || !next.romfs.empty()) g->config = next;
+    if (g->job.result > 0) g->job.result = -1;
+    refresh_status();
+    if (g->status.ready == Ready::Yes) {
+        g->note = "Output folder ready" +
+                  (g->status.installed_version.empty() ? std::string() : " (" + g->status.installed_version + ")") +
+                  " - no recompilation needed.";
+    } else {
+        g->note = "Output folder set: " + plat::data_root();
+    }
+    log("launcher: output folder %s (ready=%s, version=%s)", plat::data_root().c_str(),
+        g->status.ready == Ready::Yes ? "yes" : "no",
+        g->status.installed_version.empty() ? "unknown" : g->status.installed_version.c_str());
 }
 
 // A folder for a row's value, fitted to the room the row leaves beside its label (in pixels, at the current font and
@@ -583,8 +633,8 @@ void page_play() {
         g->page = PageFiles, rows::focus_first();
     rows::section(lt(LtAbout));
     rows::action(lt(LtVersion), NX_VERSION_STRING,
-                 "SuperWonders, a static recompilation of Super Mario Bros. Wonder (1.0.0) for PC. Nothing of the game "
-                 "ships with it: it's set up from your own copy.",
+                 "SuperWonders, a static recompilation of Super Mario Bros. Wonder (1.0.0 / 1.2.1) for PC. Nothing of the "
+                 "game ships with it: it's set up from your own copy.",
                  true);
     rows::end();
 }
@@ -602,12 +652,13 @@ std::string home_folder() {
 }
 
 void browse_open(int which) {
-    const std::string& now = which == 1 ? g->config.exefs : g->config.romfs;
+    const std::string& now = which == 1 ? g->config.exefs : which == 2 ? g->config.romfs : plat::data_root();
     std::error_code ec;
     std::string start = !now.empty() && fs::is_directory(u8(now), ec) ? str(u8(now).parent_path()) : home_folder();
-    g->browse = which, g->browse_dir = start, g->browse_listed = "\x01";
+    g->browse = which, g->browse_dir = start, g->browse_listed = "\x01", g->browse_inspected = "\x01";
     rows::focus_first();
-    log("launcher: folder browser for the %s, from %s", which == 1 ? "ExeFS" : "RomFS", start.c_str());
+    log("launcher: folder browser for the %s, from %s",
+        which == 1 ? "ExeFS" : which == 2 ? "RomFS" : "Output", start.c_str());
 }
 
 void browse_close() {
@@ -650,20 +701,59 @@ void browse_read() {
 
 void page_browse() {
     browse_read();
-    const bool exefs = g->browse == 1;
+    const int mode = g->browse;
+    const bool exefs = mode == 1;
+    const bool romfs = mode == 2;
+    const bool output = mode == 3;
     const std::string& dir = g->browse_dir;
+    if (g->browse_inspected != dir) {
+        g->browse_inspected = dir;
+        if (exefs) g->browse_exefs_info = dir.empty() ? ExefsInfo{} : inspect_exefs(u8(dir));
+        else if (romfs) g->browse_romfs_info = dir.empty() ? RomfsInfo{} : inspect_romfs(u8(dir));
+        else if (output) g->browse_output_info = dir.empty() ? OutputInfo{} : inspect_output_dir(u8(dir), NX_GAMELIB_FILE);
+    }
     rows::begin("##browse", ImGui::GetContentRegionAvail().y);
-    rows::section(exefs ? lt(LtChooseExeFS) : lt(LtChooseRomFS));
-    const bool ok = exefs ? folder_has(dir, "main") && folder_has(dir, "sdk") : folder_has(dir, "Shader");
+    rows::section(exefs ? lt(LtChooseExeFS) : romfs ? lt(LtChooseRomFS) : lt(LtChooseOutput));
+    std::error_code ec;
+    const bool ok = exefs   ? (folder_has(dir, "main") && folder_has(dir, "sdk"))
+                    : romfs ? folder_has(dir, "Shader")
+                            : (!dir.empty() && fs::is_directory(u8(dir), ec));
     const std::string where = dir.empty() ? std::string("This PC") : fit_path(dir, lt(LtUseFolder));
-    const std::string use_desc = std::string(ok ? "Use this folder." : exefs ? "Not an ExeFS folder: it has no main and sdk."
-                                                                             : "Not a RomFS folder: it has no Shader folder.") +
-                                 (dir.empty() ? std::string() : "\n\n" + dir);
+    std::string use_desc;
+    if (!ok) {
+        use_desc = exefs   ? "Not an ExeFS folder: it has no main and sdk."
+                   : romfs ? "Not a RomFS folder: it has no Shader folder."
+                           : "Choose an existing folder (or open a drive first).";
+    } else if (exefs) {
+        use_desc = "Use this ExeFS folder.\nDetected: " + g->browse_exefs_info.summary;
+        if (!g->browse_exefs_info.build_id.empty())
+            use_desc += "\nBuild ID: " + g->browse_exefs_info.build_id.substr(0, 16);
+    } else if (romfs) {
+        use_desc = "Use this RomFS folder.\nDetected: " + g->browse_romfs_info.summary;
+    } else {
+        if (g->browse_output_info.ready) {
+            use_desc = "Use this output folder.\nAll compiled game files are already present" +
+                       (g->browse_output_info.installed_version.empty()
+                            ? std::string()
+                            : " (" + g->browse_output_info.installed_version + ")") +
+                       " - no recompilation needed.";
+        } else {
+            use_desc = "Use this output folder.\nCompiled files (game code, shaders, extracted RomFS, saves and "
+                       "settings) will be saved here.";
+        }
+    }
+    if (!dir.empty()) use_desc += "\n\n" + dir;
     if (!ok) rows::disable_next();
     if (rows::action(lt(LtUseFolder), where.c_str(), use_desc.c_str(), true, ok)) {
-        (exefs ? g->config.exefs : g->config.romfs) = dir;
-        save_config(g->config);
-        log("launcher: %s folder %s", exefs ? "ExeFS" : "RomFS", dir.c_str());
+        if (output) {
+            apply_output_folder(dir);
+        } else {
+            (exefs ? g->config.exefs : g->config.romfs) = dir;
+            save_config(g->config);
+            refresh_input_versions();
+            log("launcher: %s folder %s (%s)", exefs ? "ExeFS" : "RomFS", dir.c_str(),
+                exefs ? g->exefs_info.summary.c_str() : g->romfs_info.summary.c_str());
+        }
         browse_close();
         rows::end();
         return;
@@ -686,11 +776,24 @@ void page_browse() {
     }
     rows::section(lt(LtOtherWays));
     if (rows::action(lt(LtSystemPicker), "", "Choose the folder in the system's own window (a mouse helps).",
-                     true))
-        plat::pick_folder(exefs ? "Your ExeFS folder (main, sdk)" : "Your RomFS folder", dir, [exefs](std::string p) {
+                     true)) {
+        const char* title = exefs ? "Your ExeFS folder (main, sdk)"
+                                  : romfs ? "Your RomFS folder" : "Choose the output data folder";
+        plat::pick_folder(title, dir, [mode](std::string p) {
             std::lock_guard lk(g->pick_lock);
-            (exefs ? g->picked_exefs : g->picked_romfs) = p;
+            if (mode == 1) g->picked_exefs = std::move(p);
+            else if (mode == 2) g->picked_romfs = std::move(p);
+            else g->picked_output = std::move(p);
         });
+    }
+    if (output && plat::data_root() != plat::default_data_root() &&
+        rows::action(lt(LtResetDefault), "",
+                     ("Switch back to the default folder:\n" + plat::default_data_root()).c_str(), true)) {
+        apply_output_folder(plat::default_data_root());
+        browse_close();
+        rows::end();
+        return;
+    }
     if (rows::action(lt(LtCancel), "", "Back, without changing the folder (B).", true)) browse_close();
     rows::end();
 }
@@ -699,15 +802,55 @@ void page_files() {
     if (g->browse) return page_browse();
     rows::begin("##files", ImGui::GetContentRegionAvail().y);
     rows::section(lt(LtYourGameFiles));
+    const std::string cur_out = plat::data_root();
+    const std::string out_val = fit_path(cur_out, lt(LtOutputFolder));
+    std::string out_desc =
+        "Where SuperWonders places everything compiled from ExeFS and RomFS (game code, shaders, extracted files), plus "
+        "your saves and settings.\n"
+        "If you select an output folder that already contains everything needed, you won't have to recompile.";
+    if (g->status.ready == Ready::Yes) {
+        out_desc += "\n\nStatus: Ready to play" +
+                    (g->status.installed_version.empty() ? std::string() : " (Wonder " + g->status.installed_version + ")");
+    } else {
+        out_desc += "\n\nStatus: " + g->status.why;
+    }
+    out_desc += "\nNow: " + cur_out;
+    if (rows::action(lt(LtOutputFolder), out_val.c_str(), out_desc.c_str(), true, g->status.ready == Ready::Yes))
+        browse_open(3);
+
     const std::string exefs = g->config.exefs.empty() ? lt(LtChoose) : fit_path(g->config.exefs, lt(LtExeFS));
-    const std::string exefs_desc =
-        "The ExeFS folder of your own copy of the game (version 1.0.0). It holds main and sdk." +
-        (g->config.exefs.empty() ? std::string() : "\n\nNow: " + g->config.exefs);
+    std::string exefs_desc =
+        "The ExeFS folder of your own copy of the game (versions 1.0.0 and 1.2.1 supported). It holds main and sdk.";
+    if (!g->config.exefs.empty()) {
+        exefs_desc += "\n\nVersion: " + g->exefs_info.summary;
+        if (!g->exefs_info.build_id.empty()) exefs_desc += "\nBuild ID: " + g->exefs_info.build_id.substr(0, 16);
+        exefs_desc += "\nNow: " + g->config.exefs;
+    }
     if (rows::action(lt(LtExeFS), exefs.c_str(), exefs_desc.c_str(), true)) browse_open(1);
+
     const std::string romfs = g->config.romfs.empty() ? lt(LtChoose) : fit_path(g->config.romfs, lt(LtRomFSFolder));
-    const std::string romfs_desc = "The RomFS folder of your own copy of the game." +
-                                   (g->config.romfs.empty() ? std::string() : "\n\nNow: " + g->config.romfs);
+    std::string romfs_desc = "The RomFS folder of your own copy of the game.";
+    if (!g->config.romfs.empty()) {
+        romfs_desc += "\n\nVersion: " + g->romfs_info.summary + "\nNow: " + g->config.romfs;
+    }
     if (rows::action(lt(LtRomFSFolder), romfs.c_str(), romfs_desc.c_str(), true)) browse_open(2);
+
+    std::string ver_val = g->pair_info.badge;
+    std::string ver_desc = g->pair_info.detail;
+    const bool has_inputs = !g->config.exefs.empty() || !g->config.romfs.empty();
+    if (!has_inputs && g->status.ready == Ready::Yes) {
+        ver_val = g->status.installed_version.empty() ? "Ready" : g->status.installed_version + " (Ready)";
+        ver_desc = "The selected output folder already contains all compiled game files" +
+                   (g->status.installed_version.empty() ? std::string() : " (" + g->status.installed_version + ")") +
+                   ". No recompilation is needed - you can play immediately.";
+    } else if (g->status.ready == Ready::Yes) {
+        ver_desc += "\n\nOutput folder status: Ready" +
+                    (g->status.installed_version.empty() ? std::string() : " (" + g->status.installed_version + ")") +
+                    " - no recompilation needed unless you rebuild from new files.";
+    }
+    rows::action(lt(LtGameVersion), ver_val.c_str(), ver_desc.c_str(), true,
+                 g->pair_info.state == PairState::Compatible || (!has_inputs && g->status.ready == Ready::Yes));
+
     const char* const modes[] = {lt(LtUseInPlace), lt(LtCopyIt)};
     // Both RomFS rows share a translated label, so give the storage mode its own ID scope.
     ImGui::PushID("romfs-storage-mode");
@@ -715,20 +858,30 @@ void page_files() {
                  "Copy it: SuperWonders keeps its own copy (about 3.6 GB), so it keeps working if you move or delete "
                  "yours. Use it in place: no copy, but SuperWonders needs your RomFS folder where it is.");
     ImGui::PopID();
+
     rows::section(lt(LtSetUp));
-    const bool exefs_ok = folder_has(g->config.exefs, "main") && folder_has(g->config.exefs, "sdk");
-    const bool romfs_ok = folder_has(g->config.romfs, "Shader");
-    const char* why = !exefs_ok ? "Choose your ExeFS folder first (it holds main and sdk)."
-                      : !romfs_ok ? "Choose your RomFS folder first (it holds Shader, Layout, Effect...)."
-                                  : "Reads your game files and builds the game code and the shaders from them, in this "
-                                    "PC's SuperWonders data folder. Steps that are already done are skipped.";
-    if (!exefs_ok || !romfs_ok) rows::disable_next();
-    if (rows::action(g->status.ready == Ready::Yes ? lt(LtSetUpAgain) : lt(LtSetUpGameFiles), "", why, true,
-                     exefs_ok && romfs_ok && g->status.ready != Ready::Yes))
+    const bool ready = g->status.ready == Ready::Yes;
+    if (ready && rows::action(lt(LtPlay), lt(LtStart),
+                              "Everything required is already present in the selected output folder. Start the game "
+                              "without recompiling.",
+                              true, true))
+        g->play = true;
+    const bool pair_ok = g->pair_info.state == PairState::Compatible;
+    std::string why;
+    if (!pair_ok) {
+        why = g->pair_info.detail;
+        if (ready)
+            why += "\n\nYour selected output folder is already ready to play without recompiling.";
+    } else {
+        why = "Builds the game code and translates shaders for Wonder " + g->exefs_info.version +
+              " into the selected output folder. Steps that are already done are skipped.";
+    }
+    if (!pair_ok) rows::disable_next();
+    if (rows::action(ready ? lt(LtSetUpAgain) : lt(LtSetUpGameFiles), "", why.c_str(), true, pair_ok && !ready))
         start_setup();
-    if (rows::action(lt(LtOpenDataFolder), "", "Where SuperWonders keeps your saves, settings and the game it built.",
-                     true))
-        plat::open_folder(plat::data_root());
+    if (rows::action(lt(LtOpenDataFolder), "",
+                     ("Open the active output folder in your file manager:\n" + cur_out).c_str(), true))
+        plat::open_folder(cur_out);
     rows::end();
 }
 
@@ -958,10 +1111,23 @@ void screen(float w, float h) {
     const float k = g_k;
     const ui::Theme& th = ui::theme();
     {
-        std::lock_guard lk(g->pick_lock);  // folders the picker returned
-        if (!g->picked_exefs.empty() || !g->picked_romfs.empty()) g->browse = 0;  // (the system's picker answered)
-        if (!g->picked_exefs.empty()) g->config.exefs = g->picked_exefs, g->picked_exefs.clear(), save_config(g->config);
-        if (!g->picked_romfs.empty()) g->config.romfs = g->picked_romfs, g->picked_romfs.clear(), save_config(g->config);
+        std::string picked_exefs, picked_romfs, picked_output;
+        {
+            std::lock_guard lk(g->pick_lock);  // folders the picker returned
+            picked_exefs = std::move(g->picked_exefs);
+            picked_romfs = std::move(g->picked_romfs);
+            picked_output = std::move(g->picked_output);
+            g->picked_exefs.clear(), g->picked_romfs.clear(), g->picked_output.clear();
+        }
+        if (!picked_exefs.empty() || !picked_romfs.empty() || !picked_output.empty())
+            g->browse = 0;  // (the system's picker answered)
+        if (!picked_output.empty()) apply_output_folder(picked_output);
+        if (!picked_exefs.empty() || !picked_romfs.empty()) {
+            if (!picked_exefs.empty()) g->config.exefs = picked_exefs;
+            if (!picked_romfs.empty()) g->config.romfs = picked_romfs;
+            save_config(g->config);
+            refresh_input_versions();
+        }
     }
     static bool was_running = false;
     if (was_running && !g->job.running) {  // a setup finished
@@ -1027,7 +1193,8 @@ void screen(float w, float h) {
             dl->AddRectFilled(at, {at.x + nav_w, at.y + row_h}, ui::fade(th.accent, 0.16f * a), 10 * k);
             dl->AddRectFilled(at, {at.x + 5 * k, at.y + row_h}, ui::fade(th.accent, a), 3 * k);
         }
-        if (busy && i != g->page) ImGui::BeginDisabled();
+        const bool disabled = busy && i != g->page;
+        if (disabled) ImGui::BeginDisabled();
         ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ui::fade(th.accent, 0.10f));
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, ui::fade(th.accent, 0.20f));
@@ -1057,7 +1224,7 @@ void screen(float w, float h) {
         ImGui::SetWindowFontScale(1.0f);
         ImGui::PopFont();
         ImGui::PopStyleColor(3);
-        if (busy && i != g->page) ImGui::EndDisabled();
+        if (disabled) ImGui::EndDisabled();
         ImGui::PopID();
     }
     ImGui::EndGroup();
@@ -1258,10 +1425,9 @@ void run() {
         return e ? std::max(0, std::atoi(e)) : 0;
     }();
     if (const char* e = std::getenv("NX_LAUNCHER_SETUP"); e && *e == '1') start_setup();
-    // An update brought a kit that builds the game code differently, and the folders are known: build it again at
-    // once, as Savage Wind does after an update, instead of asking for the folders again.
-    else if (g->status.ready == Ready::Rebuild && folder_has(g->config.exefs, "main") &&
-             folder_has(g->config.romfs, "Shader"))
+    // An update brought a kit that builds the game code differently, and compatible folders are known: build it again
+    // at once, as Savage Wind does after an update, instead of asking for the folders again.
+    else if (g->status.ready == Ready::Rebuild && g->pair_info.state == PairState::Compatible)
         g->page = PageFiles, start_setup();
     uint64_t frames = 0;
     test_pad_start();  // (NX_TEST_PAD: a scripted controller, launcher/test_pad.h)
@@ -1298,6 +1464,11 @@ void run() {
                 if (n && n < self.size()) {
                     self.resize(n);
                     if (_wcsicmp(fs::path(self).filename().c_str(), L"wonder-launcher.exe") == 0) {
+                        const std::string root_utf8 = plat::data_root();
+                        int wn = MultiByteToWideChar(CP_UTF8, 0, root_utf8.c_str(), -1, nullptr, 0);
+                        std::wstring root_w(size_t(std::max(1, wn)) - 1, L'\0');
+                        MultiByteToWideChar(CP_UTF8, 0, root_utf8.c_str(), -1, root_w.data(), wn);
+                        SetEnvironmentVariableW(L"NX_DATA_ROOT", root_w.c_str());
                         const std::wstring game = (fs::path(self).parent_path() / L"wonder.exe").wstring();
                         std::wstring command = L"\"" + game + L"\" --play";
                         STARTUPINFOW si{};

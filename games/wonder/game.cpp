@@ -51,6 +51,7 @@ Fn g_wide_original = nullptr;
 Fn g_ortho_original = nullptr;
 Fn g_camera_entry_original = nullptr;
 Fn g_active_rect_original = nullptr;
+uint64_t g_world_camera_caller = 0;
 std::atomic<unsigned> g_active_rect_count{0};
 std::atomic<unsigned> g_camera_entry_calls{0};
 std::atomic<unsigned> g_ortho_samples{0};
@@ -133,7 +134,7 @@ void ortho_camera_hook(CPU& c) {
     const float current_aspect = (right - left) / std::abs(top - bottom);
     const float target_aspect = nvn::uw_on() ? (16.0f / 9.0f) * nvn::uw_factor() : horplus_aspect();
     const ModuleInfo* main = game_lib().main;
-    const bool world_camera = main && c.x[30] == main->base + 0x1a95e44;
+    const bool world_camera = main && g_world_camera_caller && c.x[30] == main->base + g_world_camera_caller;
     if (((nvn::uw_on() && world_camera) || horplus_enabled()) &&
         std::isfinite(current_aspect) && std::isfinite(target_aspect) &&
         current_aspect > 1.76f && current_aspect < 1.80f && target_aspect > current_aspect + 0.01f &&
@@ -185,8 +186,9 @@ void install_wide_probe() {
         (rect_trace && std::strcmp(rect_trace, "1") == 0)) {
         constexpr uint64_t fn = 0x1d6610;
         constexpr uint32_t words[] = {0x2a2103e8, 0x3900401f, 0x72001d1f, 0xa9007c1f};
-        bool ok = ld<uint32_t>(main->base + 0x6caba0) == 0x97ec2e9c;
-        for (unsigned i = 0; i < 4; ++i) ok &= ld<uint32_t>(main->base + fn + 4 * i) == words[i];
+        bool ok = fn + 16 <= main->text_size && 0x6caba4 <= main->text_size &&
+                  ld<uint32_t>(main->base + 0x6caba0) == 0x97ec2e9c;
+        for (unsigned i = 0; ok && i < 4; ++i) ok &= ld<uint32_t>(main->base + fn + 4 * i) == words[i];
         if (ok && module->table[fn / 4]) {
             g_active_rect_original = module->table[fn / 4];
             module->table[fn / 4] = active_rect_hook;
@@ -194,25 +196,46 @@ void install_wide_probe() {
         } else log("widescreen active-area test: incompatible code or unavailable");
     }
     constexpr uint64_t camera_entry = 0x160de38;
-    if (trace && ld<uint32_t>(main->base + camera_entry) == 0x14000003 && module->table[camera_entry / 4]) {
+    if (trace && camera_entry + 4 <= main->text_size && ld<uint32_t>(main->base + camera_entry) == 0x14000003 &&
+        module->table[camera_entry / 4]) {
         g_camera_entry_original = module->table[camera_entry / 4];
         module->table[camera_entry / 4] = camera_entry_probe;
         log("widescreen camera-entry: probe installed at main+160de38");
     }
-    constexpr uint64_t ortho = 0x10578c;
+    struct OrthoTarget {
+        const char* version;
+        uint64_t ortho;
+        uint64_t world_caller;
+    };
+    constexpr OrthoTarget ortho_targets[] = {
+        {"1.0.0", 0x10578c, 0x1a95e44},
+        {"1.2.1", 0xf18f0, 0x1bbbf38},
+    };
     constexpr uint32_t ortho_code[] = {0x2d550400, 0x1e3c1003, 0x1e2e1004, 0xd2e7f008};
-    bool compatible = true;
-    for (unsigned i = 0; i < 4; ++i)
-        compatible &= ld<uint32_t>(main->base + ortho + 4 * i) == ortho_code[i];
-    if (compatible && module->table[ortho / 4]) {
-        g_ortho_original = module->table[ortho / 4];
-        module->table[ortho / 4] = ortho_camera_hook;
-        log("widescreen ortho-camera: %s hook installed at main+10578c",
-            (horplus_enabled() || (uw && uw[0] && uw[0] != '0')) ? "ultrawide" : "trace");
-    } else {
-        log("widescreen ortho-camera: incompatible code or unavailable; probe disabled");
+    bool ortho_installed = false;
+    for (const OrthoTarget& target : ortho_targets) {
+        if (target.ortho + sizeof(ortho_code) > main->text_size || (target.ortho & 3u) != 0) continue;
+        bool compatible = true;
+        for (unsigned i = 0; i < 4; ++i)
+            compatible &= ld<uint32_t>(main->base + target.ortho + 4 * i) == ortho_code[i];
+        if (compatible && module->table[target.ortho / 4]) {
+            g_world_camera_caller = target.world_caller;
+            g_ortho_original = module->table[target.ortho / 4];
+            module->table[target.ortho / 4] = ortho_camera_hook;
+            log("widescreen ortho-camera: %s hook installed (%s at main+%llx)",
+                (horplus_enabled() || (uw && uw[0] && uw[0] != '0')) ? "ultrawide" : "trace",
+                target.version, (unsigned long long)target.ortho);
+            ortho_installed = true;
+            break;
+        }
     }
+    if (!ortho_installed)
+        log("widescreen ortho-camera: incompatible code or unavailable; probe disabled");
     if (!trace) return;
+    if (offset + sizeof(code) > main->text_size) {
+        log("widescreen calls: incompatible game code; probe disabled");
+        return;
+    }
     for (unsigned i = 0; i < 8; ++i) {
         if (ld<uint32_t>(main->base + offset + 4 * i) != code[i]) {
             log("widescreen calls: incompatible game code; probe disabled");

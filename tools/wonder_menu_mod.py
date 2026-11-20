@@ -21,6 +21,7 @@ Usage: python tools/wonder_menu_mod.py [--romfs <dir>] [--out <mod dir>]
 """
 import argparse
 import os
+import re
 import struct
 import glob
 import zlib
@@ -436,6 +437,19 @@ def write_zs(path, data):
     print("wrote", path)
 
 
+def pick_latest_rstb(romfs):
+    """Return the ResourceSizeTable with the highest Product.<N> version number (handles merged base+update dumps)."""
+    tables = glob.glob(os.path.join(romfs, "System", "Resource", "ResourceSizeTable.Product.*.rsizetable.zs"))
+    assert tables, "no resource size table found under System/Resource"
+
+    def ver(path):
+        m = re.search(r"Product\.(\d+)\.rsizetable\.zs$", os.path.basename(path))
+        return int(m.group(1)) if m else -1
+
+    best = max(tables, key=ver)
+    return best, ver(best)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--romfs", default=os.path.join(REPO, "private", "wonder", "extract", "romfs"))
@@ -476,7 +490,12 @@ def main():
     pause = "Gyml/UIExtraScreenParam/Pause.game__UIExtraScreenParam.bgyml"
     mod("Pack/Bootup.Nin_NX_NVN.pack.zs", {pause: add_button}, member_heap={pause: 0x2000})
 
-    for f in sorted(os.listdir(os.path.join(romfs, "Mals"))):
+    best_table, product_ver = pick_latest_rstb(romfs)
+    mals_all = sorted(os.listdir(os.path.join(romfs, "Mals")))
+    tag = f".Product.{product_ver}."
+    mals_matching = [f for f in mals_all if tag in f]
+    mals_selected = mals_matching or mals_all
+    for f in mals_selected:
         lang = f.split(".")[0]
         if lang not in QUIT_TEXT:
             print("skipped", f, "(no translation)")
@@ -488,9 +507,7 @@ def main():
             return m
         mod("Mals/" + f, {"LayoutMsgRef/PauseRef.msbt": button, "LayoutMsgRef/TitleRef.msbt": title})
 
-    tables = glob.glob(os.path.join(romfs, "System", "Resource", "ResourceSizeTable.Product.*.rsizetable.zs"))
-    assert len(tables) == 1, f"one resource size table expected, found {tables}"
-    name = "System/Resource/" + os.path.basename(tables[0])
+    name = "System/Resource/" + os.path.basename(best_table)
     write_zs(os.path.join(out, name), rstb_grow(unzs(os.path.join(romfs, name)), growth))
 
 

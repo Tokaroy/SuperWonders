@@ -122,6 +122,15 @@ void account(Service& s) {
     s.cmds[51] = [](IpcCtx& c) { push_uid(c); return 0u; };         // TrySelectUserWithoutInteraction
     s.cmds[100] = [](IpcCtx&) { return 0u; };                       // InitializeApplicationInfo (old)
     s.cmds[101] = [](IpcCtx& c) { c.push_object(manager_for_application()); return 0u; };
+    s.cmds[130] = [](IpcCtx& c) {                                   // ActivateOpenContextHolder
+        c.push_object(std::make_shared<Service>("IOpenContext"));
+        return 0u;
+    };
+    s.cmds[131] = [](IpcCtx& c) {                                   // ListOpenContextStoredUsers
+        Buffer out = c.out_buf(0);
+        if (out.addr && out.size) std::memset(reinterpret_cast<void*>(out.addr), 0, out.size);
+        return 0u;
+    };
     s.cmds[140] = [](IpcCtx&) { return 0u; };  // InitializeApplicationInfo
     s.cmds[141] = [](IpcCtx& c) { write_uid_list(c); return 0u; };  // ListQualifiedUsers (SDK 16)
     s.cmds[160] = [](IpcCtx&) { return 0u; };                       // InitializeApplicationInfoV2 (SDK 16)

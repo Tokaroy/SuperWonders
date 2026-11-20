@@ -216,10 +216,16 @@ bool make_dirs(const std::string& path) {
 
 void log_line(const char* line) { std::fprintf(stderr, "%s\n", line); }
 
+std::string default_data_root() { return nx::game::kInfo.pc_data_root; }
+
 std::string data_root() {
     const char* r = std::getenv("NX_DATA_ROOT");
-    return r ? r : nx::game::kInfo.pc_data_root;
+    return r ? r : default_data_root();
 }
+
+bool set_data_root(const std::string&) { return false; }
+
+void reload_pc_settings() {}
 
 std::string setting(const std::string& key) {
     std::string env = "NX_";
