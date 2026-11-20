@@ -136,10 +136,10 @@ class Setup:
         if not os.path.isdir(romfs):
             info["error"] = f"error: {romfs} not found: pick the RomFS folder of your own copy of the game"
             return info
-        if not glob.glob(os.path.join(romfs, "Shader", "*.zs")):
+        if not glob.glob(os.path.join(glob.escape(romfs), "Shader", "*.zs")):
             info["error"] = f"error: {romfs} doesn't look like Super Mario Bros. Wonder's RomFS (no Shader/*.zs)"
             return info
-        tables = glob.glob(os.path.join(romfs, "System", "Resource", "ResourceSizeTable.Product.*.rsizetable.zs"))
+        tables = glob.glob(os.path.join(glob.escape(romfs), "System", "Resource", "ResourceSizeTable.Product.*.rsizetable.zs"))
         vers = []
         for t in tables:
             m = re.search(r"Product\.(\d+)\.rsizetable\.zs$", os.path.basename(t))
@@ -170,7 +170,7 @@ class Setup:
         if not hasattr(self, "_ids"):
             exe_id = gamebuild.input_id(self.exefs)
             rom_id, self.rom_files, self.rom_bytes = romfs_fingerprint(self.romfs)
-            maxwell = sorted(glob.glob(os.path.join(TOOLS, "maxwell", "*.py")))
+            maxwell = sorted(glob.glob(os.path.join(glob.escape(TOOLS), "maxwell", "*.py")))
             harness = harness_command()
             font = system_font() or ""
             self._ids = {

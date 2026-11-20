@@ -29,7 +29,7 @@ def write_program_catalog(romfs, output):
     )
     stages, stage_index, programs = [], {}, set()
     for pattern in groups:
-        for path in sorted(glob.glob(os.path.join(romfs, pattern))):
+        for path in sorted(glob.glob(os.path.join(glob.escape(romfs), pattern))):
             data = containers.read_file(path)
             root = containers.open_blob(data, 0, len(data), os.path.basename(path))
             if not root:
@@ -83,7 +83,7 @@ def extract_romfs(romfs, output):
     total_stages = 0
     recognized_groups = set()
     for group, pattern in groups:
-        paths = sorted(glob.glob(os.path.join(romfs, pattern)))
+        paths = sorted(glob.glob(os.path.join(glob.escape(romfs), pattern)))
         recognized = 0
         for path in paths:
             data = containers.read_file(path)
