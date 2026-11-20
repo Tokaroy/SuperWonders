@@ -36,7 +36,7 @@ def ensure(data):
     rom = os.path.join(data, 'extract', 'romfs')
     mods = os.path.join(data, 'mods')
     menu = os.path.join(mods, 'recomp-menu', 'romfs')
-    tables = glob.glob(os.path.join(menu, 'System', 'Resource', 'ResourceSizeTable.Product.*.rsizetable.zs'))
+    tables = glob.glob(os.path.join(glob.escape(menu), 'System', 'Resource', 'ResourceSizeTable.Product.*.rsizetable.zs'))
     if not tables:
         raise RuntimeError('The recomp-menu resource table is missing. Run game setup first.')
 

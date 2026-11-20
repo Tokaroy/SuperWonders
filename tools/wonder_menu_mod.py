@@ -439,7 +439,7 @@ def write_zs(path, data):
 
 def pick_latest_rstb(romfs):
     """Return the ResourceSizeTable with the highest Product.<N> version number (handles merged base+update dumps)."""
-    tables = glob.glob(os.path.join(romfs, "System", "Resource", "ResourceSizeTable.Product.*.rsizetable.zs"))
+    tables = glob.glob(os.path.join(glob.escape(romfs), "System", "Resource", "ResourceSizeTable.Product.*.rsizetable.zs"))
     assert tables, "no resource size table found under System/Resource"
 
     def ver(path):
