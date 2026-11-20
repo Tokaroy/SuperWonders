@@ -16,6 +16,7 @@
 
 #include "overlay/overlay_internal.h"
 #include "overlay/overlay_ui.h"
+#include "discord_rpc.h"
 
 namespace nx::overlay {
 
@@ -236,6 +237,7 @@ void init(const Host& host, const Settings& s) {
     g_pending = s, g_has_pending = true;
     g_metrics = s.metrics_enabled;
     ui::set_theme(s.theme);
+    discord::set_enabled(s.discord_rpc);
 }
 
 void sync(const Settings& s) {
@@ -243,10 +245,12 @@ void sync(const Settings& s) {
     g_pending = s, g_has_pending = true;
     g_metrics = s.metrics_enabled;
     ui::set_theme(s.theme);
+    discord::set_enabled(s.discord_rpc);
 }
 
 void settings_changed(bool persist) {
     g_metrics = g_settings.metrics_enabled;
+    discord::set_enabled(g_settings.discord_rpc);
     Host h;
     {
         std::lock_guard lk(g_lock);

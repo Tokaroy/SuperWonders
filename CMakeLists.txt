@@ -226,6 +226,7 @@ endif()  # NX_GEN_PROBE
 
 set(NX_RUNTIME_SOURCES
     runtime/src/main.cpp
+    runtime/src/discord_rpc.cpp
     runtime/src/loader.cpp
     runtime/src/memory.cpp
     runtime/src/kernel.cpp

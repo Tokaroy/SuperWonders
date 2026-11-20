@@ -25,6 +25,7 @@
 #include <nx/gamelib.h>
 #include <nx/runtime.h>
 
+#include "discord_rpc.h"
 #include "imgui.h"
 #include "launcher/game_version.h"
 #include "launcher/test_pad.h"
@@ -1438,6 +1439,7 @@ void run() {
     if (!config_mode) g->page = g->status.ready == Ready::Yes ? PagePlay : PageFiles;
     g->shown_ns = plat::monotonic_ns();
     overlay::set_screen(&screen);
+    discord::set_activity("In Launcher", g->config_mode ? "Configuration" : "Setup");
 
     // Test hooks (documented here, as Savage Wind's are where they're defined):
     //   NX_LAUNCHER_TOUR=<n>   each page for n frames, then the settings menu over it, then quits (with

@@ -10,6 +10,7 @@
 #include <nx/gamelib.h>
 #include <nx/runtime.h>
 
+#include "discord_rpc.h"
 #include "kernel.h"
 #if NX_GAME_LIBRARY
 #include "launcher/launcher.h"
@@ -145,6 +146,7 @@ NX_HLE("__process_return", process_return);
 void boot() {
     if (const char* t = std::getenv("NX_TRACE")) g_trace = *t == '1';
     if (plat::setting("trace") == "1") g_trace = true;
+    discord::init("1573462667874537472");  // override via NX_DISCORD_APP_ID
     memory_init();
 #if NX_GAME_LIBRARY
     // The start screen, when the game isn't set up or with --config: after the guest memory is reserved (so nothing it

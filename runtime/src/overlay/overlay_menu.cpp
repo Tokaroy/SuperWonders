@@ -1062,6 +1062,23 @@ void system_tab(MenuContext& c, const Labels& l) {
         settings_changed(true);
     if (rows::toggle(l.low_vram, &s.low_vram_profile, kDefaults.low_vram_profile, translated_desc(desc::low_vram, lang)))
         settings_changed(true), ui::notify(l.restart_low_vram);
+    static constexpr const char* kDiscordDesc[13] = {
+        "Show Super Mario Bros. Wonder activity on Discord.",
+        "Mostra su Discord a cosa stai giocando in Super Mario Bros. Wonder.",
+        "Zeigt deine Super Mario Bros. Wonder-Aktivität auf Discord an.",
+        "Affiche votre activité Super Mario Bros. Wonder sur Discord.",
+        "Muestra tu actividad de Super Mario Bros. Wonder en Discord.",
+        "Discord에 Super Mario Bros. Wonder 플레이 상태를 표시합니다.",
+        "Discordにスーパーマリオブラザーズ ワンダーのプレイ状況を表示します。",
+        "عرض نشاط Super Mario Bros. Wonder على Discord.",
+        "Показывать активность Super Mario Bros. Wonder в Discord.",
+        "Discord üzerinde Super Mario Bros. Wonder etkinliğini gösterir.",
+        "Toont je Super Mario Bros. Wonder-activiteit op Discord.",
+        "在 Discord 上显示《超级马力欧兄弟 惊奇》的游玩状态。",
+        "在 Discord 上顯示《超級瑪利歐兄弟 驚奇》的遊玩狀態。",
+    };
+    if (rows::toggle("Discord Rich Presence", &s.discord_rpc, kDefaults.discord_rpc, kDiscordDesc[lang]))
+        settings_changed(true);
     rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];

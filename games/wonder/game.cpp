@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "discord_rpc.h"
 #include "platform.h"
 #include "nvn/nvn_ultrawide.h"
 
@@ -20,6 +21,19 @@ namespace nvn { void hold_scene_frame_cap(int fps); }
 
 void game::file_opened(const char* path) {
     static std::atomic<bool> held{false};
+    // Update Discord Rich Presence when entering a world map or course.
+    if (const char* bgm = std::strstr(path, "/Sound/Resource/Stream/BGM_World_")) {
+        const char* wname = "Exploring the World Map";
+        if (std::strstr(bgm, "World_01") || std::strstr(bgm, "World01")) wname = "World 1: Pipe-Rock Plateau";
+        else if (std::strstr(bgm, "World_02") || std::strstr(bgm, "World02")) wname = "World 2: Fluff-Puff Peaks";
+        else if (std::strstr(bgm, "World_03") || std::strstr(bgm, "World03")) wname = "World 3: Shining Falls";
+        else if (std::strstr(bgm, "World_04") || std::strstr(bgm, "World04")) wname = "World 4: Sunbaked Desert";
+        else if (std::strstr(bgm, "World_05") || std::strstr(bgm, "World05")) wname = "World 5: Fungi Mines";
+        else if (std::strstr(bgm, "World_06") || std::strstr(bgm, "World06")) wname = "World 6: Deep Magma Bog";
+        else if (std::strstr(bgm, "Special")) wname = "Special World";
+        else if (std::strstr(bgm, "Main") || std::strstr(bgm, "Petal")) wname = "Petal Isles";
+        discord::set_activity("On the World Map", wname);
+    }
     // The map can remain resident while entering a course, so returning to it does not necessarily reopen its
     // StageLoadInfo. Its world music does reopen when the player returns from this house.
     if (held.load() && std::strstr(path, "/Sound/Resource/Stream/BGM_World_") && held.exchange(false)) {
@@ -31,6 +45,8 @@ void game::file_opened(const char* path) {
     const char* scene = std::strstr(path, prefix);
     if (!scene) return;
     scene += std::strlen(prefix);
+    if (std::strncmp(scene, "World", 5) == 0) discord::set_activity("On the World Map", "Exploring the Flower Kingdom");
+    else if (std::strncmp(scene, "Course", 6) == 0) discord::set_activity("Playing a Course", "Flower Kingdom");
     constexpr const char* house = "Course500_Course.game__stage__StageLoadInfo.bgyml";
     const bool in_house = std::strcmp(scene, house) == 0;
     if (held.exchange(in_house) != in_house) {
@@ -354,6 +370,7 @@ void seed_guard_tick(uint64_t now_ns);
 }
 
 void game::after_init() {
+    discord::set_activity("Title Screen", "Super Mario Bros. Wonder");
     init_frame_step();
     trace_screen_globals();
     install_wide_probe();
