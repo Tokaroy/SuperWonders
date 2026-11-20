@@ -1,6 +1,6 @@
 # SuperWonders — Super Mario Bros. Wonder PC Recompilation
 
-I'm working on SuperWonders, an experimental Windows and Linux x86-64 static recompilation of *Super Mario Bros. Wonder* (Nintendo Switch, base version 1.0.0) for native execution on PC. I started from the DKB/TOTK recompilation framework and have been adapting its runtime and graphics support for Wonder. The graphics backend uses Vulkan.
+I'm working on SuperWonders, an experimental Windows and Linux x86-64 static recompilation of *Super Mario Bros. Wonder* (Nintendo Switch, base version 1.0.0 and update 1.2.1) for native execution on PC. I started from the DKB/TOTK recompilation framework and have been adapting its runtime and graphics support for Wonder. The graphics backend uses Vulkan.
 
 This repository contains source code and project documentation. It does not contain the builder package, the game, game assets, a game dump, firmware, or a compiled game. The separate Windows GUI Builder is distributed through [GitHub Releases](https://github.com/vfjoo888/SuperWonders/releases).
 
@@ -27,7 +27,7 @@ I have tested the project on a Windows and Linux PC with an **NVIDIA GeForce RTX
 
 **Support on intel graphic cards is still at early stages. It boots, but it may display graphical glitches**. Other systems and GPUs may behave differently. Linux support is available.
 
-The recompilation targets the game's base version **1.0.0**. The builder uses the extracted folders provided by the user and does not identify the game version automatically. Updates and DLC are not supported.
+The recompilation targets the game's base version **1.0.0** and the **1.2.1** update.
 
 ## Minimum hardware (provisional)
 
