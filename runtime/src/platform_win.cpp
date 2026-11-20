@@ -351,7 +351,7 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask, o.pad_presets = s.pad_presets;
     o.keyboard_separate = s.keyboard_separate;
     o.controller_preset = s.controller_preset, o.button_icons = s.button_icons, o.muted = s.muted, o.fullscreen = s.fullscreen;
-    o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile;
+    o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile, o.discord_rpc = s.discord_rpc;
     o.metric_fps = s.metric_fps, o.metric_one_percent_low = s.metric_one_percent_low;
     o.metric_game_speed = s.metric_game_speed, o.metric_frametime_graph = s.metric_frametime_graph;
     o.overlay_position = s.overlay_position, o.controller_custom_mask = s.controller_custom_mask;
@@ -370,7 +370,7 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask, s.pad_presets = o.pad_presets;
     s.keyboard_separate = o.keyboard_separate;
     s.controller_preset = o.controller_preset, s.button_icons = o.button_icons, s.muted = o.muted, s.fullscreen = o.fullscreen;
-    s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile;
+    s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile, s.discord_rpc = o.discord_rpc;
     s.metric_fps = o.metric_fps, s.metric_one_percent_low = o.metric_one_percent_low;
     s.metric_game_speed = o.metric_game_speed, s.metric_frametime_graph = o.metric_frametime_graph;
     s.overlay_position = o.overlay_position, s.controller_custom_mask = o.controller_custom_mask;
@@ -477,6 +477,7 @@ static void save_pc_settings() {
          << "\ngame_language_version=2"
          << "\nmemory_limit_gb=" << g_pc_settings.memory_limit_gb
          << "\nlow_vram_profile=" << g_pc_settings.low_vram_profile
+         << "\ndiscord_rpc=" << g_pc_settings.discord_rpc
          << "\ncontroller_preset=" << g_pc_settings.controller_preset
          << "\nbutton_icons=" << g_pc_settings.button_icons
          << "\nmetrics_enabled=" << g_pc_settings.metrics_enabled << "\nmetric_fps=" << g_pc_settings.metric_fps
@@ -530,6 +531,7 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
             game_language_version = value;
         else if (std::sscanf(line.c_str(), "memory_limit_gb=%d", &value) == 1) state.memory_limit_gb = std::clamp(value, 2, 32);
         else if (std::sscanf(line.c_str(), "low_vram_profile=%d", &value) == 1) state.low_vram_profile = value != 0;
+        else if (std::sscanf(line.c_str(), "discord_rpc=%d", &value) == 1) state.discord_rpc = value != 0;
         else if (std::sscanf(line.c_str(), "keyboard_separate=%d", &value) == 1) state.keyboard_separate = value != 0;
         else if (std::sscanf(line.c_str(), "controller_preset=%d", &value) == 1) {
             state.controller_preset = std::clamp(value, 0, 1);
@@ -602,9 +604,10 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         _putenv_s("NX_ULTRAWIDE", ratio ? uw_res : "0");
         _putenv_s("NX_RESOLUTION", ratio ? uw_res : "1920x1080");
         const char* flags[] = {"NX_TERRAIN_MOD_ASPECT_TEST", "NX_UW_POWERUP_TEST", "NX_UW_FLOWER_TEST",
-            "NX_UW_FLOWER_ALT_TEST", "NX_UW_MAP_ALIGN_TEST", "NX_UW_MAP_COMPOSITE_TEST", "NX_UW_MAP_CARD_TEST",
+            "NX_UW_MAP_ALIGN_TEST", "NX_UW_MAP_COMPOSITE_TEST", "NX_UW_MAP_CARD_TEST",
             "NX_UW_MAP_MARKERS_TEST", "NX_UW_MAP_DETAIL_TEST", "NX_UW_SETTINGS_SCISSOR_TEST"};
         for (const char* flag : flags) _putenv_s(flag, ratio ? "1" : "0");
+        _putenv_s("NX_UW_FLOWER_ALT_TEST", "0");
     }
     return true;
 }

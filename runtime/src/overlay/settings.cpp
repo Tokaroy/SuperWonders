@@ -60,6 +60,7 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "game_language_version=%d", &v) == 1) game_language_version = v;
         else if (std::sscanf(l, "memory_limit_gb=%d", &v) == 1) s.memory_limit_gb = std::clamp(v, 2, 32);
         else if (std::sscanf(l, "low_vram_profile=%d", &v) == 1) s.low_vram_profile = v != 0;
+        else if (std::sscanf(l, "discord_rpc=%d", &v) == 1) s.discord_rpc = v != 0;
         else if (std::sscanf(l, "keyboard_separate=%d", &v) == 1) s.keyboard_separate = v != 0;
         else if (std::sscanf(l, "controller_preset=%d", &v) == 1) {
             s.controller_preset = std::clamp(v, 0, 1);
@@ -116,6 +117,7 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\nalways_on_top=" << s.always_on_top << "\nlanguage=" << s.language << "\ntheme=" << s.theme << "\ngame_language=" << s.game_language
       << "\ngame_language_version=2"
       << "\nmemory_limit_gb=" << s.memory_limit_gb << "\nlow_vram_profile=" << s.low_vram_profile
+      << "\ndiscord_rpc=" << s.discord_rpc
       << "\nkeyboard_separate=" << s.keyboard_separate
       << "\ncontroller_preset=" << s.controller_preset << "\nbutton_icons=" << s.button_icons
       << "\nmetrics_enabled=" << s.metrics_enabled

@@ -44,6 +44,7 @@ struct Settings {
     int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation (applies after a restart)
     bool muted = false, fullscreen = false, always_on_top = false;
     bool metrics_enabled = false, low_vram_profile = false;
+    bool discord_rpc = true;
     bool metric_fps = true, metric_one_percent_low = true, metric_game_speed = true, metric_frametime_graph = true;
     int overlay_position = 0;  // top left, top right, bottom left, bottom right
     int upscaler = 1;          // 0 bilinear, 1 FSR 1 (when the game's image is smaller than the window)
