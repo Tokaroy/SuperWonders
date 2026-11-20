@@ -1,6 +1,7 @@
 // am services (appletOE): application proxy, focus/operation-mode state, launch parameters.
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -20,7 +21,9 @@ namespace nx {
 namespace {
 std::atomic<int> g_internal_resolution_preset{0};
 std::atomic<int> g_game_language{0};
-std::atomic<uint32_t> g_native_width{1920};  // preset 6: the window's or screen's width (set by the platform)
+std::atomic<uint32_t> g_native_width{1920};  // preset 6: equivalent 16:9 width from the window's or screen's size
+std::atomic<uint32_t> g_native_display_width{1920};
+std::atomic<uint32_t> g_native_display_height{1080};
 }
 
 void set_internal_resolution_preset(int preset) {
@@ -45,7 +48,27 @@ uint32_t internal_resolution_target_width() {
 }
 
 void set_native_render_width(uint32_t width) {
-    if (width >= 640 && width <= 7680) g_native_width.store(width, std::memory_order_relaxed);
+    if (width >= 640 && width <= 7680) {
+        g_native_width.store(width, std::memory_order_relaxed);
+        g_native_display_width.store(width, std::memory_order_relaxed);
+    }
+}
+
+void set_native_render_size(uint32_t width, uint32_t height) {
+    if (width >= 640 && width <= 7680 && height >= 360 && height <= 4320) {
+        g_native_display_width.store(width, std::memory_order_relaxed);
+        g_native_display_height.store(height, std::memory_order_relaxed);
+        const uint32_t eq169 = uint32_t(std::lround(double(height) * 16.0 / 9.0));
+        const uint32_t effective = std::clamp(std::min(width, eq169), 640u, 7680u);
+        g_native_width.store(effective, std::memory_order_relaxed);
+    } else {
+        set_native_render_width(width);
+    }
+}
+
+void native_display_size(uint32_t& width, uint32_t& height) {
+    width = g_native_display_width.load(std::memory_order_relaxed);
+    height = g_native_display_height.load(std::memory_order_relaxed);
 }
 
 void set_game_language(int language) {
