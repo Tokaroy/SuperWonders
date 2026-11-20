@@ -113,6 +113,22 @@ Kit find_kit() {
         k.python = py.is_absolute() ? str(py) : "python3";
         std::ifstream f(kit / "kit-id.txt");
         std::getline(f, k.id);
+    } else {
+        // Fallback for local CMake builds (e.g. build-git-win): locate checkout tools/.
+        fs::path cur = u8(program_dir());
+        for (int depth = 0; depth < 4 && !cur.empty(); ++depth) {
+            for (const fs::path& cand : {cur / "tools" / "setup_game.py",
+                                         cur / "SuperWonders-git" / "tools" / "setup_game.py"}) {
+                if (file(cand)) {
+                    k.script = str(cand);
+                    break;
+                }
+            }
+            if (!k.script.empty()) break;
+            fs::path parent = cur.parent_path();
+            if (parent == cur) break;
+            cur = parent;
+        }
     }
     // a developer's build: NX_SETUP_SCRIPT=<checkout>/tools/setup_game.py, NX_SETUP_PYTHON=<a Python with the deps>
     if (const char* s = std::getenv("NX_SETUP_SCRIPT"); s && *s) k.script = s;
