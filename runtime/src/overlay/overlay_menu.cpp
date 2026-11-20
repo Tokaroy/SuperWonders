@@ -578,6 +578,78 @@ const char* translated_desc(const char* text, int lang) {
 
 const Settings kDefaults{};
 
+struct ExtraUiText {
+    const char *reset_sec, *reset_tab_fmt, *reset_tab_desc, *reset_tab_note,
+               *reset_all, *reset_all_confirm, *reset_all_desc, *reset_all_note,
+               *style_color, *style_color_desc;
+};
+constexpr ExtraUiText kExtraUiText[13] = {
+    {"Reset", "Reset %s", "Restore default settings for this tab.", "Tab settings reset to defaults.",
+     "Reset all settings", "Press again to confirm", "Reset every settings tab to factory defaults.",
+     "All settings reset to defaults.", "Style color", "Accent color theme for the launcher and in-game settings."},
+    {"Ripristino", "Ripristina %s", "Ripristina i valori predefiniti di questa scheda.",
+     "Impostazioni della scheda ripristinate.", "Ripristina tutte le impostazioni",
+     "Premi di nuovo per confermare", "Ripristina tutte le schede ai valori predefiniti.",
+     "Tutte le impostazioni sono state ripristinate.", "Colore stile",
+     "Tema colori dell'interfaccia per launcher e impostazioni."},
+    {"Zurücksetzen", "%s zurücksetzen", "Standardwerte für diesen Tab wiederherstellen.",
+     "Tab-Einstellungen zurückgesetzt.", "Alle Einstellungen zurücksetzen",
+     "Zum Bestätigen erneut wählen", "Alle Tabs auf die Standardwerte zurücksetzen.",
+     "Alle Einstellungen zurückgesetzt.", "Stilfarbe",
+     "Akzentfarbe für den Launcher und das Menü im Spiel."},
+    {"Réinitialiser", "Réinitialiser %s", "Restaurer les paramètres par défaut de cet onglet.",
+     "Paramètres de l'onglet réinitialisés.", "Tout réinitialiser",
+     "Sélectionner encore pour confirmer", "Réinitialiser tous les onglets par défaut.",
+     "Tous les paramètres ont été réinitialisés.", "Couleur du thème",
+     "Couleur d'accentuation du lanceur et du menu en jeu."},
+    {"Restablecer", "Restablecer %s", "Restaurar los valores predeterminados de esta pestaña.",
+     "Ajustes de la pestaña restablecidos.", "Restablecer todos los ajustes",
+     "Pulsa de nuevo para confirmar", "Restablecer todas las pestañas a los valores de fábrica.",
+     "Todos los ajustes restablecidos.", "Color de estilo",
+     "Color de énfasis para el lanzador y los ajustes del juego."},
+    {"초기화", "%s 초기화", "이 탭의 설정을 기본값으로 되돌립니다.",
+     "이 탭의 설정이 초기화되었습니다.", "모든 설정 초기화",
+     "다시 눌러 확인", "모든 설정 탭을 기본값으로 되돌립니다.",
+     "모든 설정이 초기화되었습니다.", "스타일 색상",
+     "런처와 게임 내 설정의 강조 색상입니다."},
+    {"リセット", "%sをリセット", "このタブの設定を初期値に戻します。",
+     "このタブの設定をリセットしました。", "すべての設定をリセット",
+     "もう一度押して確認", "すべての設定タブを初期値に戻します。",
+     "すべての設定をリセットしました。", "スタイルカラー",
+     "ランチャーとゲーム内設定のアクセントカラーです。"},
+    {"إعادة تعيين", "إعادة تعيين %s", "استعادة الإعدادات الافتراضية لهذا التبويب.",
+     "تمت إعادة تعيين إعدادات التبويب.", "إعادة تعيين كل الإعدادات",
+     "اضغط مرة أخرى للتأكيد", "إعادة تعيين جميع التبويبات إلى الإعدادات الافتراضية.",
+     "تمت إعادة تعيين كل الإعدادات.", "لون النمط",
+     "لون التمييز للمشغّل وقائمة الإعدادات داخل اللعبة."},
+    {"Сброс", "Сбросить: %s", "Восстановить настройки этой вкладки по умолчанию.",
+     "Настройки вкладки сброшены.", "Сбросить все настройки",
+     "Нажмите ещё раз для подтверждения", "Сбросить все вкладки к значениям по умолчанию.",
+     "Все настройки сброшены.", "Цвет темы",
+     "Акцентный цвет интерфейса лаунчера и меню настроек."},
+    {"Sıfırla", "%s sıfırla", "Bu sekmenin ayarlarını varsayılana döndürür.",
+     "Sekme ayarları sıfırlandı.", "Tüm ayarları sıfırla",
+     "Onaylamak için tekrar seçin", "Tüm ayar sekmelerini varsayılan değerlere döndürür.",
+     "Tüm ayarlar sıfırlandı.", "Stil rengi",
+     "Başlatıcı ve oyun içi ayarlar için vurgu rengi."},
+    {"Herstellen", "%s herstellen", "Standaardinstellingen voor dit tabblad herstellen.",
+     "Tabbladinstellingen hersteld.", "Alle instellingen herstellen",
+     "Nogmaals drukken om te bevestigen", "Alle tabbladen terugzetten naar standaardwaarden.",
+     "Alle instellingen hersteld.", "Stijlkleur",
+     "Accentkleur voor de launcher en de instellingen in het spel."},
+    {"重置", "重置%s", "将此选项卡的设置恢复为默认值。",
+     "已重置此选项卡设置。", "重置所有设置",
+     "再次选择以确认", "将所有设置选项卡恢复为出厂默认值。",
+     "所有设置已重置。", "界面主题色",
+     "启动器和游戏内设置的主题配色。"},
+    {"重設", "重設%s", "將此分頁的設定恢復為預設值。",
+     "已重設此分頁設定。", "重設所有設定",
+     "再次選擇以確認", "將所有設定分頁恢復為出廠預設值。",
+     "所有設定已重設。", "介面主題色",
+     "啟動器與遊戲內設定的主題配色。"},
+};
+static_assert(std::size(kExtraUiText) == std::size(kLabels));
+
 void video(MenuContext& c, const Labels& l) {
     Settings& s = c.settings;
     const int lang = std::clamp(s.language, 0, 12);
@@ -678,18 +750,18 @@ void video(MenuContext& c, const Labels& l) {
         if (cap_values[i] == s.frame_cap) cap = i;
     if (rows::choice(l.frame_cap_label, &cap, caps, 5, 1, translated_desc(desc::frame_cap, lang)))
         s.frame_cap = cap_values[cap], settings_changed(true);
-    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
-        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", l.video);
-        if (rows::action(rlabel, "", lang == 1 ? "Ripristina le impostazioni video predefinite." : "Restore default video settings.")) {
+        std::snprintf(rlabel, sizeof rlabel, kExtraUiText[lang].reset_tab_fmt, l.video);
+        if (rows::action(rlabel, "", kExtraUiText[lang].reset_tab_desc)) {
             s.width = kDefaults.width, s.height = kDefaults.height, s.aspect_ratio = kDefaults.aspect_ratio;
             s.internal_resolution = kDefaults.internal_resolution, s.fullscreen = kDefaults.fullscreen;
             s.always_on_top = kDefaults.always_on_top, s.upscaler = kDefaults.upscaler;
             s.fsr_sharpness = kDefaults.fsr_sharpness, s.antialiasing = kDefaults.antialiasing;
             s.anisotropy = kDefaults.anisotropy, s.vsync = kDefaults.vsync, s.frame_cap = kDefaults.frame_cap;
             settings_changed(true);
-            ui::notify(lang == 1 ? "Impostazioni video ripristinate." : "Video settings reset to defaults.");
+            ui::notify(kExtraUiText[lang].reset_tab_note);
         }
     }
     rows::page_note(l.restart_note);
@@ -764,16 +836,16 @@ void audio(MenuContext& c, const Labels& l) {
     if (rows::choice(l.game_language, &s.game_language, kGameLanguageNames, int(std::size(kGameLanguageNames)),
                      kDefaults.game_language, translated_desc(desc::game_language, lang)))
         settings_changed(true), ui::notify(l.game_language_restart);
-    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
-        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", l.audio);
-        if (rows::action(rlabel, "", lang == 1 ? "Ripristina le impostazioni audio predefinite." : "Restore default audio and game language settings.")) {
+        std::snprintf(rlabel, sizeof rlabel, kExtraUiText[lang].reset_tab_fmt, l.audio);
+        if (rows::action(rlabel, "", kExtraUiText[lang].reset_tab_desc)) {
             s.volume = kDefaults.volume, s.muted = kDefaults.muted;
             s.audio_mode = kDefaults.audio_mode, s.stereo_separation = kDefaults.stereo_separation;
             s.game_language = kDefaults.game_language;
             settings_changed(true);
-            ui::notify(lang == 1 ? "Impostazioni audio ripristinate." : "Audio settings reset to defaults.");
+            ui::notify(kExtraUiText[lang].reset_tab_note);
         }
     }
     rows::page_note(l.game_language_restart);
@@ -905,11 +977,11 @@ void controls(MenuContext& c, const Labels& l) {
         const char* name = waiting ? t.press_key : c.host.key_name ? c.host.key_name(s.keyboard_bindings[a]) : "?";
         if (rows::action(id, name, translated_desc(desc::key, lang), true, waiting)) c.capture_action = int(a);  // overlay.cpp takes the next key
     }
-    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
-        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", l.controls);
-        if (rows::action(rlabel, "", lang == 1 ? "Ripristina i controlli predefiniti per tutti i pad e la tastiera." : "Restore default bindings and layout for all controllers and keyboard.")) {
+        std::snprintf(rlabel, sizeof rlabel, kExtraUiText[lang].reset_tab_fmt, l.controls);
+        if (rows::action(rlabel, "", kExtraUiText[lang].reset_tab_desc)) {
             s.keyboard_separate = kDefaults.keyboard_separate;
             s.player_devices = kDefaults.player_devices;
             s.controller_preset = kDefaults.controller_preset;
@@ -924,7 +996,7 @@ void controls(MenuContext& c, const Labels& l) {
                 if (c.host.default_keyboard_bindings[a]) s.keyboard_bindings[a] = c.host.default_keyboard_bindings[a];
             c.capture_action = -1;
             settings_changed(true);
-            ui::notify(lang == 1 ? "Controlli ripristinati." : "Controls reset to defaults.");
+            ui::notify(kExtraUiText[lang].reset_tab_note);
         }
     }
     rows::page_note(slot_preset == 1 ? l.nintendo_desc : l.standard_desc);
@@ -954,11 +1026,11 @@ void overlay_tab(MenuContext& c) {
     if (!s.metrics_enabled) rows::disable_next();
     if (rows::choice(o[5], &s.overlay_position, kPositions[lang], 4, kDefaults.overlay_position, translated_desc(desc::position, lang)))
         settings_changed(true);
-    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
-        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", kLabels[lang].overlay);
-        if (rows::action(rlabel, "", lang == 1 ? "Ripristina le impostazioni dell'overlay predefinite." : "Restore default overlay settings.")) {
+        std::snprintf(rlabel, sizeof rlabel, kExtraUiText[lang].reset_tab_fmt, kLabels[lang].overlay);
+        if (rows::action(rlabel, "", kExtraUiText[lang].reset_tab_desc)) {
             s.metrics_enabled = kDefaults.metrics_enabled;
             s.metric_fps = kDefaults.metric_fps;
             s.metric_one_percent_low = kDefaults.metric_one_percent_low;
@@ -966,7 +1038,7 @@ void overlay_tab(MenuContext& c) {
             s.metric_frametime_graph = kDefaults.metric_frametime_graph;
             s.overlay_position = kDefaults.overlay_position;
             settings_changed(true);
-            ui::notify(lang == 1 ? "Impostazioni overlay ripristinate." : "Overlay settings reset to defaults.");
+            ui::notify(kExtraUiText[lang].reset_tab_note);
         }
     }
     rows::end();
@@ -981,8 +1053,8 @@ void system_tab(MenuContext& c, const Labels& l) {
         settings_changed(true);
     const char* theme_names[5] = {};
     for (int i = 0; i < ui::theme_count() && i < 5; ++i) theme_names[i] = ui::theme_name(i);
-    if (rows::choice("Style color", &s.theme, theme_names, ui::theme_count(), kDefaults.theme,
-                     "Accent color theme for the launcher and in-game settings.")) {
+    if (rows::choice(kExtraUiText[lang].style_color, &s.theme, theme_names, ui::theme_count(), kDefaults.theme,
+                     kExtraUiText[lang].style_color_desc)) {
         ui::set_theme(s.theme);
         settings_changed(true);
     }
@@ -990,24 +1062,23 @@ void system_tab(MenuContext& c, const Labels& l) {
         settings_changed(true);
     if (rows::toggle(l.low_vram, &s.low_vram_profile, kDefaults.low_vram_profile, translated_desc(desc::low_vram, lang)))
         settings_changed(true), ui::notify(l.restart_low_vram);
-    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
-        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", l.system);
-        if (rows::action(rlabel, "", lang == 1 ? "Ripristina le impostazioni di sistema predefinite." : "Restore default system settings (language, theme, memory, VRAM profile).")) {
+        std::snprintf(rlabel, sizeof rlabel, kExtraUiText[lang].reset_tab_fmt, l.system);
+        if (rows::action(rlabel, "", kExtraUiText[lang].reset_tab_desc)) {
             s.language = kDefaults.language, s.theme = kDefaults.theme;
             s.memory_limit_gb = kDefaults.memory_limit_gb, s.low_vram_profile = kDefaults.low_vram_profile;
             ui::set_theme(s.theme);
             settings_changed(true);
-            ui::notify(lang == 1 ? "Impostazioni di sistema ripristinate." : "System settings reset to defaults.");
+            ui::notify(kExtraUiText[lang].reset_tab_note);
         }
     }
     static double reset_all_at = -10;
     const bool armed_all = ImGui::GetTime() - reset_all_at < 4.0;
-    if (rows::action(lang == 1 ? "Ripristina tutte le impostazioni" : "Reset all settings",
-                     armed_all ? (lang == 1 ? "Premi di nuovo per confermare" : "Press again to confirm") : "",
-                     lang == 1 ? "Ripristina tutte le schede (Video, Audio, Controlli, Overlay, Sistema) ai valori predefiniti."
-                               : "Reset every settings tab (Video, Audio, Controls, Overlay, System) to factory defaults.",
+    if (rows::action(kExtraUiText[lang].reset_all,
+                     armed_all ? kExtraUiText[lang].reset_all_confirm : "",
+                     kExtraUiText[lang].reset_all_desc,
                      true, armed_all)) {
         if (armed_all) {
             Settings fresh = kDefaults;
@@ -1018,7 +1089,7 @@ void system_tab(MenuContext& c, const Labels& l) {
             ui::set_theme(s.theme);
             settings_changed(true);
             reset_all_at = -10;
-            ui::notify(lang == 1 ? "Tutte le impostazioni sono state ripristinate." : "All settings reset to defaults.");
+            ui::notify(kExtraUiText[lang].reset_all_note);
         } else {
             reset_all_at = ImGui::GetTime();
         }
