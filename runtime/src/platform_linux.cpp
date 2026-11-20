@@ -19,6 +19,7 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -514,6 +515,7 @@ int main() {
     nx::plat::make_dirs(nx::plat::data_root());
     nx::plat::start_memory_guard();  // before anything can grow: a leak must never freeze the machine
     nx::plat::linux_host::load_player_settings();
+    nx::plat::linux_host::sample_input();
 
     // The game on its own thread, with a big stack (recompiled calls nest deeply); the main thread keeps SDL's
     // event loop.
@@ -618,6 +620,42 @@ std::vector<std::string> program_args() {
         at = end + 1;
     }
     return out;
+}
+
+bool upgrade_button_font(const std::string& out_path) {
+    char exe_buf[PATH_MAX]{};
+    const ssize_t n = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    if (n <= 0) return false;
+    exe_buf[n] = '\0';
+    const auto exe_dir = std::filesystem::path(exe_buf).parent_path();
+    std::error_code ec;
+    const auto script = exe_dir / "game-build" / "tools" / "fonts" / "make_button_font.py";
+    if (!std::filesystem::is_regular_file(script, ec)) return false;
+    const auto bundled_py = exe_dir / "game-build" / "python" / "bin" / "python3";
+    const std::string py = std::filesystem::is_regular_file(bundled_py, ec) ? bundled_py.string() : std::string("python3");
+    std::string base;
+    for (const char* cand : {"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"}) {
+        if (std::filesystem::is_regular_file(cand, ec)) {
+            base = cand;
+            break;
+        }
+    }
+    if (base.empty()) return false;
+    const pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid == 0) {
+        const std::string script_s = script.string();
+        char* const argv[] = {const_cast<char*>(py.c_str()), const_cast<char*>(script_s.c_str()),
+                              const_cast<char*>("--base"), const_cast<char*>(base.c_str()),
+                              const_cast<char*>("--out"), const_cast<char*>(out_path.c_str()), nullptr};
+        execvp(py.c_str(), argv);
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return false;
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 }  // namespace nx::plat

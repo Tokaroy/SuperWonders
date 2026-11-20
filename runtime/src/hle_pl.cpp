@@ -18,6 +18,7 @@
 #include <nx/runtime.h>
 
 #include "platform.h"
+#include "ttf_cmap_remap.h"
 
 namespace nx {
 
@@ -75,6 +76,30 @@ const Font& font(uint32_t type) {
         }
     }
     if (ttf.empty()) log("pl: no font for shared font %u (put one in %s)", type, root.c_str());
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
+    if (type == 5 && !ttf.empty()) {
+        const plat::ButtonPromptConfig cfg = plat::button_prompt_config();
+        bool remapped = remap_button_font_cmap(ttf, cfg.style, cfg.bindings);
+        if (!remapped) {
+            log("pl: shared_5.ttf lacks dynamic button icons; regenerating...");
+            const std::string target = root + "shared_5.ttf";
+            if (plat::upgrade_button_font(target)) {
+                std::vector<uint8_t> upgraded = read_file(target);
+                if (!upgraded.empty() && remap_button_font_cmap(upgraded, cfg.style, cfg.bindings)) {
+                    ttf = std::move(upgraded);
+                    remapped = true;
+                }
+            }
+        }
+        if (remapped) {
+            const char* style_name = cfg.style == 3 ? "PlayStation" : cfg.style == 2 ? "Xbox" : "Nintendo";
+            log("pl: remapped button icons (%s, A->phy %d, B->phy %d, X->phy %d, Y->phy %d)",
+                style_name, cfg.bindings[0], cfg.bindings[1], cfg.bindings[2], cfg.bindings[3]);
+        } else {
+            log("pl: button icons not remapped (update data/fonts/shared_5.ttf with make_button_font.py)");
+        }
+    }
+#endif
     f.size = ttf.size() + 8;
     f.addr = kernel_alloc(f.size);
     st<uint32_t>(f.addr, 0x18029A7F);  // plain magic: "already decoded"

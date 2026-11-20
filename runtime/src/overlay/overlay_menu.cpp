@@ -743,22 +743,23 @@ void audio(MenuContext& c, const Labels& l) {
 // Multiplayer input labels and help, in the same language order as kLabels.
 struct InputText {
     const char *separate, *separate_help, *automatic, *none, *keyboard, *offline,
-               *player, *player_help, *configure, *configure_help, *press_key;
+               *player, *player_help, *configure, *configure_help, *press_key,
+               *icons, *icons_help, *icons_restart;
 };
 constexpr InputText kInputText[] = {
-    {"Keyboard as separate player", "Keyboard is player 1; controllers start at player 2.", "Automatic", "None", "Keyboard", "offline", "Player", "Choose this player's input device.", "Configure controller", "Choose which controller to configure.", "Press a key..."},
-    {"Tastiera giocatore separato", "Tastiera: giocatore 1; controller: dal giocatore 2.", "Automatico", "Nessuno", "Tastiera", "non connesso", "Giocatore", "Seleziona il dispositivo assegnato al giocatore.", "Configura controller", "Scegli quale controller modificare.", "Premi un tasto..."},
-    {"Tastatur als eigener Spieler", "Tastatur: Spieler 1; Controller: ab Spieler 2.", "Automatisch", "Keines", "Tastatur", "nicht verbunden", "Spieler", "Eingabegerät für diesen Spieler wählen.", "Controller konfigurieren", "Controller zum Bearbeiten wählen.", "Taste drücken..."},
-    {"Clavier comme joueur séparé", "Clavier : joueur 1 ; manettes : à partir du joueur 2.", "Automatique", "Aucun", "Clavier", "déconnecté", "Joueur", "Choisissez le périphérique de ce joueur.", "Configurer la manette", "Choisissez la manette à modifier.", "Appuyez sur une touche..."},
-    {"Teclado como jugador independiente", "Teclado: jugador 1; mandos: desde el jugador 2.", "Automático", "Ninguno", "Teclado", "desconectado", "Jugador", "Elige el dispositivo de este jugador.", "Configurar mando", "Elige el mando que quieres modificar.", "Pulsa una tecla..."},
-    {"키보드를 별도 플레이어로", "키보드는 플레이어 1, 컨트롤러는 플레이어 2부터 사용합니다.", "자동", "없음", "키보드", "연결 안 됨", "플레이어", "이 플레이어의 입력 장치를 선택하세요.", "컨트롤러 설정", "설정할 컨트롤러를 선택하세요.", "키를 누르세요..."},
-    {"キーボードを別のプレイヤーに", "キーボードはプレイヤー1、コントローラーは2から使用します。", "自動", "なし", "キーボード", "未接続", "プレイヤー", "このプレイヤーの入力機器を選択します。", "コントローラーを設定", "設定するコントローラーを選択します。", "キーを押してください..."},
-    {"لوحة المفاتيح كلاعب منفصل", "لوحة المفاتيح للاعب الأول، ووحدات التحكم بدءاً من اللاعب الثاني.", "تلقائي", "لا شيء", "لوحة المفاتيح", "غير متصل", "اللاعب", "اختر جهاز الإدخال لهذا اللاعب.", "إعداد وحدة التحكم", "اختر وحدة التحكم التي تريد إعدادها.", "اضغط مفتاحاً..."},
-    {"Клавиатура как отдельный игрок", "Клавиатура — игрок 1, контроллеры — начиная с игрока 2.", "Автоматически", "Нет", "Клавиатура", "не подключён", "Игрок", "Выберите устройство ввода для этого игрока.", "Настроить контроллер", "Выберите контроллер для настройки.", "Нажмите клавишу..."},
-    {"Klavye ayrı oyuncu olsun", "Klavye oyuncu 1, kumandalar oyuncu 2'den başlar.", "Otomatik", "Yok", "Klavye", "bağlı değil", "Oyuncu", "Bu oyuncunun giriş cihazını seçin.", "Kumandayı yapılandır", "Yapılandırılacak kumandayı seçin.", "Bir tuşa basın..."},
-    {"Toetsenbord als aparte speler", "Toetsenbord: speler 1; controllers vanaf speler 2.", "Automatisch", "Geen", "Toetsenbord", "niet verbonden", "Speler", "Kies het invoerapparaat voor deze speler.", "Controller instellen", "Kies welke controller je wilt instellen.", "Druk op een toets..."},
-    {"键盘作为独立玩家", "键盘为玩家1，控制器从玩家2开始。", "自动", "无", "键盘", "未连接", "玩家", "选择此玩家使用的输入设备。", "配置控制器", "选择要配置的控制器。", "请按一个键..."},
-    {"鍵盤作為獨立玩家", "鍵盤為玩家1，控制器從玩家2開始。", "自動", "無", "鍵盤", "未連線", "玩家", "選擇此玩家使用的輸入裝置。", "設定控制器", "選擇要設定的控制器。", "請按一個鍵..."},
+    {"Keyboard as separate player", "Keyboard is player 1; controllers start at player 2.", "Automatic", "None", "Keyboard", "offline", "Player", "Choose this player's input device.", "Configure controller", "Choose which controller to configure.", "Press a key...", "Button icons", "In-game button icon style synced with Pad 1's bindings. Requires restart.", "Restart the game to apply button icons."},
+    {"Tastiera giocatore separato", "Tastiera: giocatore 1; controller: dal giocatore 2.", "Automatico", "Nessuno", "Tastiera", "non connesso", "Giocatore", "Seleziona il dispositivo assegnato al giocatore.", "Configura controller", "Scegli quale controller modificare.", "Premi un tasto...", "Icone tasti HUD", "Stile delle icone dei tasti in gioco sincronizzato coi comandi del Pad 1. Richiede riavvio.", "Riavvia il gioco per applicare le icone dei tasti."},
+    {"Tastatur als eigener Spieler", "Tastatur: Spieler 1; Controller: ab Spieler 2.", "Automatisch", "Keines", "Tastatur", "nicht verbunden", "Spieler", "Eingabegerät für diesen Spieler wählen.", "Controller konfigurieren", "Controller zum Bearbeiten wählen.", "Taste drücken...", "Tastensymbole", "Symbolstil der Tasten im Spiel, abgestimmt auf die Belegung von Pad 1. Neustart erforderlich.", "Spiel neu starten, um Tastensymbole anzuwenden."},
+    {"Clavier comme joueur séparé", "Clavier : joueur 1 ; manettes : à partir du joueur 2.", "Automatique", "Aucun", "Clavier", "déconnecté", "Joueur", "Choisissez le périphérique de ce joueur.", "Configurer la manette", "Choisissez la manette à modifier.", "Appuyez sur une touche...", "Icônes des touches", "Style des icônes en jeu synchronisé avec les touches du Pad 1. Redémarrage requis.", "Redémarrez le jeu pour appliquer les icônes."},
+    {"Teclado como jugador independiente", "Teclado: jugador 1; mandos: desde el jugador 2.", "Automático", "Ninguno", "Teclado", "desconectado", "Jugador", "Elige el dispositivo de este jugador.", "Configurar mando", "Elige el mando que quieres modificar.", "Pulsa una tecla...", "Iconos de botones", "Estilo de los iconos en el juego sincronizado con los controles del Pad 1. Requiere reiniciar.", "Reinicia el juego para aplicar los iconos."},
+    {"키보드를 별도 플레이어로", "키보드는 플레이어 1, 컨트롤러는 플레이어 2부터 사용합니다.", "자동", "없음", "키보드", "연결 안 됨", "플레이어", "이 플레이어의 입력 장치를 선택하세요.", "컨트롤러 설정", "설정할 컨트롤러를 선택하세요.", "키를 누르세요...", "버튼 표시", "게임 내 버튼 표시를 Pad 1 설정으로 적용합니다. 재시작 필요.", "버튼 표시를 적용하려면 게임을 다시 시작하세요."},
+    {"キーボードを別のプレイヤーに", "キーボードはプレイヤー1、コントローラーは2から使用します。", "自動", "なし", "キーボード", "未接続", "プレイヤー", "このプレイヤーの入力機器を選択します。", "コントローラーを設定", "設定するコントローラーを選択します。", "キーを押してください...", "ボタンアイコン", "ゲーム内のボタン表示を Pad 1 の設定に合わせます。再起動が必要です。", "ボタンアイコンの適用には再起動が必要です。"},
+    {"لوحة المفاتيح كلاعب منفصل", "لوحة المفاتيح للاعب الأول، ووحدات التحكم بدءاً من اللاعب الثاني.", "تلقائي", "لا شيء", "لوحة المفاتيح", "غير متصل", "اللاعب", "اختر جهاز الإدخال لهذا اللاعب.", "إعداد وحدة التحكم", "اختر وحدة التحكم التي تريد إعدادها.", "اضغط مفتاحاً...", "أيقونات الأزرار", "نمط أيقونات الأزرار في اللعبة متزامن مع إعدادات Pad 1. يتطلب إعادة التشغيل.", "أعد تشغيل اللعبة لتطبيق أيقونات الأزرار."},
+    {"Клавиатура как отдельный игрок", "Клавиатура — игрок 1, контроллеры — начиная с игрока 2.", "Автоматически", "Нет", "Клавиатура", "не подключён", "Игрок", "Выберите устройство ввода для этого игрока.", "Настроить контроллер", "Выберите контроллер для настройки.", "Нажмите клавишу...", "Иконки кнопок", "Стиль значков кнопок в игре с учётом раскладки Pad 1. Нужен перезапуск.", "Перезапустите игру для применения иконок."},
+    {"Klavye ayrı oyuncu olsun", "Klavye oyuncu 1, kumandalar oyuncu 2'den başlar.", "Otomatik", "Yok", "Klavye", "bağlı değil", "Oyuncu", "Bu oyuncunun giriş cihazını seçin.", "Kumandayı yapılandır", "Yapılandırılacak kumandayı seçin.", "Bir tuşa basın...", "Düğme simgeleri", "Oyun içi düğme simgeleri Pad 1 atamalarına göre gösterilir. Yeniden başlatma gerekir.", "Düğme simgelerini uygulamak için oyunu yeniden başlatın."},
+    {"Toetsenbord als aparte speler", "Toetsenbord: speler 1; controllers vanaf speler 2.", "Automatisch", "Geen", "Toetsenbord", "niet verbonden", "Speler", "Kies het invoerapparaat voor deze speler.", "Controller instellen", "Kies welke controller je wilt instellen.", "Druk op een toets...", "Knopiconen", "Stijl van knopiconen in het spel, afgestemd op Pad 1. Herstart vereist.", "Herstart het spel om knopiconen toe te passen."},
+    {"键盘作为独立玩家", "键盘为玩家1，控制器从玩家2开始。", "自动", "无", "键盘", "未连接", "玩家", "选择此玩家使用的输入设备。", "配置控制器", "选择要配置的控制器。", "请按一个键...", "按键图示", "与控制器 1 配置同步的游戏内按键图示。需要重启。", "重启游戏以应用按键图示。"},
+    {"鍵盤作為獨立玩家", "鍵盤為玩家1，控制器從玩家2開始。", "自動", "無", "鍵盤", "未連線", "玩家", "選擇此玩家使用的輸入裝置。", "設定控制器", "選擇要設定的控制器。", "請按一個鍵...", "按鍵圖示", "與控制器 1 設定同步的遊戲內按鍵圖示。需要重新啟動。", "重新啟動遊戲以套用按鍵圖示。"},
 };
 static_assert(std::size(kInputText) == std::size(kLabels));
 // Translated directional pad labels and PlayStation face-button names.
@@ -814,6 +815,9 @@ void controls(MenuContext& c, const Labels& l) {
     const char* presets[] = {"Xbox / DualSense", "Nintendo"};
     if (rows::choice(l.control_preset, &s.controller_preset, presets, 2, kDefaults.controller_preset, translated_desc(desc::preset, lang)))
         settings_changed(true);
+    const char* icon_styles[] = {t.automatic, "Nintendo", "Xbox", "PlayStation"};
+    if (rows::choice(t.icons, &s.button_icons, icon_styles, 4, kDefaults.button_icons, t.icons_help))
+        settings_changed(true), ui::notify(t.icons_restart);
     if (rows::integer(kCommon[lang][8], &s.rumble, 0, 100, 10, kDefaults.rumble, "%d%%", translated_desc(desc::rumble, lang))) settings_changed(true);
     std::array<std::string, 4> face_labels;
     const char* physical[kControlCount];

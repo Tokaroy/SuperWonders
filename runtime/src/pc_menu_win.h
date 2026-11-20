@@ -47,6 +47,7 @@ struct PcMenuState {
     std::array<uint32_t, 4> pad_custom_mask{};
     bool keyboard_separate = false;
     int controller_preset = 0;  // Xbox / DualSense, Nintendo
+    int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation
     bool muted = false;
     bool fullscreen = false;
     bool always_on_top = false;

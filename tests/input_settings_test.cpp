@@ -12,6 +12,7 @@ int main() {
     o::Settings s;
     s.player_devices = {3, 2, 4, 1};
     s.keyboard_separate = true;
+    s.button_icons = 3;
     s.pad_custom_mask[1] = 1u << o::CtlA;
     s.pad_bindings[1][o::CtlA] = o::PhyNorth;
     s.controller_custom_mask = 1u << o::CtlA;
@@ -20,6 +21,7 @@ int main() {
     o::Settings loaded;
     assert(o::load_settings(path.string(), loaded));
     assert(loaded.player_devices == s.player_devices && loaded.keyboard_separate);
+    assert(loaded.button_icons == 3);
     assert(o::controller_binding_for_slot(loaded, 0, o::CtlA) == o::PhyWest);
     assert(o::controller_binding_for_slot(loaded, 1, o::CtlA) == o::PhyNorth);
     assert(o::controller_binding_for_slot(loaded, 2, o::CtlA) == o::default_controller_binding(o::CtlA, s.controller_preset));

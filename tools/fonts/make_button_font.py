@@ -80,6 +80,58 @@ ICONS = {
     # small triangles around the stick icon in menus ("<[stick]>")
     0xE145: ("tri_left", "triangle", 180),
     0xE146: ("tri_right", "triangle", 0),
+    # physical-position button sets in nx::overlay::Physical order (0..15) for dynamic HUD prompt remapping
+    # Nintendo (0xE200..0xE20F)
+    0xE200: ("nin_south", "circle_letter", "B"),
+    0xE201: ("nin_east", "circle_letter", "A"),
+    0xE202: ("nin_west", "circle_letter", "Y"),
+    0xE203: ("nin_north", "circle_letter", "X"),
+    0xE204: ("nin_l", "shoulder", "L"),
+    0xE205: ("nin_r", "shoulder", "R"),
+    0xE206: ("nin_zl", "trigger", "ZL"),
+    0xE207: ("nin_zr", "trigger", "ZR"),
+    0xE208: ("nin_plus", "circle_sign", "+"),
+    0xE209: ("nin_minus", "circle_sign", "-"),
+    0xE20A: ("nin_ls", "stick", "L"),
+    0xE20B: ("nin_rs", "stick", "R"),
+    0xE20C: ("nin_dpad_left", "dpad", "left"),
+    0xE20D: ("nin_dpad_up", "dpad", "up"),
+    0xE20E: ("nin_dpad_right", "dpad", "right"),
+    0xE20F: ("nin_dpad_down", "dpad", "down"),
+    # Xbox (0xE210..0xE21F)
+    0xE210: ("xbox_south", "circle_letter", "A"),
+    0xE211: ("xbox_east", "circle_letter", "B"),
+    0xE212: ("xbox_west", "circle_letter", "X"),
+    0xE213: ("xbox_north", "circle_letter", "Y"),
+    0xE214: ("xbox_lb", "shoulder", "LB"),
+    0xE215: ("xbox_rb", "shoulder", "RB"),
+    0xE216: ("xbox_lt", "trigger", "LT"),
+    0xE217: ("xbox_rt", "trigger", "RT"),
+    0xE218: ("xbox_menu", "xbox_menu", ""),
+    0xE219: ("xbox_view", "xbox_view", ""),
+    0xE21A: ("xbox_ls", "stick", "L"),
+    0xE21B: ("xbox_rs", "stick", "R"),
+    0xE21C: ("xbox_dpad_left", "dpad", "left"),
+    0xE21D: ("xbox_dpad_up", "dpad", "up"),
+    0xE21E: ("xbox_dpad_right", "dpad", "right"),
+    0xE21F: ("xbox_dpad_down", "dpad", "down"),
+    # PlayStation (0xE220..0xE22F)
+    0xE220: ("ps_cross", "ps_face", "cross"),
+    0xE221: ("ps_circle", "ps_face", "circle"),
+    0xE222: ("ps_square", "ps_face", "square"),
+    0xE223: ("ps_triangle", "ps_face", "triangle"),
+    0xE224: ("ps_l1", "shoulder", "L1"),
+    0xE225: ("ps_r1", "shoulder", "R1"),
+    0xE226: ("ps_l2", "trigger", "L2"),
+    0xE227: ("ps_r2", "trigger", "R2"),
+    0xE228: ("ps_options", "ps_menu", "options"),
+    0xE229: ("ps_create", "ps_menu", "create"),
+    0xE22A: ("ps_l3", "stick", "L3"),
+    0xE22B: ("ps_r3", "stick", "R3"),
+    0xE22C: ("ps_dpad_left", "dpad", "left"),
+    0xE22D: ("ps_dpad_up", "dpad", "up"),
+    0xE22E: ("ps_dpad_right", "dpad", "right"),
+    0xE22F: ("ps_dpad_down", "dpad", "down"),
 }
 
 
@@ -233,8 +285,78 @@ class Builder:
             ri = 0.33 * S
             self.circle(pen, cx, cy, ri)
             if arg:
-                self.text(pen, arg, cx, cy, 0.36 * S)
+                self.text(pen, arg, cx, cy, (0.28 if len(arg) >= 2 else 0.36) * S)
             adv = 2 * r + 2 * side
+        elif kind == "ps_face":
+            r = S / 2
+            cx = side + r
+            self.circle(pen, cx, cy, r)
+            if arg == "cross":
+                a, t = 0.28 * S, 0.068 * S
+                pts = [(-t, a), (t, a), (t, t), (a, t), (a, -t), (t, -t),
+                       (t, -a), (-t, -a), (-t, -t), (-a, -t), (-a, t), (-t, t)]
+                self.poly(pen, self._rot(pts, 45, cx, cy), hole=True)
+            elif arg == "circle":
+                self.circle(pen, cx, cy, 0.29 * S, hole=True)
+                self.circle(pen, cx, cy, 0.18 * S, hole=False)
+            elif arg == "square":
+                def sq(d):
+                    return [(cx - d, cy + d), (cx + d, cy + d), (cx + d, cy - d), (cx - d, cy - d)]
+                self.poly(pen, sq(0.25 * S), hole=True)
+                self.poly(pen, sq(0.15 * S), hole=False)
+            elif arg == "triangle":
+                tc_y = cy - 0.04 * S
+                s32 = math.sqrt(3.0) / 2.0
+                def tri(rad):
+                    return [(cx, tc_y + rad), (cx + rad * s32, tc_y - 0.5 * rad), (cx - rad * s32, tc_y - 0.5 * rad)]
+                self.poly(pen, tri(0.31 * S), hole=True)
+                self.poly(pen, tri(0.16 * S), hole=False)
+            else:
+                raise ValueError(arg)
+            adv = 2 * r + 2 * side
+        elif kind == "xbox_menu":
+            r = S / 2
+            cx = side + r
+            self.circle(pen, cx, cy, r)
+            for dy in (0.16 * S, 0.0, -0.16 * S):
+                self.rrect(pen, cx - 0.24 * S, cy + dy - 0.042 * S,
+                           cx + 0.24 * S, cy + dy + 0.042 * S, 0.042 * S, hole=True)
+            adv = 2 * r + 2 * side
+        elif kind == "xbox_view":
+            r = S / 2
+            cx = side + r
+            self.circle(pen, cx, cy, r)
+            st, gap = 0.06 * S, 0.03 * S
+            bx0, by0, bx1, by1 = cx - 0.25 * S, cy - 0.06 * S, cx + 0.06 * S, cy + 0.25 * S
+            fx0, fy0, fx1, fy1 = cx - 0.06 * S, cy - 0.25 * S, cx + 0.25 * S, cy + 0.06 * S
+            def rect_cw(x0, y0, x1, y1):
+                return [(x0, y1), (x1, y1), (x1, y0), (x0, y0)]
+            self.poly(pen, rect_cw(fx0, fy0, fx1, fy1), hole=True)
+            self.poly(pen, rect_cw(fx0 + st, fy0 + st, fx1 - st, fy1 - st), hole=False)
+            back_l = [
+                (bx0, by0), (bx0, by1), (bx1, by1), (bx1, fy1 + gap),
+                (bx1 - st, fy1 + gap), (bx1 - st, by1 - st), (bx0 + st, by1 - st),
+                (bx0 + st, by0 + st), (fx0 - gap, by0 + st), (fx0 - gap, by0),
+            ]
+            self.poly(pen, back_l, hole=True)
+            adv = 2 * r + 2 * side
+        elif kind == "ps_menu":
+            w, h = 0.92 * S, 0.64 * S
+            x0, y0, x1, y1 = side, cy - h / 2, side + w, cy + h / 2
+            cx = side + w / 2
+            self.rrect(pen, x0, y0, x1, y1, h / 2)
+            if arg == "options":
+                for dy in (0.13 * S, 0.0, -0.13 * S):
+                    self.rrect(pen, cx - 0.21 * S, cy + dy - 0.036 * S,
+                               cx + 0.21 * S, cy + dy + 0.036 * S, 0.036 * S, hole=True)
+            elif arg == "create":
+                d0, d1, t = 0.11 * S, 0.29 * S, 0.032 * S
+                ray = [(d0, t), (d1, t), (d1, -t), (d0, -t)]
+                for ang in (56, 90, 124):
+                    self.poly(pen, self._rot(ray, ang, cx, cy - 0.14 * S), hole=True)
+            else:
+                raise ValueError(arg)
+            adv = w + 2 * side
         elif kind == "arrow":
             # arrow pointing right, rotated; drawn in a square box a bit smaller than the icons
             L = 0.80 * S
