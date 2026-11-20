@@ -583,9 +583,17 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
             state.height = std::max(360, ratio == 1 ? state.width * 27 / 64 :
                                           ratio == 2 ? state.width * 9 / 32 :
                                                        state.width * 9 / 16);
+        const int disp_w = state.fullscreen ? GetSystemMetrics(SM_CXSCREEN) : state.width;
+        const int disp_h = state.fullscreen ? GetSystemMetrics(SM_CYSCREEN) : state.height;
+        const double disp_aspect = disp_h > 0 ? double(disp_w) / double(disp_h) : 0.0;
+        char uw_res[32];
+        if (ratio && disp_w > 0 && disp_h > 0 && std::fabs(disp_aspect - target_aspect) / target_aspect <= 0.10)
+            std::snprintf(uw_res, sizeof uw_res, "%dx%d", disp_w, disp_h);
+        else
+            std::snprintf(uw_res, sizeof uw_res, "%s", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "0");
         _putenv_s("NX_ASPECT_PROFILE", ratio == 1 ? "21:9" : ratio == 2 ? "32:9" : "16:9");
-        _putenv_s("NX_ULTRAWIDE", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "0");
-        _putenv_s("NX_RESOLUTION", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "1920x1080");
+        _putenv_s("NX_ULTRAWIDE", ratio ? uw_res : "0");
+        _putenv_s("NX_RESOLUTION", ratio ? uw_res : "1920x1080");
         const char* flags[] = {"NX_TERRAIN_MOD_ASPECT_TEST", "NX_UW_POWERUP_TEST", "NX_UW_FLOWER_TEST",
             "NX_UW_FLOWER_ALT_TEST", "NX_UW_MAP_ALIGN_TEST", "NX_UW_MAP_COMPOSITE_TEST", "NX_UW_MAP_CARD_TEST",
             "NX_UW_MAP_MARKERS_TEST", "NX_UW_MAP_DETAIL_TEST", "NX_UW_SETTINGS_SCISSOR_TEST"};
@@ -606,7 +614,9 @@ static void apply_loaded_pc_settings(const PcMenuState& state) {
     nx::nvn::set_anisotropy(state.anisotropy);
     nx::nvn::set_vsync(state.vsync);
     nx::nvn::set_frame_cap(state.frame_cap);
-    nx::set_native_render_width(state.fullscreen ? uint32_t(GetSystemMetrics(SM_CXSCREEN)) : uint32_t(state.width));
+    const uint32_t nw = uint32_t(GetSystemMetrics(SM_CXSCREEN));
+    const uint32_t nh = uint32_t(GetSystemMetrics(SM_CYSCREEN));
+    nx::set_native_render_size(nw, nh);
 }
 
 static void load_pc_settings() {

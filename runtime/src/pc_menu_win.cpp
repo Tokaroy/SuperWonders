@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cwchar>
 #include <iterator>
 #include <windowsx.h>
+#include "svc_am.h"
 
 namespace nx::plat {
 namespace {
@@ -250,7 +252,20 @@ void paint_video(HDC dc) {
     int internal_ui = 0;
     for (int i = 0; i < 10; ++i)
         if (kInternalOrder[i] == g_state.internal_resolution) internal_ui = i;
-    paint_arrow(dc, 270, kInternalResolution[std::clamp(g_state.language, 0, 12)][internal_ui]);
+    if (internal_ui == 9) {
+        static constexpr const wchar_t* kNativeLabelW[13] = {
+            L"Native", L"Nativa", L"Nativ", L"Native", L"Nativa", L"네이티브", L"ネイティブ",
+            L"أصلية", L"Экранное", L"Doğal", L"Schermresolutie", L"屏幕原生", L"螢幕原生",
+        };
+        uint32_t dw = 0, dh = 0;
+        nx::native_display_size(dw, dh);
+        if (!dw || !dh) dw = g_state.width > 0 ? uint32_t(g_state.width) : 1920, dh = g_state.height > 0 ? uint32_t(g_state.height) : 1080;
+        wchar_t native_opt[64];
+        std::swprintf(native_opt, 64, L"%ls (%ux%u)", kNativeLabelW[std::clamp(g_state.language, 0, 12)], dw, dh);
+        paint_arrow(dc, 270, native_opt);
+    } else {
+        paint_arrow(dc, 270, kInternalResolution[std::clamp(g_state.language, 0, 12)][internal_ui]);
+    }
 
     paint_text(dc, text.frame_cap, RECT{44, 300, 385, 328}, RGB(214, 222, 238), 16);
     wchar_t cap[32];

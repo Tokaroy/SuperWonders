@@ -4,6 +4,7 @@
 // with a close X, tabs, and two-pane pages of option rows with the selected row's description on the right
 // (option_rows.cpp). Descriptions are English for now.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <iterator>
 
@@ -15,6 +16,7 @@
 #include "overlay/option_rows.h"
 #include "overlay/overlay_internal.h"
 #include "overlay/overlay_ui.h"
+#include "svc_am.h"
 
 namespace nx::overlay {
 
@@ -630,10 +632,22 @@ void video(MenuContext& c, const Labels& l) {
     if (!c.host.can_always_on_top) rows::disable_next();
     if (rows::toggle(l.topmost, &s.always_on_top, kDefaults.always_on_top, translated_desc(desc::topmost, lang))) settings_changed(true);
     rows::section(kCommon[lang][1]);
+    static constexpr const char* kNativeLabel[13] = {
+        "Native", "Nativa", "Nativ", "Native", "Nativa", "네이티브", "ネイティブ",
+        "أصلية", "Экранное", "Doğal", "Schermresolutie", "屏幕原生", "螢幕原生",
+    };
+    uint32_t dw = 0, dh = 0;
+    nx::native_display_size(dw, dh);
+    if (!dw || !dh) dw = s.width > 0 ? uint32_t(s.width) : 1920, dh = s.height > 0 ? uint32_t(s.height) : 1080;
+    char native_opt[64];
+    std::snprintf(native_opt, sizeof native_opt, "%s (%ux%u)", kNativeLabel[lang], dw, dh);
+    const char* internal_opts[10];
+    for (int i = 0; i < 9; ++i) internal_opts[i] = kInternal[lang][i];
+    internal_opts[9] = native_opt;
     int internal_ui = 0;
     for (int i = 0; i < 10; ++i)
         if (kInternalOrder[i] == s.internal_resolution) internal_ui = i;
-    if (rows::choice(l.internal_resolution, &internal_ui, kInternal[lang], 10, 0,
+    if (rows::choice(l.internal_resolution, &internal_ui, internal_opts, 10, 0,
                      translated_desc(desc::internal, lang)))
         s.internal_resolution = kInternalOrder[internal_ui], settings_changed(true), ui::notify(l.restart_note);
     const char* upscalers[] = {"Bilinear", "FSR 1"};
