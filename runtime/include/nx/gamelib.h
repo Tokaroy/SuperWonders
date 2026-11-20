@@ -55,6 +55,7 @@ struct GameLib {
 const GameLib& game_lib();
 #if NX_GAME_LIBRARY
 std::string game_lib_path();  // the library game_lib() would load, "" when there is none (the launcher)
+bool probe_game_lib(const std::string& path, std::string& why);  // checks ABI compatibility without keeping it loaded
 std::string program_dir();    // the folder of the running program
 #endif
 

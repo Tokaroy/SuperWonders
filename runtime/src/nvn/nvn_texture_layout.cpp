@@ -16,22 +16,62 @@ namespace nx::nvn {
 
 namespace {
 
-constexpr uint64_t kFormatTable = 0xd34198;  // in sdk (SDK 16.2)
 constexpr uint32_t kFormatCount = 0xd0;
+constexpr uint64_t kFormatEntrySize = 0x30;
 
 struct FormatInfo {
     uint32_t block_w = 1, block_h = 1, bytes = 4;
 };
 
-FormatInfo format_info(uint32_t format) {
-    static uint64_t sdk = [] {
+bool matches_format_table(uint64_t base, uint64_t end) {
+    if (base + uint64_t(kFormatCount) * kFormatEntrySize > end) return false;
+    auto entry = [&](uint32_t fmt) { return reinterpret_cast<const uint32_t*>(base + uint64_t(fmt) * kFormatEntrySize); };
+    const uint32_t* e0 = entry(0x00);
+    const uint32_t* e1 = entry(0x01);
+    const uint32_t* e25 = entry(0x25);  // RGBA8
+    const uint32_t* e49 = entry(0x49);  // BC1 (4x4, 8B)
+    const uint32_t* e87 = entry(0x87);  // ASTC 4x4 sRGB (4x4, 16B)
+    return e0[0] == 0 && e0[1] == 0 && e0[2] == 0x101u && e0[4] == 0x1000000u &&
+           e1[2] == 0x80101u && e1[4] == 0x1000001u &&
+           e25[2] == 0x8080101u && e25[4] == 0x1000004u &&
+           e49[2] == 0x404u && e49[4] == 0x1000008u &&
+           e87[2] == 0x404u && e87[4] == 0x1010010u;
+}
+
+uint64_t format_table_address() {
+    static uint64_t table = []() -> uint64_t {
         uint64_t loader = find_symbol("nvnBootstrapLoader");
         const LoadedModule* m = module_at(loader);
-        return m ? m->base : 0;
+        if (!m || !m->info) return 0;
+        const uint64_t image_end = m->base + m->info->data + m->info->data_size;
+        constexpr uint64_t kKnownOffsets[] = {0xd34198, 0xd351a8};  // SDK 16.2.0 (1.0.0), SDK 16.2.12 (1.2.1)
+        for (uint64_t off : kKnownOffsets) {
+            if (matches_format_table(m->base + off, image_end)) {
+                log("nvn: format table at sdk+%llx", (unsigned long long)off);
+                return m->base + off;
+            }
+        }
+        const uint64_t table_bytes = uint64_t(kFormatCount) * kFormatEntrySize;
+        const uint64_t scan_lo = m->base + m->info->ro;
+        if (image_end >= scan_lo + table_bytes) {
+            for (uint64_t a = scan_lo; a + table_bytes <= image_end; a += 8) {
+                if (matches_format_table(a, image_end)) {
+                    log("nvn: format table found by scan at sdk+%llx", (unsigned long long)(a - m->base));
+                    return a;
+                }
+            }
+        }
+        log("nvn: warning: SDK format table not found; using default 1x1x4 layout");
+        return 0;
     }();
+    return table;
+}
+
+FormatInfo format_info(uint32_t format) {
+    uint64_t table = format_table_address();
     FormatInfo f;
-    if (!sdk || format >= kFormatCount) return f;
-    const uint32_t* e = reinterpret_cast<const uint32_t*>(sdk + kFormatTable + uint64_t(format) * 0x30);
+    if (!table || format >= kFormatCount) return f;
+    const uint32_t* e = reinterpret_cast<const uint32_t*>(table + uint64_t(format) * kFormatEntrySize);
     uint32_t bw = e[2] & 0xFF, bh = (e[2] >> 8) & 0xFF, bytes = e[4] & 0xFF;
     if (bw && bh && bytes) f = {bw, bh, bytes};
     return f;

@@ -5,6 +5,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -36,9 +37,14 @@ def ensure(data):
     mods = os.path.join(data, 'mods')
     menu = os.path.join(mods, 'recomp-menu', 'romfs')
     tables = glob.glob(os.path.join(menu, 'System', 'Resource', 'ResourceSizeTable.Product.*.rsizetable.zs'))
-    if len(tables) != 1:
+    if not tables:
         raise RuntimeError('The recomp-menu resource table is missing. Run game setup first.')
-    table = tables[0]
+
+    def rstb_ver(path):
+        m = re.search(r'Product\.(\d+)\.rsizetable\.zs$', os.path.basename(path))
+        return int(m.group(1)) if m else -1
+
+    table = max(tables, key=rstb_ver)
     required = [os.path.join(HERE, x) for x in ('wonder_menu_mod.py', 'wonder_uw_map_hud.py',
                 'wonder_uw_screen_backgrounds.py', 'wonder_uw_prepare.py')]
     required += [table, os.path.join(menu, 'Layout', 'Title.Nin_NX_NVN.blarc.zs')]

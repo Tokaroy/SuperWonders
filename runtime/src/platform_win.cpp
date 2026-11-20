@@ -208,18 +208,112 @@ void log_line(const char* line) {
     if (write_stderr) std::fprintf(stderr, "%s\n", line);
 }
 
-std::string data_root() {
-    const char* r = std::getenv("NX_DATA_ROOT");
-    if (r && *r) return r;
+namespace {
 
+std::mutex g_data_root_mutex;
+bool g_has_data_root_override = false;
+bool g_data_root_loaded = false;
+std::string g_data_root_value;
+
+std::string clean_root_string(std::string s) {
+    while (!s.empty() && (s.back() == '\r' || s.back() == '\n' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    while (s.size() > 1 && (s.back() == '/' || s.back() == '\\')) {
+        if (s.size() == 3 && s[1] == ':') break;  // preserve drive root like C:\ or C:/
+        s.pop_back();
+    }
+    return s;
+}
+
+std::string path_utf8(const std::filesystem::path& p) {
+    const auto u = p.u8string();
+    return std::string(reinterpret_cast<const char*>(u.data()), u.size());
+}
+
+bool paths_same(const std::string& a, const std::string& b) {
+    const auto pa = std::filesystem::u8path(clean_root_string(a)).lexically_normal();
+    const auto pb = std::filesystem::u8path(clean_root_string(b)).lexically_normal();
+    std::error_code ec;
+    if (std::filesystem::exists(pa, ec) && std::filesystem::exists(pb, ec)) {
+        const bool eq = std::filesystem::equivalent(pa, pb, ec);
+        if (!ec) return eq;
+    }
+    return _wcsicmp(pa.wstring().c_str(), pb.wstring().c_str()) == 0;
+}
+
+std::filesystem::path data_root_pointer_path() {
+    return std::filesystem::u8path(default_data_root()) / "data_root.txt";
+}
+
+}  // namespace
+
+std::string default_data_root() {
     // A directly launched build has no batch file to set NX_DATA_ROOT. Keep game data
     // next to the executable so it works regardless of the process working directory.
     std::wstring module_path(32768, L'\0');
     const DWORD length = GetModuleFileNameW(nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
     if (length == 0 || length >= module_path.size()) return nx::game::kInfo.pc_data_root;
     module_path.resize(length);
-    const auto root = (std::filesystem::path(module_path).parent_path() / L"data").u8string();
-    return std::string(reinterpret_cast<const char*>(root.data()), root.size());
+    return path_utf8(std::filesystem::path(module_path).parent_path() / L"data");
+}
+
+std::string data_root() {
+    std::lock_guard lk(g_data_root_mutex);
+    if (g_has_data_root_override) return g_data_root_value;
+    if (const char* r = std::getenv("NX_DATA_ROOT"); r && *r) return r;
+    if (!g_data_root_loaded) {
+        g_data_root_loaded = true;
+        std::ifstream f(data_root_pointer_path());
+        std::string line;
+        if (std::getline(f, line)) {
+            line = clean_root_string(std::move(line));
+            if (!line.empty()) {
+                std::error_code ec;
+                const auto p = std::filesystem::u8path(line);
+                if (std::filesystem::is_directory(p, ec) || (std::filesystem::create_directories(p, ec) && !ec)) {
+                    g_data_root_value = std::move(line);
+                    return g_data_root_value;
+                }
+            }
+        }
+        g_data_root_value.clear();
+    }
+    if (!g_data_root_value.empty()) return g_data_root_value;
+    return default_data_root();
+}
+
+bool set_data_root(const std::string& path) {
+    const std::string cleaned = clean_root_string(path);
+    const std::string def = default_data_root();
+    const std::filesystem::path ptr = data_root_pointer_path();
+    std::error_code ec;
+    if (cleaned.empty() || paths_same(cleaned, def)) {
+        std::filesystem::remove(ptr, ec);
+        std::lock_guard lk(g_data_root_mutex);
+        g_has_data_root_override = true;
+        g_data_root_loaded = true;
+        g_data_root_value = def;
+        return true;
+    }
+    const auto target = std::filesystem::u8path(cleaned);
+    if (!std::filesystem::is_directory(target, ec) && (!std::filesystem::create_directories(target, ec) || ec))
+        return false;
+    std::filesystem::create_directories(ptr.parent_path(), ec);
+    const auto tmp = std::filesystem::path(ptr.wstring() + L".tmp");
+    {
+        std::ofstream f(tmp, std::ios::trunc);
+        if (!f) return false;
+        f << cleaned << '\n';
+        if (!f.flush()) return false;
+    }
+    if (!MoveFileExW(tmp.c_str(), ptr.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    std::lock_guard lk(g_data_root_mutex);
+    g_has_data_root_override = true;
+    g_data_root_loaded = true;
+    g_data_root_value = cleaned;
+    return true;
 }
 
 static PcMenuState g_pc_settings;
@@ -371,7 +465,7 @@ static void apply_input_bindings(const PcMenuState& state) {
 }
 
 static void save_pc_settings() {
-    std::ofstream file(data_root() + "/pc-settings.ini", std::ios::trunc);
+    std::ofstream file(std::filesystem::u8path(data_root()) / "pc-settings.ini", std::ios::trunc);
     if (!file) return;
     file << "width=" << g_pc_settings.width << "\nheight=" << g_pc_settings.height << "\nvolume=" << g_pc_settings.volume
          << "\naudio_mode=" << g_pc_settings.audio_mode << "\nstereo_separation=" << g_pc_settings.stereo_separation
@@ -408,86 +502,87 @@ static void save_pc_settings() {
              << "controller_" << i << '=' << g_pc_settings.controller_bindings[i] << '\n';
 }
 
-static void load_pc_settings() {
-    std::ifstream file(data_root() + "/pc-settings.ini");
+static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenuState& state) {
+    std::ifstream file(ini_path);
+    if (!file) return false;
     std::string line;
     int game_language_version = 0;
     while (std::getline(file, line)) {
         int value = 0;
-        if (std::sscanf(line.c_str(), "width=%d", &value) == 1 && value >= 640 && value <= 7680) g_pc_settings.width = value;
-        else if (std::sscanf(line.c_str(), "height=%d", &value) == 1 && value >= 360 && value <= 4320) g_pc_settings.height = value;
-        else if (std::sscanf(line.c_str(), "aspect_ratio=%d", &value) == 1) g_pc_settings.aspect_ratio = std::clamp(value, 0, 2);
-        else if (std::sscanf(line.c_str(), "internal_resolution=%d", &value) == 1) g_pc_settings.internal_resolution = std::clamp(value, 0, 9);
-        else if (std::sscanf(line.c_str(), "volume=%d", &value) == 1) g_pc_settings.volume = std::clamp(value, 0, 200);
-        else if (std::sscanf(line.c_str(), "audio_mode=%d", &value) == 1) g_pc_settings.audio_mode = std::clamp(value, 0, 2);
+        if (std::sscanf(line.c_str(), "width=%d", &value) == 1 && value >= 640 && value <= 7680) state.width = value;
+        else if (std::sscanf(line.c_str(), "height=%d", &value) == 1 && value >= 360 && value <= 4320) state.height = value;
+        else if (std::sscanf(line.c_str(), "aspect_ratio=%d", &value) == 1) state.aspect_ratio = std::clamp(value, 0, 2);
+        else if (std::sscanf(line.c_str(), "internal_resolution=%d", &value) == 1) state.internal_resolution = std::clamp(value, 0, 9);
+        else if (std::sscanf(line.c_str(), "volume=%d", &value) == 1) state.volume = std::clamp(value, 0, 200);
+        else if (std::sscanf(line.c_str(), "audio_mode=%d", &value) == 1) state.audio_mode = std::clamp(value, 0, 2);
         else if (std::sscanf(line.c_str(), "stereo_separation=%d", &value) == 1)
-            g_pc_settings.stereo_separation = std::clamp(value, 0, 100);
-        else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) g_pc_settings.muted = value != 0;
-        else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) g_pc_settings.fullscreen = value != 0;
-        else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) g_pc_settings.always_on_top = value != 0;
-        else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) g_pc_settings.language = std::clamp(value, 0, 12);
+            state.stereo_separation = std::clamp(value, 0, 100);
+        else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) state.muted = value != 0;
+        else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) state.fullscreen = value != 0;
+        else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) state.always_on_top = value != 0;
+        else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) state.language = std::clamp(value, 0, 12);
         else if (std::sscanf(line.c_str(), "game_language=%d", &value) == 1)
-            g_pc_settings.game_language = std::clamp(value, 0, 11);
+            state.game_language = std::clamp(value, 0, 11);
         else if (std::sscanf(line.c_str(), "game_language_version=%d", &value) == 1)
             game_language_version = value;
-        else if (std::sscanf(line.c_str(), "memory_limit_gb=%d", &value) == 1) g_pc_settings.memory_limit_gb = std::clamp(value, 2, 32);
-        else if (std::sscanf(line.c_str(), "low_vram_profile=%d", &value) == 1) g_pc_settings.low_vram_profile = value != 0;
-        else if (std::sscanf(line.c_str(), "keyboard_separate=%d", &value) == 1) g_pc_settings.keyboard_separate = value != 0;
+        else if (std::sscanf(line.c_str(), "memory_limit_gb=%d", &value) == 1) state.memory_limit_gb = std::clamp(value, 2, 32);
+        else if (std::sscanf(line.c_str(), "low_vram_profile=%d", &value) == 1) state.low_vram_profile = value != 0;
+        else if (std::sscanf(line.c_str(), "keyboard_separate=%d", &value) == 1) state.keyboard_separate = value != 0;
         else if (std::sscanf(line.c_str(), "controller_preset=%d", &value) == 1)
-            g_pc_settings.controller_preset = std::clamp(value, 0, 1);
+            state.controller_preset = std::clamp(value, 0, 1);
         else if (std::sscanf(line.c_str(), "button_icons=%d", &value) == 1)
-            g_pc_settings.button_icons = std::clamp(value, 0, 3);
-        else if (std::sscanf(line.c_str(), "metrics_enabled=%d", &value) == 1) g_pc_settings.metrics_enabled = value != 0;
-        else if (std::sscanf(line.c_str(), "metric_fps=%d", &value) == 1) g_pc_settings.metric_fps = value != 0;
+            state.button_icons = std::clamp(value, 0, 3);
+        else if (std::sscanf(line.c_str(), "metrics_enabled=%d", &value) == 1) state.metrics_enabled = value != 0;
+        else if (std::sscanf(line.c_str(), "metric_fps=%d", &value) == 1) state.metric_fps = value != 0;
         else if (std::sscanf(line.c_str(), "metric_one_percent_low=%d", &value) == 1)
-            g_pc_settings.metric_one_percent_low = value != 0;
+            state.metric_one_percent_low = value != 0;
         else if (std::sscanf(line.c_str(), "metric_game_speed=%d", &value) == 1)
-            g_pc_settings.metric_game_speed = value != 0;
+            state.metric_game_speed = value != 0;
         else if (std::sscanf(line.c_str(), "metric_frametime_graph=%d", &value) == 1)
-            g_pc_settings.metric_frametime_graph = value != 0;
+            state.metric_frametime_graph = value != 0;
         else if (std::sscanf(line.c_str(), "overlay_position=%d", &value) == 1)
-            g_pc_settings.overlay_position = std::clamp(value, 0, 3);
-        else if (std::sscanf(line.c_str(), "controller_custom_mask=%u", &g_pc_settings.controller_custom_mask) == 1) {}
-        else if (std::sscanf(line.c_str(), "upscaler=%d", &value) == 1) g_pc_settings.upscaler = std::clamp(value, 0, 1);
+            state.overlay_position = std::clamp(value, 0, 3);
+        else if (std::sscanf(line.c_str(), "controller_custom_mask=%u", &state.controller_custom_mask) == 1) {}
+        else if (std::sscanf(line.c_str(), "upscaler=%d", &value) == 1) state.upscaler = std::clamp(value, 0, 1);
         else if (std::sscanf(line.c_str(), "fsr_sharpness=%d", &value) == 1)
-            g_pc_settings.fsr_sharpness = std::clamp(value, 0, 200);
+            state.fsr_sharpness = std::clamp(value, 0, 200);
         else if (std::sscanf(line.c_str(), "antialiasing=%d", &value) == 1)
-            g_pc_settings.antialiasing = std::clamp(value, 0, 1);
+            state.antialiasing = std::clamp(value, 0, 1);
         else if (std::sscanf(line.c_str(), "anisotropy=%d", &value) == 1)
-            g_pc_settings.anisotropy = std::clamp(value, 0, 16);
-        else if (std::sscanf(line.c_str(), "rumble=%d", &value) == 1) g_pc_settings.rumble = std::clamp(value, 0, 100);
-        else if (std::sscanf(line.c_str(), "vsync=%d", &value) == 1) g_pc_settings.vsync = std::clamp(value, 0, 3);
+            state.anisotropy = std::clamp(value, 0, 16);
+        else if (std::sscanf(line.c_str(), "rumble=%d", &value) == 1) state.rumble = std::clamp(value, 0, 100);
+        else if (std::sscanf(line.c_str(), "vsync=%d", &value) == 1) state.vsync = std::clamp(value, 0, 3);
         else if (std::sscanf(line.c_str(), "frame_cap=%d", &value) == 1)
-            g_pc_settings.frame_cap = value == 30 || value == 60 || value == 90 || value == 120 || value == 144
-                                          ? value
-                                          : 60;
+            state.frame_cap = value == 30 || value == 60 || value == 90 || value == 120 || value == 144
+                                  ? value
+                                  : 60;
         else {
             int index = -1, binding = -1, slot = -1;
             unsigned mask = 0;
             if (std::sscanf(line.c_str(), "player_device_%d=%d", &index, &binding) == 2 && index >= 0 && index < 4 && binding >= 0 && binding <= 6)
-                g_pc_settings.player_devices[size_t(index)] = binding;
+                state.player_devices[size_t(index)] = binding;
             else if (std::sscanf(line.c_str(), "pad_mask_%d=%u", &slot, &mask) == 2 && slot > 0 && slot < 4)
-                g_pc_settings.pad_custom_mask[size_t(slot)] = mask;
+                state.pad_custom_mask[size_t(slot)] = mask;
             else if (std::sscanf(line.c_str(), "pad_%d_%d=%d", &slot, &index, &binding) == 3 && slot > 0 && slot < 4 && index >= 0 && index < int(kPcControlCount) && binding >= 0 && binding < int(kPcControlCount))
-                g_pc_settings.pad_bindings[size_t(slot)][size_t(index)] = binding;
+                state.pad_bindings[size_t(slot)][size_t(index)] = binding;
             else if (std::sscanf(line.c_str(), "keyboard_%d=%d", &index, &binding) == 2 &&
                 index >= 0 && index < int(kPcControlCount) && binding >= 0 && binding <= 255)
-                g_pc_settings.keyboard_bindings[size_t(index)] = binding;
+                state.keyboard_bindings[size_t(index)] = binding;
             else if (std::sscanf(line.c_str(), "controller_%d=%d", &index, &binding) == 2 &&
                      index >= 0 && index < int(kPcControlCount) && binding >= 0 && binding < int(kPcControlCount))
-                g_pc_settings.controller_bindings[size_t(index)] = binding;
+                state.controller_bindings[size_t(index)] = binding;
         }
     }
-    if (game_language_version < 2 && (g_pc_settings.game_language == 8 || g_pc_settings.game_language == 10))
-        g_pc_settings.game_language = 0;
-    if (g_pc_settings.aspect_ratio >= 0) {
-        const int ratio = g_pc_settings.aspect_ratio;
+    if (game_language_version < 2 && (state.game_language == 8 || state.game_language == 10))
+        state.game_language = 0;
+    if (state.aspect_ratio >= 0) {
+        const int ratio = state.aspect_ratio;
         const double target_aspect = ratio == 1 ? (64.0 / 27.0) : ratio == 2 ? (32.0 / 9.0) : (16.0 / 9.0);
-        const double current_aspect = g_pc_settings.height > 0 ? double(g_pc_settings.width) / double(g_pc_settings.height) : 0.0;
-        if (g_pc_settings.width > 0 && std::fabs(current_aspect - target_aspect) / target_aspect > 0.03)
-            g_pc_settings.height = std::max(360, ratio == 1 ? g_pc_settings.width * 27 / 64 :
-                                                  ratio == 2 ? g_pc_settings.width * 9 / 32 :
-                                                               g_pc_settings.width * 9 / 16);
+        const double current_aspect = state.height > 0 ? double(state.width) / double(state.height) : 0.0;
+        if (state.width > 0 && std::fabs(current_aspect - target_aspect) / target_aspect > 0.03)
+            state.height = std::max(360, ratio == 1 ? state.width * 27 / 64 :
+                                          ratio == 2 ? state.width * 9 / 32 :
+                                                       state.width * 9 / 16);
         _putenv_s("NX_ASPECT_PROFILE", ratio == 1 ? "21:9" : ratio == 2 ? "32:9" : "16:9");
         _putenv_s("NX_ULTRAWIDE", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "0");
         _putenv_s("NX_RESOLUTION", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "1920x1080");
@@ -496,19 +591,43 @@ static void load_pc_settings() {
             "NX_UW_MAP_MARKERS_TEST", "NX_UW_MAP_DETAIL_TEST", "NX_UW_SETTINGS_SCISSOR_TEST"};
         for (const char* flag : flags) _putenv_s(flag, ratio ? "1" : "0");
     }
-    nx::set_internal_resolution_preset(g_pc_settings.internal_resolution);
-    nx::set_audio_output(g_pc_settings.audio_mode, g_pc_settings.stereo_separation);
-    nx::set_game_language(g_pc_settings.game_language);
-    apply_input_bindings(g_pc_settings);
-    set_memory_limit_gb(g_pc_settings.memory_limit_gb);
-    _putenv_s("NX_LOW_VRAM_PROFILE", g_pc_settings.low_vram_profile ? "1" : "0");
-    nx::nvn::set_fsr(g_pc_settings.upscaler == 1, float(g_pc_settings.fsr_sharpness) / 100.0f);
-    nx::nvn::set_fxaa(g_pc_settings.antialiasing == 1);
-    nx::nvn::set_anisotropy(g_pc_settings.anisotropy);
-    nx::nvn::set_vsync(g_pc_settings.vsync);
-    nx::nvn::set_frame_cap(g_pc_settings.frame_cap);
-    nx::set_native_render_width(g_pc_settings.fullscreen ? uint32_t(GetSystemMetrics(SM_CXSCREEN))
-                                                          : uint32_t(g_pc_settings.width));
+    return true;
+}
+
+static void apply_loaded_pc_settings(const PcMenuState& state) {
+    nx::set_internal_resolution_preset(state.internal_resolution);
+    nx::set_audio_output(state.audio_mode, state.stereo_separation);
+    nx::set_game_language(state.game_language);
+    apply_input_bindings(state);
+    set_memory_limit_gb(state.memory_limit_gb);
+    _putenv_s("NX_LOW_VRAM_PROFILE", state.low_vram_profile ? "1" : "0");
+    nx::nvn::set_fsr(state.upscaler == 1, float(state.fsr_sharpness) / 100.0f);
+    nx::nvn::set_fxaa(state.antialiasing == 1);
+    nx::nvn::set_anisotropy(state.anisotropy);
+    nx::nvn::set_vsync(state.vsync);
+    nx::nvn::set_frame_cap(state.frame_cap);
+    nx::set_native_render_width(state.fullscreen ? uint32_t(GetSystemMetrics(SM_CXSCREEN)) : uint32_t(state.width));
+}
+
+static void load_pc_settings() {
+    parse_pc_settings_file(std::filesystem::u8path(data_root()) / "pc-settings.ini", g_pc_settings);
+    apply_loaded_pc_settings(g_pc_settings);
+}
+
+void reload_pc_settings() {
+    const auto ini = std::filesystem::u8path(data_root()) / "pc-settings.ini";
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(ini, ec)) return;
+    PcMenuState fresh;
+    if (!parse_pc_settings_file(ini, fresh)) return;
+    if (!g_window) {
+        g_pc_settings = fresh;
+        apply_loaded_pc_settings(g_pc_settings);
+        return;
+    }
+    auto* msg = new OverlayApply{fresh, false};
+    if (!PostMessageW(g_window, kOverlayApplyMessage, 0, reinterpret_cast<LPARAM>(msg))) delete msg;
+    if (overlay::enabled()) overlay::sync(to_overlay(fresh));
 }
 
 static void set_game_volume() {

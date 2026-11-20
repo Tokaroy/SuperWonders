@@ -49,7 +49,7 @@ def main():
     ap.add_argument("--base", default="0x4000000000")
     ap.add_argument("--only", nargs="*", default=None, help="only these function addresses (debug)")
     ap.add_argument("--wonder-realtime", action="store_true",
-                    help="patch Wonder 1.0.0's frame-step calculation for real-time simulation")
+                    help="patch Wonder 1.0.0 / 1.2.1's frame-step calculation for real-time simulation")
     args = ap.parse_args()
     base = int(args.base, 0)
     name = args.name

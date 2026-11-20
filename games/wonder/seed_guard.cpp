@@ -42,10 +42,18 @@ namespace {
 
 struct Hook {
     const char* what;
-    uint64_t offset;
     uint32_t code[8];
     Fn replacement;
     Fn game = nullptr;
+};
+
+struct VersionLayout {
+    const char* version;
+    uint64_t rigid_body_vtable;
+    uint64_t off;
+    uint64_t on;
+    uint64_t hit_enter;
+    uint64_t hit_update;
 };
 
 void body_off(CPU& c);
@@ -53,22 +61,27 @@ void body_on(CPU& c);
 void hit_enter(CPU& c);
 void hit_update(CPU& c);
 
-Hook g_off = {"rigid body off", 0x2b7238,
+Hook g_off = {"rigid body off",
               {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xf9400408, 0xf9400508, 0xf940fd09, 0xf9410528, 0xb4000348},
               body_off};
-Hook g_on = {"rigid body on", 0x4d42f0,
+Hook g_on = {"rigid body on",
              {0xd10103ff, 0xa9027bfd, 0xa9034ff4, 0x910083fd, 0xf9400408, 0xf9400508, 0xf940fd09, 0xf9410528},
              body_on};
 
-// IsHitInfoRepOut (vtable main+0x33c7728): enter +0xd0 and update +0x118; the result is written through node+0x30.
-Hook g_hit_enter = {"IsHitInfoRepOut enter", 0x16d877c,
+// IsHitInfoRepOut: enter +0xd0 and update +0x118; the result is written through node+0x30.
+Hook g_hit_enter = {"IsHitInfoRepOut enter",
                     {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xaa0003f3, 0x94000016, 0xb9401a68, 0x52b00009, 0x33007509},
                     hit_enter};
-Hook g_hit_update = {"IsHitInfoRepOut update", 0x16d87b4,
+Hook g_hit_update = {"IsHitInfoRepOut update",
                      {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xaa0003f3, 0x94000008, 0xb9401a68, 0x52b00009, 0x33007509},
                      hit_update};
 
-constexpr uint64_t kRigidBodyOnOffVtable = 0x33326b8;
+constexpr VersionLayout kVersions[] = {
+    {"1.0.0", 0x33326b8, 0x2b7238, 0x4d42f0, 0x16d877c, 0x16d87b4},
+    {"1.2.1", 0x34bbc88, 0x2dfb70, 0x4d4c28, 0x17fd50c, 0x17fd544},
+};
+
+uint64_t g_rigid_body_vtable = 0;
 bool g_hold_mode = false;               // NX_SEED_GUARD=60
 std::atomic<bool> g_landed{false};      // the seed has touched down since its appearance began
 std::atomic<uint64_t> g_kept{0};        // checks answered "touching" by the guard, this appearance
@@ -79,7 +92,7 @@ std::atomic<uint64_t> g_since_ns{0};  // when the hold began
 
 // The node's actor when it switches "Target" on a Wonder Seed, else 0.
 uint64_t seed_actor(uint64_t node) {
-    if (ld<uint64_t>(node) != g_main + kRigidBodyOnOffVtable) return 0;
+    if (!g_rigid_body_vtable || ld<uint64_t>(node) != g_main + g_rigid_body_vtable) return 0;
     const uint64_t name_at = ld<uint64_t>(node + 0x40) & ~3ull;
     const char* body = name_at ? reinterpret_cast<const char*>(ld<uint64_t>(name_at)) : nullptr;
     if (!body || std::strcmp(body, "Target") != 0) return 0;
@@ -147,17 +160,21 @@ void body_on(CPU& c) {
     if (seed && seed == g_seed.load()) release("can be taken");
 }
 
-bool install(Hook& h) {
-    const LoadedModule* m = module_at(g_main);
-    const uint64_t at = g_main + h.offset;
+bool matches(uint64_t offset, const Hook& h) {
+    const ModuleInfo* main = game_lib().main;
+    if (!main || offset + sizeof(h.code) > main->text_size || (offset & 3u) != 0) return false;
+    const uint64_t at = g_main + offset;
     for (int k = 0; k < 8; k++)
-        if (ld<uint32_t>(at + 4 * k) != h.code[k]) {
-            log("wonder: main+%llx (%s) is not the 1.0.0 code: no Wonder Seed guard", (unsigned long long)h.offset, h.what);
-            return false;
-        }
-    h.game = m->table[h.offset / 4];
+        if (ld<uint32_t>(at + 4 * k) != h.code[k]) return false;
+    return true;
+}
+
+bool install(uint64_t offset, Hook& h) {
+    const LoadedModule* m = module_at(g_main);
+    if (!m || !matches(offset, h)) return false;
+    h.game = m->table[offset / 4];
     if (!h.game) return false;
-    m->table[h.offset / 4] = h.replacement;
+    m->table[offset / 4] = h.replacement;
     return true;
 }
 
@@ -169,12 +186,23 @@ void seed_guard_init() {
         log("wonder: Wonder Seed guard off (NX_SEED_GUARD=0)");
         return;
     }
-    g_main = game_lib().main->base;
+    const ModuleInfo* main = game_lib().main;
+    if (!main) return;
+    g_main = main->base;
     g_hold_mode = e && std::strcmp(e, "60") == 0;
-    const bool ok = install(g_off) && install(g_on) && (g_hold_mode || (install(g_hit_enter) && install(g_hit_update)));
-    if (ok)
-        log("wonder: Wonder Seed guard on (%s while a seed comes out of a pipe)",
-            g_hold_mode ? "60 FPS" : "its landing kept");
+    for (const VersionLayout& v : kVersions) {
+        if (!matches(v.off, g_off) || !matches(v.on, g_on)) continue;
+        if (!g_hold_mode && (!matches(v.hit_enter, g_hit_enter) || !matches(v.hit_update, g_hit_update))) continue;
+        const bool ok = install(v.off, g_off) && install(v.on, g_on) &&
+                        (g_hold_mode || (install(v.hit_enter, g_hit_enter) && install(v.hit_update, g_hit_update)));
+        if (ok) {
+            g_rigid_body_vtable = v.rigid_body_vtable;
+            log("wonder: Wonder Seed guard on (%s, %s while a seed comes out of a pipe)", v.version,
+                g_hold_mode ? "60 FPS" : "its landing kept");
+        }
+        return;
+    }
+    log("wonder: unsupported game version for Wonder Seed guard (expected 1.0.0 or 1.2.1)");
 }
 
 // Each present (game.cpp): ends a hold that has lasted too long (the seed taken by something else, or gone).

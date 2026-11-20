@@ -35,6 +35,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -231,17 +232,38 @@ bool make_dirs(const std::string& path) {
 
 void log_line(const char* line) { std::fprintf(stderr, "%s\n", line); }
 
-// Where the player's data lives (saves, settings, the game set up from their files), first found:
-//   1. NX_DATA_ROOT
-//   2. an AppImage release: $XDG_DATA_HOME/superwonders (~/.local/share/superwonders), since the AppImage is a read-only
-//      image (as Savage Wind's: its runtime/paths.c). $APPIMAGE counts only when this program runs inside $APPDIR: an
-//      AppImage launcher passes its own on to the games it starts.
-//   3. a portable release (the folder holds game-build/, tools/pack_release.py): data/ next to the program
-//   4. a developer's build: games/<game>'s pc_data_root ("private/<game>")
-std::string data_root() {
-    static const std::string root = [] {
-        const char* r = std::getenv("NX_DATA_ROOT");
-        if (r && *r) return std::string(r);
+namespace {
+
+std::mutex g_data_root_mutex;
+bool g_has_data_root_override = false;
+bool g_data_root_loaded = false;
+std::string g_data_root_value;
+
+std::string clean_linux_root(std::string s) {
+    while (!s.empty() && (s.back() == '\r' || s.back() == '\n' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    while (s.size() > 1 && s.back() == '/') s.pop_back();
+    return s;
+}
+
+bool linux_paths_same(const std::string& a, const std::string& b) {
+    const auto pa = std::filesystem::u8path(clean_linux_root(a)).lexically_normal();
+    const auto pb = std::filesystem::u8path(clean_linux_root(b)).lexically_normal();
+    std::error_code ec;
+    if (std::filesystem::exists(pa, ec) && std::filesystem::exists(pb, ec)) {
+        const bool eq = std::filesystem::equivalent(pa, pb, ec);
+        if (!ec) return eq;
+    }
+    return pa == pb;
+}
+
+std::filesystem::path linux_pointer_path() {
+    return std::filesystem::u8path(default_data_root()) / "data_root.txt";
+}
+
+}  // namespace
+
+std::string default_data_root() {
+    static const std::string def = [] {
         char exe[4096];
         const ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
         const std::string self = n > 0 ? std::string(exe, size_t(n)) : std::string();
@@ -257,8 +279,76 @@ std::string data_root() {
         if (!dir.empty() && std::filesystem::is_directory(dir + "/game-build", ec)) return dir + "/data";
         return std::string(nx::game::kInfo.pc_data_root);
     }();
-    return root;
+    return def;
 }
+
+// Where the player's data lives (saves, settings, the game set up from their files), first found:
+//   1. In-process override from set_data_root()
+//   2. NX_DATA_ROOT
+//   3. <default_data_root()>/data_root.txt (saved custom output folder)
+//   4. default_data_root()
+std::string data_root() {
+    std::lock_guard lk(g_data_root_mutex);
+    if (g_has_data_root_override) return g_data_root_value;
+    if (const char* r = std::getenv("NX_DATA_ROOT"); r && *r) return std::string(r);
+    if (!g_data_root_loaded) {
+        g_data_root_loaded = true;
+        std::ifstream f(linux_pointer_path());
+        std::string line;
+        if (std::getline(f, line)) {
+            line = clean_linux_root(std::move(line));
+            if (!line.empty()) {
+                std::error_code ec;
+                const auto p = std::filesystem::u8path(line);
+                if (std::filesystem::is_directory(p, ec) || (std::filesystem::create_directories(p, ec) && !ec)) {
+                    g_data_root_value = std::move(line);
+                    return g_data_root_value;
+                }
+            }
+        }
+        g_data_root_value.clear();
+    }
+    if (!g_data_root_value.empty()) return g_data_root_value;
+    return default_data_root();
+}
+
+bool set_data_root(const std::string& path) {
+    const std::string cleaned = clean_linux_root(path);
+    const std::string def = default_data_root();
+    const std::filesystem::path ptr = linux_pointer_path();
+    std::error_code ec;
+    if (cleaned.empty() || linux_paths_same(cleaned, def)) {
+        std::filesystem::remove(ptr, ec);
+        std::lock_guard lk(g_data_root_mutex);
+        g_has_data_root_override = true;
+        g_data_root_loaded = true;
+        g_data_root_value = def;
+        return true;
+    }
+    const auto target = std::filesystem::u8path(cleaned);
+    if (!std::filesystem::is_directory(target, ec) && (!std::filesystem::create_directories(target, ec) || ec))
+        return false;
+    std::filesystem::create_directories(ptr.parent_path(), ec);
+    const auto tmp = std::filesystem::u8path(ptr.string() + ".tmp");
+    {
+        std::ofstream f(tmp, std::ios::trunc);
+        if (!f) return false;
+        f << cleaned << '\n';
+        if (!f.flush()) return false;
+    }
+    std::filesystem::rename(tmp, ptr, ec);
+    if (ec) {
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    std::lock_guard lk(g_data_root_mutex);
+    g_has_data_root_override = true;
+    g_data_root_loaded = true;
+    g_data_root_value = cleaned;
+    return true;
+}
+
+void reload_pc_settings() { linux_host::reload_player_settings(); }
 
 std::string setting(const std::string& key) {
     std::string env = "NX_";

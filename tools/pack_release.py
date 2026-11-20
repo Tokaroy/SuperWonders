@@ -231,7 +231,7 @@ def recomplauncher_json(version):
         "repo": "vfjoo888/SuperWonders",
         "game": {
             "kind": "folder",
-            "label": "Your Super Mario Bros. Wonder game files, extracted, version 1.0.0: a folder holding exefs and romfs.",
+            "label": "Your Super Mario Bros. Wonder game files, extracted, version 1.0.0 or 1.2.1: a folder holding exefs and romfs.",
             "check": {"file": "exefs/main"},
         },
         "prepare": {

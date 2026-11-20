@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 project(SwitchGamesRecomp C CXX)
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,6 +93,9 @@ if(NX_TESTS AND NOT ANDROID)
     add_executable(user_profiles_test tests/user_profiles_test.cpp runtime/src/user_profiles.cpp runtime/src/profile_image.cpp)
     target_include_directories(user_profiles_test PRIVATE runtime/src)
     add_test(NAME user_profiles COMMAND user_profiles_test)
+    add_executable(game_version_test tests/game_version_test.cpp runtime/src/launcher/game_version.cpp)
+    target_include_directories(game_version_test PRIVATE runtime/src)
+    add_test(NAME game_version COMMAND game_version_test)
     add_executable(settings_service_test tests/settings_service_test.cpp runtime/src/svc_settings.cpp)
     target_include_directories(settings_service_test PRIVATE runtime/include runtime/src)
     add_test(NAME settings_service COMMAND settings_service_test)
@@ -336,7 +342,8 @@ file(GLOB NX_GAME_SOURCES CONFIGURE_DEPENDS "${NX_GAME_DIR}/*.cpp")
 list(APPEND NX_RUNTIME_SOURCES ${NX_GAME_SOURCES} ${NX_SHADER_SOURCES} runtime/src/gamelib.cpp)
 if(NX_GAME_LIBRARY)
     # SuperWonders Launcher: the start screen before the game (setup, settings, mods, updates; launcher/launcher.h)
-    list(APPEND NX_RUNTIME_SOURCES runtime/src/launcher/launcher.cpp runtime/src/launcher/updates.cpp runtime/src/launcher/test_pad.cpp
+    list(APPEND NX_RUNTIME_SOURCES runtime/src/launcher/launcher.cpp runtime/src/launcher/game_version.cpp
+         runtime/src/launcher/updates.cpp runtime/src/launcher/test_pad.cpp
          runtime/src/launcher/update_core.c runtime/src/launcher/update_crypto.c)
     if(NOT WIN32)
         list(APPEND NX_RUNTIME_SOURCES runtime/src/launcher/update_appimage.c)  # (an AppImage updates itself)

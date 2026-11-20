@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -298,6 +299,33 @@ void load_player_settings() {
     host.can_always_on_top = !driver || std::strcmp(driver, "wayland") != 0;
     overlay::init(host, s);
     log("platform: settings %s (%s)", found ? "loaded" : "defaults", settings_path().c_str());
+}
+
+void reload_player_settings() {
+    std::error_code ec;
+    const std::string path = settings_path();
+    if (!std::filesystem::is_regular_file(std::filesystem::u8path(path), ec)) return;
+    overlay::Settings s;
+    const int keys[overlay::kControlCount] = {
+        SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_J, SDL_SCANCODE_K, SDL_SCANCODE_Q, SDL_SCANCODE_E,
+        SDL_SCANCODE_Z, SDL_SCANCODE_C, SDL_SCANCODE_RETURN, SDL_SCANCODE_ESCAPE, SDL_SCANCODE_M, SDL_SCANCODE_N,
+        SDL_SCANCODE_LEFT, SDL_SCANCODE_UP, SDL_SCANCODE_RIGHT, SDL_SCANCODE_DOWN,
+    };
+    for (size_t a = 0; a < overlay::kControlCount; ++a)
+        s.keyboard_bindings[a] = keys[a], s.controller_bindings[a] = overlay::default_controller_binding(a, s.controller_preset);
+    if (!overlay::load_settings(path, s)) return;
+    const int ratio = std::clamp(s.aspect_ratio, 0, 2);
+    if (s.width > 0) s.height = std::max(360, ratio == 1 ? s.width * 27 / 64 :
+                                              ratio == 2 ? s.width * 9 / 32 : s.width * 9 / 16);
+    setenv("NX_ASPECT_PROFILE", ratio == 1 ? "21:9" : ratio == 2 ? "32:9" : "16:9", 1);
+    setenv("NX_ULTRAWIDE", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "0", 1);
+    const char* flags[] = {"NX_TERRAIN_MOD_ASPECT_TEST", "NX_UW_POWERUP_TEST", "NX_UW_FLOWER_TEST",
+        "NX_UW_MAP_ALIGN_TEST", "NX_UW_MAP_COMPOSITE_TEST", "NX_UW_MAP_CARD_TEST",
+        "NX_UW_MAP_MARKERS_TEST", "NX_UW_MAP_DETAIL_TEST", "NX_UW_SETTINGS_SCISSOR_TEST"};
+    for (const char* flag : flags) setenv(flag, ratio ? "1" : "0", 1);
+    apply_settings(s, false);
+    overlay::sync(s);
+    log("platform: settings reloaded (%s)", path.c_str());
 }
 
 void run_posted() {

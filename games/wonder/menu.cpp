@@ -29,27 +29,41 @@ namespace nx::wonder {
 
 namespace {
 
-// A function in main (1.0.0) the recomp replaces, and its first instructions: a different game version has other code
-// there, and then that entry is left alone.
-struct Hook {
-    const char* what;
+struct HookVariant {
+    const char* version;
     uint64_t offset;
     uint32_t code[8];
+};
+
+// Known targets in main (1.0.0 and 1.2.1): each variant checks its first instructions before swapping.
+struct Hook {
+    const char* what;
+    HookVariant variants[2];
     Fn replacement;
     Fn game = nullptr;
 };
 
-// PauseResult's from-string callback: bool (int* out, const char** name). Enum types are registered by main+0x581d38.
+// PauseResult's from-string callback: bool (int* out, const char** name).
 void pause_result_from_string(CPU& c);
-// WaitPressKeyInTitle's update (this): done once the title's key state (main+0x3630a98, +0x4c) reads 3.
+// WaitPressKeyInTitle's update (this): done once the title's key state reads 3.
 void wait_press_key_in_title(CPU& c);
 
-Hook g_pause = {"pause menu", 0x1c0bd9c,
-                {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xf9400021, 0xaa0003f3, 0x910063a0, 0xb9001bbf, 0x940015a4},
-                pause_result_from_string};
-Hook g_title = {"title screen", 0x1bfcddc,
-                {0x9000d1a8, 0xf9454d08, 0xb9404d08, 0x71000d1f, 0x54000040, 0xd65f03c0, 0xb9401808, 0x52b00009},
-                wait_press_key_in_title};
+Hook g_pause = {
+    "pause menu",
+    {
+        {"1.0.0", 0x1c0bd9c, {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xf9400021, 0xaa0003f3, 0x910063a0, 0xb9001bbf, 0x940015a4}},
+        {"1.2.1", 0x1d3415c, {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xf9400021, 0xaa0003f3, 0x910063a0, 0xb9001bbf, 0x940016e4}},
+    },
+    pause_result_from_string,
+};
+Hook g_title = {
+    "title screen",
+    {
+        {"1.0.0", 0x1bfcddc, {0x9000d1a8, 0xf9454d08, 0xb9404d08, 0x71000d1f, 0x54000040, 0xd65f03c0, 0xb9401808, 0x52b00009}},
+        {"1.2.1", 0x1d2519c, {0x9000d4c8, 0xf9431908, 0xb9404d08, 0x71000d1f, 0x54000040, 0xd65f03c0, 0xb9401808, 0x52b00009}},
+    },
+    wait_press_key_in_title,
+};
 
 [[noreturn]] void quit(const char* where) {
     log("menu: Quit Game chosen on the %s", where);
@@ -82,20 +96,30 @@ void wait_press_key_in_title(CPU& c) {
 }
 
 void install(Hook& h) {
-    const uint64_t main_base = game_lib().main->base;  // (nx/gamelib.h: linked in, or the game code library)
-    const LoadedModule* m = module_at(main_base);
-    const uint64_t at = main_base + h.offset;
-    for (int k = 0; k < 8; k++)
-        if (ld<uint32_t>(at + 4 * k) != h.code[k]) {
-            log("menu: main+%llx is not the 1.0.0 code: no Quit Game on the %s", (unsigned long long)h.offset, h.what);
+    const ModuleInfo* main = game_lib().main;  // (nx/gamelib.h: linked in, or the game code library)
+    const LoadedModule* m = main ? module_at(main->base) : nullptr;
+    if (!main || !m) return;
+    for (const HookVariant& v : h.variants) {
+        if (v.offset + sizeof(v.code) > main->text_size || (v.offset & 3u) != 0) continue;
+        const uint64_t at = main->base + v.offset;
+        bool match = true;
+        for (int k = 0; k < 8; k++)
+            if (ld<uint32_t>(at + 4 * k) != v.code[k]) {
+                match = false;
+                break;
+            }
+        if (!match) continue;
+        h.game = m->table[v.offset / 4];
+        if (!h.game) {
+            log("menu: no function at main+%llx (%s): no Quit Game on the %s", (unsigned long long)v.offset,
+                v.version, h.what);
             return;
         }
-    h.game = m->table[h.offset / 4];
-    if (!h.game) {
-        log("menu: no function at main+%llx: no Quit Game on the %s", (unsigned long long)h.offset, h.what);
+        m->table[v.offset / 4] = h.replacement;
+        log("menu: Quit Game hooked on the %s (%s at main+%llx)", h.what, v.version, (unsigned long long)v.offset);
         return;
     }
-    m->table[h.offset / 4] = h.replacement;
+    log("menu: code is not a supported game version (1.0.0 / 1.2.1): no Quit Game on the %s", h.what);
 }
 
 }  // namespace

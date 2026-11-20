@@ -387,23 +387,32 @@ void load_modules(const ModuleInfo* const* mods, size_t count, const std::string
         if (!f) fatal("missing %s (run tools/nso2bin.py)", path.c_str());
         f.read(reinterpret_cast<char*>(mi->base), std::streamsize(image));
         if (uint64_t(f.gcount()) != image) fatal("%s: expected %llx bytes", path.c_str(), (unsigned long long)image);
-        // Diagnostic comparison with StevensND / KeatonTheBot's Wonder 1.0.0 32:9 patch.
+        // Diagnostic comparison with StevensND / KeatonTheBot's Wonder 32:9 patch.
         const char* mod_probe = std::getenv("NX_TERRAIN_MOD_ASPECT_TEST");
         if (mod_probe && std::strcmp(mod_probe, "1") == 0 && std::strcmp(mi->name, "main") == 0 &&
-            game::kInfo.program_id == 0x010015100B514000ull && image > 0x29b5fec) {
-            uint32_t* word = reinterpret_cast<uint32_t*>(mi->base + 0x29b5fe8);
-            if (*word == 0x3fe38e3bu) {
-                float aspect = 32.0f / 9.0f;
-                const char* requested = std::getenv("NX_ULTRAWIDE");
-                unsigned width = 0, height = 0;
-                if (requested && ((std::sscanf(requested, "%ux%u", &width, &height) == 2) ||
-                                  (std::sscanf(requested, "%u:%u", &width, &height) == 2)) &&
-                    width && height && float(width) / float(height) >= 16.0f / 9.0f &&
-                    float(width) / float(height) <= 16.0f / 3.0f)
-                    aspect = float(width) / float(height);
-                std::memcpy(word, &aspect, sizeof aspect);
-                log("terrain mod aspect test: main+29b5fe8 16:9 -> %.5f before constructors", double(aspect));
-            } else log("terrain mod aspect test: incompatible original %08x; unchanged", *word);
+            game::kInfo.program_id == 0x010015100B514000ull) {
+            constexpr uint64_t kAspectOffsets[] = {0x29b5fe8, 0x2aeedb4};  // 1.0.0, 1.2.1
+            bool patched = false;
+            for (uint64_t off : kAspectOffsets) {
+                if (off < 4 || off + 8 > image) continue;
+                uint32_t* word = reinterpret_cast<uint32_t*>(mi->base + off);
+                if (word[0] == 0x3fe38e3bu && word[-1] == 0xc7c34f80u && word[1] == 0x429c774cu) {
+                    float aspect = 32.0f / 9.0f;
+                    const char* requested = std::getenv("NX_ULTRAWIDE");
+                    unsigned width = 0, height = 0;
+                    if (requested && ((std::sscanf(requested, "%ux%u", &width, &height) == 2) ||
+                                      (std::sscanf(requested, "%u:%u", &width, &height) == 2)) &&
+                        width && height && float(width) / float(height) >= 16.0f / 9.0f &&
+                        float(width) / float(height) <= 16.0f / 3.0f)
+                        aspect = float(width) / float(height);
+                    std::memcpy(word, &aspect, sizeof aspect);
+                    log("terrain mod aspect test: main+%llx 16:9 -> %.5f before constructors",
+                        (unsigned long long)off, double(aspect));
+                    patched = true;
+                    break;
+                }
+            }
+            if (!patched) log("terrain mod aspect test: incompatible game version; unchanged");
         }
         vm_set(mi->base + mi->text, mi->text_size, kMemCode, 5);
         vm_set(mi->base + mi->ro, mi->ro_size, kMemCode, 1);

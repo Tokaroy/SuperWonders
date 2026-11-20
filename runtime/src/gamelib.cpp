@@ -73,8 +73,16 @@ std::string program_dir() {
 
 namespace {
 
-// The library's bind function, or null with why filled in.
-NxGameLibBind open_library(const std::string& path, std::string& why) {
+// The library's handle and bind function, or null with why filled in.
+#if defined(_WIN32)
+using LibHandle = HMODULE;
+void close_library(LibHandle h) { if (h) FreeLibrary(h); }
+#else
+using LibHandle = void*;
+void close_library(LibHandle h) { if (h) dlclose(h); }
+#endif
+
+NxGameLibBind open_library(const std::string& path, std::string& why, LibHandle* out_handle = nullptr) {
 #if defined(_WIN32)
     int len = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
     std::wstring w(size_t(len), L'\0');
@@ -95,7 +103,12 @@ NxGameLibBind open_library(const std::string& path, std::string& why) {
     }
     auto bind = reinterpret_cast<NxGameLibBind>(dlsym(m, NX_GAMELIB_BIND_NAME));
 #endif
-    if (!bind) why = "it is not a game code library (no " NX_GAMELIB_BIND_NAME ")";
+    if (!bind) {
+        why = "it is not a game code library (no " NX_GAMELIB_BIND_NAME ")";
+        close_library(m);
+        return nullptr;
+    }
+    if (out_handle) *out_handle = m;
     return bind;
 }
 
@@ -145,6 +158,30 @@ std::string game_lib_path() {
     for (const std::string& path : places())
         if (exists(path)) return path;
     return {};
+}
+
+bool probe_game_lib(const std::string& path, std::string& why) {
+    if (!exists(path)) {
+        why = "The game code library is missing.";
+        return false;
+    }
+    LibHandle handle = nullptr;
+    NxGameLibBind bind = open_library(path, why, &handle);
+    if (!bind) return false;
+    const GameLib* lib = bind(nullptr);
+    bool ok = true;
+    if (!lib || lib->layout != gamelib_layout()) {
+        why = "The game code library was built for another ABI version of SuperWonders.";
+        ok = false;
+    } else if (!lib->game || std::string(lib->game) != NX_GAME_NAME) {
+        why = "The game code library belongs to another game.";
+        ok = false;
+    } else if (!lib->main || !lib->sdk) {
+        why = "The game code library has no module tables.";
+        ok = false;
+    }
+    close_library(handle);
+    return ok;
 }
 
 #endif

@@ -130,12 +130,41 @@ class Setup:
         self.kit = gamebuild.Kit()
 
     # ---- what each step depends on ----
+    @staticmethod
+    def inspect_romfs(romfs):
+        info = {"valid": False, "product": None, "version_label": None, "error": None}
+        if not os.path.isdir(romfs):
+            info["error"] = f"error: {romfs} not found: pick the RomFS folder of your own copy of the game"
+            return info
+        if not glob.glob(os.path.join(romfs, "Shader", "*.zs")):
+            info["error"] = f"error: {romfs} doesn't look like Super Mario Bros. Wonder's RomFS (no Shader/*.zs)"
+            return info
+        tables = glob.glob(os.path.join(romfs, "System", "Resource", "ResourceSizeTable.Product.*.rsizetable.zs"))
+        vers = []
+        for t in tables:
+            m = re.search(r"Product\.(\d+)\.rsizetable\.zs$", os.path.basename(t))
+            if m:
+                vers.append(int(m.group(1)))
+        if not vers:
+            info["error"] = f"error: {romfs} is missing System/Resource/ResourceSizeTable.Product.*.rsizetable.zs"
+            return info
+        prod = max(vers)
+        info["valid"] = True
+        info["product"] = prod
+        info["version_label"] = "1.0.0" if prod == 100 else ("1.2.0 / 1.2.1" if prod == 120 else f"Product.{prod}")
+        return info
+
     def check_inputs(self):
-        gamebuild.check_exefs(self.exefs)
-        if not os.path.isdir(self.romfs):
-            raise SystemExit(f"error: {self.romfs} not found: pick the RomFS folder of your own copy of the game")
-        if not glob.glob(os.path.join(self.romfs, "Shader", "*.zs")):
-            raise SystemExit(f"error: {self.romfs} doesn't look like Super Mario Bros. Wonder's RomFS (no Shader/*.zs)")
+        ex = gamebuild.check_exefs(self.exefs)
+        rom = self.inspect_romfs(self.romfs)
+        if rom["error"]:
+            raise SystemExit(rom["error"])
+        exp = ex.get("expected_romfs_product")
+        if exp is not None and rom["product"] != exp:
+            raise SystemExit(
+                f"error: game version mismatch: ExeFS is {ex['version']} (expects RomFS Product.{exp}), "
+                f"but RomFS is {rom['version_label']} (Product.{rom['product']})"
+            )
 
     def ids(self):
         if not hasattr(self, "_ids"):
@@ -218,6 +247,9 @@ class Setup:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         if os.path.islink(dest) or (WIN and os.path.isdir(dest) and is_junction(dest)):
             remove_link(dest)
+        elif os.path.isdir(dest) and self.state().get("romfs") and self.state().get("romfs") != self.ids()["romfs"]:
+            # Switching RomFS versions/dumps: remove stale files from the previous copy.
+            shutil.rmtree(dest, ignore_errors=True)
         if self.mode == "link":
             if os.path.isdir(dest):
                 shutil.rmtree(dest)
@@ -272,6 +304,7 @@ class Setup:
         # Without this mod games/wonder/menu.cpp has no pane to act on: the pause menu has no Quit Game (the title
         # screen's hold-Minus still works). Not fatal: a RomFS the tool doesn't know only loses the entry.
         out = os.path.join(self.data, "mods", MENU_MOD)
+        shutil.rmtree(out, ignore_errors=True)
         try:
             self.run([self.py, os.path.join(TOOLS, "wonder_menu_mod.py"), "--romfs", self.romfs, "--out", out],
                      at, share, "Adding Quit Game to the game's menus")

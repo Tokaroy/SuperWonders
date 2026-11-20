@@ -261,7 +261,10 @@ bool make_dirs(const std::string& path) {
 
 void log_line(const char* line) { __android_log_write(ANDROID_LOG_INFO, nx::game::kInfo.id, line); }
 
+std::string default_data_root() { return g_root; }
 std::string data_root() { return g_root; }
+bool set_data_root(const std::string&) { return false; }
+void reload_pc_settings() {}
 
 std::string setting(const std::string& key) {
     std::ifstream f(g_root + "/config.txt");
