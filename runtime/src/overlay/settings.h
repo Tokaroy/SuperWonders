@@ -32,11 +32,13 @@ struct Settings {
     int audio_mode = 0;         // 0 Stereo, 1 Mono, 2 5.1 Surround (PCM)
     int stereo_separation = 100;  // 0..100% (used in Stereo mode)
     int language = 0;       // menu language: English, Italian, German, French, Spanish, Korean, Japanese, Arabic, Russian, Turkish, Dutch, Simplified Chinese, Traditional Chinese
+    int theme = 0;          // UI style color preset: 0 Obsidian, 1 Cobalt, 2 Emerald, 3 Amber, 4 Crimson
     int game_language = 0;  // en-US, it, de, fr, pt-BR, es, ko, ja, nl, ru, zh-CN, zh-TW
     int memory_limit_gb = 8;
     std::array<int, 4> player_devices{{0, 0, 0, 0}}; // 0 automatic, 1 none, 2 keyboard, 3..6 controller slots
     std::array<std::array<int, kControlCount>, 4> pad_bindings{};
     std::array<uint32_t, 4> pad_custom_mask{};
+    std::array<int, 4> pad_presets{{1, 1, 1, 1}};
     bool keyboard_separate = false;  // keyboard is player 1 and controllers start at player 2
     int controller_preset = 1;  // 1 Nintendo positions (the default, as on the Switch: A on the right), 0 Xbox / DualSense
     int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation (applies after a restart)
@@ -60,6 +62,7 @@ struct Settings {
 int default_controller_binding(size_t action, int preset);
 // The physical button an action is bound to now.
 int controller_binding(const Settings& s, size_t action);
+int controller_preset_for_slot(const Settings& s, size_t slot);
 int controller_binding_for_slot(const Settings& s, size_t slot, size_t action);
 
 // Window size presets per aspect ratio (0: 16:9, 1: 21:9, 2: 32:9).

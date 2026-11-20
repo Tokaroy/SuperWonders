@@ -24,10 +24,15 @@ int controller_binding(const Settings& s, size_t action) {
                                                      : default_controller_binding(action, s.controller_preset);
 }
 
+int controller_preset_for_slot(const Settings& s, size_t slot) {
+    if (slot == 0 || slot >= 4) return std::clamp(s.controller_preset, 0, 1);
+    return std::clamp(s.pad_presets[slot], 0, 1);
+}
+
 int controller_binding_for_slot(const Settings& s, size_t slot, size_t action) {
     if (slot == 0 || slot >= 4 || action >= kControlCount) return controller_binding(s, action);
     return s.pad_custom_mask[slot] & (1u << action) ? std::clamp(s.pad_bindings[slot][action], 0, int(kControlCount) - 1)
-                                                     : default_controller_binding(action, s.controller_preset);
+                                                     : default_controller_binding(action, controller_preset_for_slot(s, slot));
 }
 
 bool load_settings(const std::string& path, Settings& s) {
@@ -50,12 +55,16 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "fullscreen=%d", &v) == 1) s.fullscreen = v != 0;
         else if (std::sscanf(l, "always_on_top=%d", &v) == 1) s.always_on_top = v != 0;
         else if (std::sscanf(l, "language=%d", &v) == 1) s.language = std::clamp(v, 0, 12);
+        else if (std::sscanf(l, "theme=%d", &v) == 1) s.theme = std::clamp(v, 0, 4);
         else if (std::sscanf(l, "game_language=%d", &v) == 1) s.game_language = std::clamp(v, 0, 11);
         else if (std::sscanf(l, "game_language_version=%d", &v) == 1) game_language_version = v;
         else if (std::sscanf(l, "memory_limit_gb=%d", &v) == 1) s.memory_limit_gb = std::clamp(v, 2, 32);
         else if (std::sscanf(l, "low_vram_profile=%d", &v) == 1) s.low_vram_profile = v != 0;
         else if (std::sscanf(l, "keyboard_separate=%d", &v) == 1) s.keyboard_separate = v != 0;
-        else if (std::sscanf(l, "controller_preset=%d", &v) == 1) s.controller_preset = std::clamp(v, 0, 1);
+        else if (std::sscanf(l, "controller_preset=%d", &v) == 1) {
+            s.controller_preset = std::clamp(v, 0, 1);
+            s.pad_presets[0] = s.controller_preset;
+        }
         else if (std::sscanf(l, "button_icons=%d", &v) == 1) s.button_icons = std::clamp(v, 0, 3);
         else if (std::sscanf(l, "metrics_enabled=%d", &v) == 1) s.metrics_enabled = v != 0;
         else if (std::sscanf(l, "metric_fps=%d", &v) == 1) s.metric_fps = v != 0;
@@ -77,6 +86,8 @@ bool load_settings(const std::string& path, Settings& s) {
             unsigned mask = 0;
             if (std::sscanf(l, "player_device_%d=%d", &index, &binding) == 2 && index >= 0 && index < 4 && binding >= 0 && binding <= 6)
                 s.player_devices[size_t(index)] = binding;
+            else if (std::sscanf(l, "pad_preset_%d=%d", &slot, &binding) == 2 && slot > 0 && slot < 4)
+                s.pad_presets[size_t(slot)] = std::clamp(binding, 0, 1);
             else if (std::sscanf(l, "pad_mask_%d=%u", &slot, &mask) == 2 && slot > 0 && slot < 4)
                 s.pad_custom_mask[size_t(slot)] = mask;
             else if (std::sscanf(l, "pad_%d_%d=%d", &slot, &index, &binding) == 3 && slot > 0 && slot < 4 && index >= 0 && index < int(kControlCount) && binding >= 0 && binding < int(kControlCount))
@@ -102,7 +113,7 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\naudio_mode=" << s.audio_mode << "\nstereo_separation=" << s.stereo_separation
       << "\naspect_ratio=" << std::max(0, s.aspect_ratio)
       << "\ninternal_resolution=" << s.internal_resolution << "\nmuted=" << s.muted << "\nfullscreen=" << s.fullscreen
-      << "\nalways_on_top=" << s.always_on_top << "\nlanguage=" << s.language << "\ngame_language=" << s.game_language
+      << "\nalways_on_top=" << s.always_on_top << "\nlanguage=" << s.language << "\ntheme=" << s.theme << "\ngame_language=" << s.game_language
       << "\ngame_language_version=2"
       << "\nmemory_limit_gb=" << s.memory_limit_gb << "\nlow_vram_profile=" << s.low_vram_profile
       << "\nkeyboard_separate=" << s.keyboard_separate
@@ -117,6 +128,7 @@ void save_settings(const std::string& path, const Settings& s) {
     for (size_t slot = 0; slot < 4; ++slot) {
         f << "player_device_" << slot << '=' << s.player_devices[slot] << '\n';
         if (slot) {
+            f << "pad_preset_" << slot << '=' << std::clamp(s.pad_presets[slot], 0, 1) << '\n';
             f << "pad_mask_" << slot << '=' << s.pad_custom_mask[slot] << '\n';
             for (size_t action = 0; action < kControlCount; ++action)
                 f << "pad_" << slot << '_' << action << '=' << s.pad_bindings[slot][action] << '\n';

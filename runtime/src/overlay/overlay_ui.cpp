@@ -3,6 +3,7 @@
 #include "overlay/overlay_ui.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -140,17 +141,73 @@ ImU32 mix(ImU32 a, ImU32 b, float t) {
 
 namespace {
 
-// "Wonder Night": hot pink and sky cyan on deep indigo, after Wonder's colourful menus. The panels are dark and
-// saturated so the text reads over any scene.
-const Theme kTheme = {
-    "Wonder Night", IM_COL32(255, 94, 168, 255), IM_COL32(86, 214, 255, 255), IM_COL32(250, 248, 255, 255),
-    IM_COL32(208, 202, 230, 255), IM_COL32(116, 108, 142, 255), IM_COL32(22, 18, 54, 242), IM_COL32(28, 22, 66, 250),
-    IM_COL32(10, 8, 30, 255), IM_COL32(44, 24, 88, 255), IM_COL32(110, 232, 140, 255), IM_COL32(255, 206, 72, 255),
-    IM_COL32(255, 96, 112, 255)};
+// Modern minimalist palettes: neutral dark surfaces for high contrast and clean readability, paired with refined accents.
+const Theme kThemes[] = {
+    {"Obsidian", IM_COL32(244, 91, 147, 255), IM_COL32(122, 200, 255, 255), IM_COL32(244, 246, 250, 255),
+     IM_COL32(174, 180, 194, 255), IM_COL32(106, 112, 128, 255), IM_COL32(18, 20, 26, 242), IM_COL32(25, 28, 36, 252),
+     IM_COL32(11, 13, 18, 255), IM_COL32(18, 21, 29, 255), IM_COL32(74, 222, 128, 255), IM_COL32(250, 204, 21, 255),
+     IM_COL32(248, 113, 113, 255)},
+    {"Cobalt", IM_COL32(79, 158, 255, 255), IM_COL32(130, 217, 255, 255), IM_COL32(244, 247, 252, 255),
+     IM_COL32(172, 184, 204, 255), IM_COL32(104, 116, 138, 255), IM_COL32(15, 20, 29, 242), IM_COL32(22, 29, 42, 252),
+     IM_COL32(10, 14, 21, 255), IM_COL32(16, 23, 35, 255), IM_COL32(74, 222, 128, 255), IM_COL32(250, 204, 21, 255),
+     IM_COL32(248, 113, 113, 255)},
+    {"Emerald", IM_COL32(52, 211, 153, 255), IM_COL32(124, 236, 196, 255), IM_COL32(243, 248, 246, 255),
+     IM_COL32(170, 188, 180, 255), IM_COL32(102, 120, 112, 255), IM_COL32(16, 22, 20, 242), IM_COL32(22, 32, 28, 252),
+     IM_COL32(10, 15, 13, 255), IM_COL32(16, 25, 21, 255), IM_COL32(74, 222, 128, 255), IM_COL32(250, 204, 21, 255),
+     IM_COL32(248, 113, 113, 255)},
+    {"Amber", IM_COL32(245, 158, 11, 255), IM_COL32(252, 211, 77, 255), IM_COL32(248, 246, 242, 255),
+     IM_COL32(188, 180, 168, 255), IM_COL32(120, 114, 104, 255), IM_COL32(21, 19, 17, 242), IM_COL32(30, 27, 23, 252),
+     IM_COL32(14, 12, 10, 255), IM_COL32(23, 20, 16, 255), IM_COL32(74, 222, 128, 255), IM_COL32(250, 204, 21, 255),
+     IM_COL32(248, 113, 113, 255)},
+    {"Crimson", IM_COL32(239, 68, 68, 255), IM_COL32(252, 165, 165, 255), IM_COL32(246, 246, 248, 255),
+     IM_COL32(180, 180, 188, 255), IM_COL32(112, 112, 120, 255), IM_COL32(18, 18, 21, 242), IM_COL32(26, 26, 32, 252),
+     IM_COL32(11, 11, 14, 255), IM_COL32(20, 18, 22, 255), IM_COL32(74, 222, 128, 255), IM_COL32(250, 204, 21, 255),
+     IM_COL32(248, 113, 113, 255)},
+};
+std::atomic<int> g_theme_index{0};
 
 }  // namespace
 
-const Theme& theme() { return kTheme; }
+const Theme& theme() {
+    const int idx = std::clamp(g_theme_index.load(std::memory_order_relaxed), 0, int(std::size(kThemes)) - 1);
+    return kThemes[idx];
+}
+int theme_count() { return int(std::size(kThemes)); }
+int theme_index() { return std::clamp(g_theme_index.load(std::memory_order_relaxed), 0, int(std::size(kThemes)) - 1); }
+const char* theme_name(int index) { return kThemes[std::clamp(index, 0, int(std::size(kThemes)) - 1)].name; }
+void set_theme(int index) { g_theme_index.store(std::clamp(index, 0, int(std::size(kThemes)) - 1), std::memory_order_relaxed); }
+void cycle_theme() { set_theme((theme_index() + 1) % theme_count()); }
+
+bool theme_button(float k) {
+    const Theme& th = theme();
+    ImFont* f = body();
+    const float fs = ImGui::GetFontSize() * 0.84f;
+    const float h = 38 * k;
+    const float dot_r = 5.5f * k;
+    const float pad_x = 14 * k;
+    const float gap = 8 * k;
+    const ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, 0, th.name);
+    const float w = pad_x * 2 + dot_r * 2 + gap + ts.x;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
+    const bool clicked = ImGui::InvisibleButton("##theme_btn", ImVec2(w, h), ImGuiButtonFlags_EnableNav);
+    ImGui::PopStyleColor();
+    const bool hot = ImGui::IsItemHovered() || (ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible);
+    const float t = eased(ImGui::GetItemID(), hot ? 1.0f : 0.0f, 22.0f);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 q(p.x + w, p.y + h);
+    const float r = h * 0.5f;
+    dl->AddRectFilled(p, q, fade(mix(IM_COL32(255, 255, 255, 14), IM_COL32(255, 255, 255, 28), t)), r);
+    dl->AddRect(p, q, fade(mix(IM_COL32(255, 255, 255, 32), th.accent, t)), r, 0, std::max(1.0f, 1.2f * k));
+    dl->AddCircleFilled(ImVec2(p.x + pad_x + dot_r, p.y + h * 0.5f), dot_r, fade(th.accent));
+    dl->AddText(f, fs, ImVec2(p.x + pad_x + dot_r * 2 + gap, p.y + (h - ts.y) * 0.5f),
+                fade(mix(th.text_dim, th.text, t)), th.name);
+    if (clicked) {
+        cycle_theme();
+        return true;
+    }
+    return false;
+}
 
 namespace {
 ImVec4 v4(ImU32 c, float a = -1) {
@@ -162,39 +219,41 @@ ImVec4 v4(ImU32 c, float a = -1) {
 
 void apply_style(float height) {
     static float made_for = -1;
+    static int made_theme = -1;
     const float k = std::clamp(height / 1080.0f, 0.5f, 3.0f);
-    if (std::fabs(made_for - k) < 0.005f) return;
+    const int cur_theme = theme_index();
+    if (std::fabs(made_for - k) < 0.005f && made_theme == cur_theme) return;
     made_for = k;
+    made_theme = cur_theme;
     const Theme& t = theme();
     ImGui::StyleColorsDark();
     ImGuiStyle& s = ImGui::GetStyle();
-    // (sizes: Savage Wind's menu at 1080 p)
-    s.WindowRounding = 14, s.FrameRounding = 8, s.GrabRounding = 8, s.TabRounding = 8, s.ChildRounding = 10;
-    s.PopupRounding = 10, s.ScrollbarRounding = 8;
-    s.WindowPadding = {28, 24}, s.FramePadding = {14, 8}, s.ItemSpacing = {14, 12}, s.ItemInnerSpacing = {10, 8};
-    s.WindowBorderSize = 0, s.PopupBorderSize = 1, s.ChildBorderSize = 0, s.TabBorderSize = 0;
-    s.ScrollbarSize = 14, s.TabBarBorderSize = 1;
-    s.DisabledAlpha = 0.45f;
+    s.WindowRounding = 16, s.FrameRounding = 10, s.GrabRounding = 8, s.TabRounding = 8, s.ChildRounding = 12;
+    s.PopupRounding = 12, s.ScrollbarRounding = 8;
+    s.WindowPadding = {32, 26}, s.FramePadding = {14, 8}, s.ItemSpacing = {14, 10}, s.ItemInnerSpacing = {10, 8};
+    s.WindowBorderSize = 1, s.PopupBorderSize = 1, s.ChildBorderSize = 0, s.TabBorderSize = 0;
+    s.ScrollbarSize = 8, s.TabBarBorderSize = 1;
+    s.DisabledAlpha = 0.42f;
     ImVec4* c = s.Colors;
-    const ImVec4 accent = v4(t.accent), lift = v4(mix(t.panel, t.accent2, 0.22f), 1), lift2 = v4(mix(t.panel, t.accent2, 0.34f), 1);
+    const ImVec4 accent = v4(t.accent), lift = v4(mix(t.panel, t.text, 0.08f), 1), lift2 = v4(mix(t.panel, t.text, 0.14f), 1);
     c[ImGuiCol_WindowBg] = v4(t.panel);
     c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
     c[ImGuiCol_PopupBg] = v4(t.card, 0.98f);
-    c[ImGuiCol_Border] = v4(t.accent, 0.35f);
+    c[ImGuiCol_Border] = ImVec4(1, 1, 1, 0.09f);
     c[ImGuiCol_Text] = v4(t.text);
     c[ImGuiCol_TextDisabled] = v4(t.text_off);
-    c[ImGuiCol_FrameBg] = v4(mix(t.panel, t.accent2, 0.12f), 1);
+    c[ImGuiCol_FrameBg] = v4(mix(t.panel, t.text, 0.05f), 1);
     c[ImGuiCol_FrameBgHovered] = c[ImGuiCol_ButtonHovered] = c[ImGuiCol_Header] = lift;
     c[ImGuiCol_FrameBgActive] = c[ImGuiCol_ButtonActive] = c[ImGuiCol_HeaderHovered] = c[ImGuiCol_HeaderActive] = lift2;
-    c[ImGuiCol_Button] = v4(mix(t.panel, t.accent2, 0.14f), 1);
+    c[ImGuiCol_Button] = v4(mix(t.panel, t.text, 0.06f), 1);
     c[ImGuiCol_Tab] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_TabHovered] = ImVec4(1, 1, 1, 0.08f);
-    c[ImGuiCol_TabSelected] = ImVec4(1, 1, 1, 0.07f);
+    c[ImGuiCol_TabHovered] = ImVec4(1, 1, 1, 0.06f);
+    c[ImGuiCol_TabSelected] = ImVec4(1, 1, 1, 0.05f);
     c[ImGuiCol_TabSelectedOverline] = ImVec4(0, 0, 0, 0);  // (the menu draws its own sliding underline)
     c[ImGuiCol_TabDimmed] = c[ImGuiCol_Tab], c[ImGuiCol_TabDimmedSelected] = c[ImGuiCol_TabSelected];
     c[ImGuiCol_CheckMark] = c[ImGuiCol_SliderGrabActive] = c[ImGuiCol_NavCursor] = c[ImGuiCol_PlotLines] = accent;
     c[ImGuiCol_SliderGrab] = c[ImGuiCol_ScrollbarGrabActive] = v4(t.accent, 0.7f);
-    c[ImGuiCol_Separator] = ImVec4(1, 1, 1, 0.10f);
+    c[ImGuiCol_Separator] = ImVec4(1, 1, 1, 0.08f);
     c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
     c[ImGuiCol_ScrollbarGrab] = ImVec4(1, 1, 1, 0.14f);
     c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(1, 1, 1, 0.24f);

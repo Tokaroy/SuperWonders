@@ -40,11 +40,13 @@ struct PcMenuState {
     int audio_mode = 0;
     int stereo_separation = 100;
     int language = 0;  // English, Italian, German, French
+    int theme = 0;     // UI style color preset (0..4)
     int game_language = 0;  // Language returned to the game at startup: en-US, it, de, fr, pt-BR
     int memory_limit_gb = 8;  // Process private-commit guard; not a dedicated VRAM budget
     std::array<int, 4> player_devices{{0, 0, 0, 0}};
     std::array<std::array<int, kPcControlCount>, 4> pad_bindings{};
     std::array<uint32_t, 4> pad_custom_mask{};
+    std::array<int, 4> pad_presets{{0, 0, 0, 0}};
     bool keyboard_separate = false;
     int controller_preset = 0;  // Xbox / DualSense, Nintendo
     int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation

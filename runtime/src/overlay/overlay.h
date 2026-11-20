@@ -23,6 +23,7 @@ struct Host {
     void (*apply)(const Settings& s, bool persist) = nullptr;
     // A short name for a keyboard binding (a platform key code), for the Controls tab.
     const char* (*key_name)(int key) = nullptr;
+    std::array<int, kControlCount> default_keyboard_bindings{};
     bool can_always_on_top = true;  // the window system supports it (not Wayland)
     bool can_resize = true;         // the window can be given a size
 };
@@ -31,6 +32,7 @@ bool enabled();  // NX_IMGUI_MENU, default on
 int menu_language();  // selected launcher / in-game menu language, 0..12
 int aspect_ratio();
 void set_aspect_ratio(int ratio);
+void set_theme_index(int index);
 void init(const Host& host, const Settings& s);  // before the first frame
 void sync(const Settings& s);                    // the platform changed settings itself (F11, window resize)
 

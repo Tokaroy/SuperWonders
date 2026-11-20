@@ -678,6 +678,20 @@ void video(MenuContext& c, const Labels& l) {
         if (cap_values[i] == s.frame_cap) cap = i;
     if (rows::choice(l.frame_cap_label, &cap, caps, 5, 1, translated_desc(desc::frame_cap, lang)))
         s.frame_cap = cap_values[cap], settings_changed(true);
+    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    {
+        char rlabel[64];
+        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", l.video);
+        if (rows::action(rlabel, "", lang == 1 ? "Ripristina le impostazioni video predefinite." : "Restore default video settings.")) {
+            s.width = kDefaults.width, s.height = kDefaults.height, s.aspect_ratio = kDefaults.aspect_ratio;
+            s.internal_resolution = kDefaults.internal_resolution, s.fullscreen = kDefaults.fullscreen;
+            s.always_on_top = kDefaults.always_on_top, s.upscaler = kDefaults.upscaler;
+            s.fsr_sharpness = kDefaults.fsr_sharpness, s.antialiasing = kDefaults.antialiasing;
+            s.anisotropy = kDefaults.anisotropy, s.vsync = kDefaults.vsync, s.frame_cap = kDefaults.frame_cap;
+            settings_changed(true);
+            ui::notify(lang == 1 ? "Impostazioni video ripristinate." : "Video settings reset to defaults.");
+        }
+    }
     rows::page_note(l.restart_note);
     rows::end();
 }
@@ -750,6 +764,18 @@ void audio(MenuContext& c, const Labels& l) {
     if (rows::choice(l.game_language, &s.game_language, kGameLanguageNames, int(std::size(kGameLanguageNames)),
                      kDefaults.game_language, translated_desc(desc::game_language, lang)))
         settings_changed(true), ui::notify(l.game_language_restart);
+    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    {
+        char rlabel[64];
+        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", l.audio);
+        if (rows::action(rlabel, "", lang == 1 ? "Ripristina le impostazioni audio predefinite." : "Restore default audio and game language settings.")) {
+            s.volume = kDefaults.volume, s.muted = kDefaults.muted;
+            s.audio_mode = kDefaults.audio_mode, s.stereo_separation = kDefaults.stereo_separation;
+            s.game_language = kDefaults.game_language;
+            settings_changed(true);
+            ui::notify(lang == 1 ? "Impostazioni audio ripristinate." : "Audio settings reset to defaults.");
+        }
+    }
     rows::page_note(l.game_language_restart);
     rows::end();
 }
@@ -762,7 +788,7 @@ struct InputText {
 };
 constexpr InputText kInputText[] = {
     {"Keyboard as separate player", "Keyboard is player 1; controllers start at player 2.", "Automatic", "None", "Keyboard", "offline", "Player", "Choose this player's input device.", "Configure controller", "Choose which controller to configure.", "Press a key...", "Button icons", "In-game button icon style synced with Pad 1's bindings. Requires restart.", "Restart the game to apply button icons."},
-    {"Tastiera giocatore separato", "Tastiera: giocatore 1; controller: dal giocatore 2.", "Automatico", "Nessuno", "Tastiera", "non connesso", "Giocatore", "Seleziona il dispositivo assegnato al giocatore.", "Configura controller", "Scegli quale controller modificare.", "Premi un tasto...", "Icone tasti HUD", "Stile delle icone dei tasti in gioco sincronizzato coi comandi del Pad 1. Richiede riavvio.", "Riavvia il gioco per applicare le icone dei tasti."},
+    {"Tastiera giocatore separato", "Tastiera: giocatore 1; controller: dal giocatore 2.", "Automatico", "Nessuno", "Tastiera", "disattivato", "Giocatore", "Seleziona il dispositivo assegnato al giocatore.", "Configura controller", "Scegli quale controller modificare dal menu a tendina.", "Premi un tasto...", "Icone tasti HUD", "Stile delle icone dei tasti in gioco sincronizzato coi comandi del Pad 1. Richiede riavvio.", "Riavvia il gioco per applicare le icone dei tasti."},
     {"Tastatur als eigener Spieler", "Tastatur: Spieler 1; Controller: ab Spieler 2.", "Automatisch", "Keines", "Tastatur", "nicht verbunden", "Spieler", "Eingabegerät für diesen Spieler wählen.", "Controller konfigurieren", "Controller zum Bearbeiten wählen.", "Taste drücken...", "Tastensymbole", "Symbolstil der Tasten im Spiel, abgestimmt auf die Belegung von Pad 1. Neustart erforderlich.", "Spiel neu starten, um Tastensymbole anzuwenden."},
     {"Clavier comme joueur séparé", "Clavier : joueur 1 ; manettes : à partir du joueur 2.", "Automatique", "Aucun", "Clavier", "déconnecté", "Joueur", "Choisissez le périphérique de ce joueur.", "Configurer la manette", "Choisissez la manette à modifier.", "Appuyez sur une touche...", "Icônes des touches", "Style des icônes en jeu synchronisé avec les touches du Pad 1. Redémarrage requis.", "Redémarrez le jeu pour appliquer les icônes."},
     {"Teclado como jugador independiente", "Teclado: jugador 1; mandos: desde el jugador 2.", "Automático", "Ninguno", "Teclado", "desconectado", "Jugador", "Elige el dispositivo de este jugador.", "Configurar mando", "Elige el mando que quieres modificar.", "Pulsa una tecla...", "Iconos de botones", "Estilo de los iconos en el juego sincronizado con los controles del Pad 1. Requiere reiniciar.", "Reinicia el juego para aplicar los iconos."},
@@ -821,14 +847,25 @@ void controls(MenuContext& c, const Labels& l) {
         }
     }
     static int edit_slot = 0;
-    const char* slots[] = {"Pad 1", "Pad 2", "Pad 3", "Pad 4"};
-    rows::choice(t.configure, &edit_slot, slots, 4, 0, t.configure_help);
+    std::array<std::string, 4> slot_strings;
+    const char* slots[4] = {};
+    for (int i = 0; i < 4; ++i) {
+        slot_strings[i] = "Pad " + std::to_string(i + 1) +
+                          (device_names[i].empty() ? std::string(" (") + t.offline + ")" : ": " + device_names[i]);
+        slots[i] = slot_strings[i].c_str();
+    }
+    rows::dropdown(t.configure, &edit_slot, slots, 4, t.configure_help);
+    rows::section(slots[edit_slot]);
 #else
     const int edit_slot = 0;
 #endif
     const char* presets[] = {"Xbox / DualSense", "Nintendo"};
-    if (rows::choice(l.control_preset, &s.controller_preset, presets, 2, kDefaults.controller_preset, translated_desc(desc::preset, lang)))
+    int slot_preset = controller_preset_for_slot(s, size_t(edit_slot));
+    if (rows::choice(l.control_preset, &slot_preset, presets, 2, kDefaults.controller_preset, translated_desc(desc::preset, lang))) {
+        if (edit_slot == 0) s.controller_preset = s.pad_presets[0] = slot_preset;
+        else s.pad_presets[size_t(edit_slot)] = slot_preset;
         settings_changed(true);
+    }
     const char* icon_styles[] = {t.automatic, "Nintendo", "Xbox", "PlayStation"};
     if (rows::choice(t.icons, &s.button_icons, icon_styles, 4, kDefaults.button_icons, t.icons_help))
         settings_changed(true), ui::notify(t.icons_restart);
@@ -844,7 +881,7 @@ void controls(MenuContext& c, const Labels& l) {
     }
     for (size_t a = 0; a < kControlCount; ++a) {
         int phys = controller_binding_for_slot(s, size_t(edit_slot), a);
-        const int def = default_controller_binding(a, s.controller_preset);
+        const int def = default_controller_binding(a, slot_preset);
         char id[128];
         std::snprintf(id, sizeof id, "%s###pad%zu", a >= 12 ? kInputDirections[lang][a - 12] : kActions[a], a);
         if (rows::choice(id, &phys, physical, int(kControlCount), def, translated_desc(desc::pad, lang))) {
@@ -868,7 +905,29 @@ void controls(MenuContext& c, const Labels& l) {
         const char* name = waiting ? t.press_key : c.host.key_name ? c.host.key_name(s.keyboard_bindings[a]) : "?";
         if (rows::action(id, name, translated_desc(desc::key, lang), true, waiting)) c.capture_action = int(a);  // overlay.cpp takes the next key
     }
-    rows::page_note(s.controller_preset == 1 ? l.nintendo_desc : l.standard_desc);
+    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    {
+        char rlabel[64];
+        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", l.controls);
+        if (rows::action(rlabel, "", lang == 1 ? "Ripristina i controlli predefiniti per tutti i pad e la tastiera." : "Restore default bindings and layout for all controllers and keyboard.")) {
+            s.keyboard_separate = kDefaults.keyboard_separate;
+            s.player_devices = kDefaults.player_devices;
+            s.controller_preset = kDefaults.controller_preset;
+            s.pad_presets = kDefaults.pad_presets;
+            s.button_icons = kDefaults.button_icons;
+            s.rumble = kDefaults.rumble;
+            s.controller_custom_mask = 0;
+            s.pad_custom_mask = {};
+            s.controller_bindings = {};
+            s.pad_bindings = {};
+            for (size_t a = 0; a < kControlCount; ++a)
+                if (c.host.default_keyboard_bindings[a]) s.keyboard_bindings[a] = c.host.default_keyboard_bindings[a];
+            c.capture_action = -1;
+            settings_changed(true);
+            ui::notify(lang == 1 ? "Controlli ripristinati." : "Controls reset to defaults.");
+        }
+    }
+    rows::page_note(slot_preset == 1 ? l.nintendo_desc : l.standard_desc);
     rows::end();
 }
 
@@ -895,6 +954,21 @@ void overlay_tab(MenuContext& c) {
     if (!s.metrics_enabled) rows::disable_next();
     if (rows::choice(o[5], &s.overlay_position, kPositions[lang], 4, kDefaults.overlay_position, translated_desc(desc::position, lang)))
         settings_changed(true);
+    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    {
+        char rlabel[64];
+        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", kLabels[lang].overlay);
+        if (rows::action(rlabel, "", lang == 1 ? "Ripristina le impostazioni dell'overlay predefinite." : "Restore default overlay settings.")) {
+            s.metrics_enabled = kDefaults.metrics_enabled;
+            s.metric_fps = kDefaults.metric_fps;
+            s.metric_one_percent_low = kDefaults.metric_one_percent_low;
+            s.metric_game_speed = kDefaults.metric_game_speed;
+            s.metric_frametime_graph = kDefaults.metric_frametime_graph;
+            s.overlay_position = kDefaults.overlay_position;
+            settings_changed(true);
+            ui::notify(lang == 1 ? "Impostazioni overlay ripristinate." : "Overlay settings reset to defaults.");
+        }
+    }
     rows::end();
 }
 
@@ -905,10 +979,50 @@ void system_tab(MenuContext& c, const Labels& l) {
     const int lang = std::clamp(s.language, 0, 12);
     if (rows::choice(kCommon[lang][11], &s.language, kLanguageNames, int(std::size(kLanguageNames)), kDefaults.language, translated_desc(desc::language, lang)))
         settings_changed(true);
+    const char* theme_names[5] = {};
+    for (int i = 0; i < ui::theme_count() && i < 5; ++i) theme_names[i] = ui::theme_name(i);
+    if (rows::choice("Style color", &s.theme, theme_names, ui::theme_count(), kDefaults.theme,
+                     "Accent color theme for the launcher and in-game settings.")) {
+        ui::set_theme(s.theme);
+        settings_changed(true);
+    }
     if (rows::integer(l.memory_limit, &s.memory_limit_gb, 2, 32, 1, kDefaults.memory_limit_gb, "%d GB", translated_desc(desc::memory, lang)))
         settings_changed(true);
     if (rows::toggle(l.low_vram, &s.low_vram_profile, kDefaults.low_vram_profile, translated_desc(desc::low_vram, lang)))
         settings_changed(true), ui::notify(l.restart_low_vram);
+    rows::section(lang == 1 ? "Ripristino" : "Reset");
+    {
+        char rlabel[64];
+        std::snprintf(rlabel, sizeof rlabel, "%s %s", lang == 1 ? "Ripristina" : "Reset", l.system);
+        if (rows::action(rlabel, "", lang == 1 ? "Ripristina le impostazioni di sistema predefinite." : "Restore default system settings (language, theme, memory, VRAM profile).")) {
+            s.language = kDefaults.language, s.theme = kDefaults.theme;
+            s.memory_limit_gb = kDefaults.memory_limit_gb, s.low_vram_profile = kDefaults.low_vram_profile;
+            ui::set_theme(s.theme);
+            settings_changed(true);
+            ui::notify(lang == 1 ? "Impostazioni di sistema ripristinate." : "System settings reset to defaults.");
+        }
+    }
+    static double reset_all_at = -10;
+    const bool armed_all = ImGui::GetTime() - reset_all_at < 4.0;
+    if (rows::action(lang == 1 ? "Ripristina tutte le impostazioni" : "Reset all settings",
+                     armed_all ? (lang == 1 ? "Premi di nuovo per confermare" : "Press again to confirm") : "",
+                     lang == 1 ? "Ripristina tutte le schede (Video, Audio, Controlli, Overlay, Sistema) ai valori predefiniti."
+                               : "Reset every settings tab (Video, Audio, Controls, Overlay, System) to factory defaults.",
+                     true, armed_all)) {
+        if (armed_all) {
+            Settings fresh = kDefaults;
+            for (size_t a = 0; a < kControlCount; ++a)
+                fresh.keyboard_bindings[a] = c.host.default_keyboard_bindings[a] ? c.host.default_keyboard_bindings[a] : s.keyboard_bindings[a];
+            s = fresh;
+            c.capture_action = -1;
+            ui::set_theme(s.theme);
+            settings_changed(true);
+            reset_all_at = -10;
+            ui::notify(lang == 1 ? "Tutte le impostazioni sono state ripristinate." : "All settings reset to defaults.");
+        } else {
+            reset_all_at = ImGui::GetTime();
+        }
+    }
     // Quit: A once arms it (the row pulses, "Press again to quit"), A again within 4 s quits as closing the window does
     // (the pipeline cache is saved); progress since the game's last save is lost
     static double armed_at = -10;
@@ -948,13 +1062,13 @@ const char* const* menu_language_names() { return kLanguageNames; }
 
 void draw_menu(MenuContext& c) {
     Settings& s = c.settings;
+    ui::set_theme(s.theme);
     const Labels& l = kLabels[std::clamp(s.language, 0, 12)];
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     const float k = std::clamp(c.height / 1080.0f, 0.5f, 3.0f);
-    // Savage Wind's in-game Settings window: up to 1500 px wide at 1080 p, the full height less a slim margin; it
-    // rises a little as it fades in (c.reveal: 0..1).
-    const ImVec2 size{std::min(display.x * 0.92f, 1500 * k), display.y - 2 * 22 * k};
-    const float rise = (1.0f - ui::smoothstep(c.reveal)) * 26 * k;
+    // Modern minimalist window: up to 1480 px wide at 1080 p, rising subtly as it fades in.
+    const ImVec2 size{std::min(display.x * 0.90f, 1480 * k), display.y - 2 * 28 * k};
+    const float rise = (1.0f - ui::smoothstep(c.reveal)) * 20 * k;
     ImGui::SetNextWindowPos({display.x * 0.5f, display.y * 0.5f + rise}, ImGuiCond_Always, {0.5f, 0.5f});
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
     ImGuiWindowFlags f = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
@@ -964,18 +1078,28 @@ void draw_menu(MenuContext& c) {
         return;
     }
     ImDrawList* wdl = ImGui::GetWindowDrawList();
-    {  // a thin accent rule along the top edge
-        const ImVec2 a = ImGui::GetWindowPos(), b(a.x + ImGui::GetWindowWidth(), a.y);
-        wdl->AddRectFilled(ImVec2(a.x + 14 * k, a.y), ImVec2(b.x - 14 * k, a.y + 3 * k), ui::fade(ui::theme().accent, 0.85f));
-    }
     ImGui::PushFont(ui::title());
-    ImGui::SetWindowFontScale(0.74f);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ui::theme().accent));
+    ImGui::SetWindowFontScale(0.70f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ui::theme().text));
     ImGui::TextUnformatted(l.title);
     ImGui::PopStyleColor();
     ImGui::SetWindowFontScale(1.0f);
     ImGui::PopFont();
+    {
+        // Place the theme color toggle button neatly beside the close button in the top-right header.
+        const float close_w = 44 * k;
+        const float btn_fs = ImGui::GetFontSize() * 0.84f;
+        const ImVec2 ts = ui::body()->CalcTextSizeA(btn_fs, FLT_MAX, 0, ui::theme().name);
+        const float theme_w = 28 * k + 11 * k + 8 * k + ts.x;
+        const float right_x = ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - close_w - 12 * k - theme_w;
+        ImGui::SameLine(right_x);
+        if (ui::theme_button(k)) {
+            s.theme = ui::theme_index();
+            settings_changed(true);
+        }
+    }
     if (close_button(k)) c.open = false;
+    ImGui::Dummy(ImVec2(0, 4 * k));
 
     const char* names[kTabs] = {l.video, l.audio, l.controls, l.overlay, l.system};
     int current = -1;

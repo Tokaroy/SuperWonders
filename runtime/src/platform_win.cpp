@@ -347,8 +347,8 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     overlay::Settings o;
     o.width = s.width, o.height = s.height, o.aspect_ratio = s.aspect_ratio, o.internal_resolution = s.internal_resolution, o.volume = s.volume;
     o.audio_mode = s.audio_mode, o.stereo_separation = s.stereo_separation;
-    o.language = s.language, o.game_language = s.game_language, o.memory_limit_gb = s.memory_limit_gb;
-    o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask;
+    o.language = s.language, o.theme = s.theme, o.game_language = s.game_language, o.memory_limit_gb = s.memory_limit_gb;
+    o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask, o.pad_presets = s.pad_presets;
     o.keyboard_separate = s.keyboard_separate;
     o.controller_preset = s.controller_preset, o.button_icons = s.button_icons, o.muted = s.muted, o.fullscreen = s.fullscreen;
     o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile;
@@ -366,8 +366,8 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     PcMenuState s = g_pc_settings;
     s.width = o.width, s.height = o.height, s.aspect_ratio = o.aspect_ratio, s.internal_resolution = o.internal_resolution, s.volume = o.volume;
     s.audio_mode = o.audio_mode, s.stereo_separation = o.stereo_separation;
-    s.language = o.language, s.game_language = o.game_language, s.memory_limit_gb = o.memory_limit_gb;
-    s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask;
+    s.language = o.language, s.theme = o.theme, s.game_language = o.game_language, s.memory_limit_gb = o.memory_limit_gb;
+    s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask, s.pad_presets = o.pad_presets;
     s.keyboard_separate = o.keyboard_separate;
     s.controller_preset = o.controller_preset, s.button_icons = o.button_icons, s.muted = o.muted, s.fullscreen = o.fullscreen;
     s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile;
@@ -452,7 +452,7 @@ static void apply_input_bindings(const PcMenuState& state) {
     for (size_t i = 0; i < kPcControlCount; ++i) {
         for (size_t slot = 0; slot < 4; ++slot) {
             int binding = slot == 0 ? (state.controller_custom_mask & (1u << i) ? state.controller_bindings[i] : pc_default_controller_binding(i, state.controller_preset)) :
-                (state.pad_custom_mask[slot] & (1u << i) ? state.pad_bindings[slot][i] : pc_default_controller_binding(i, state.controller_preset));
+                (state.pad_custom_mask[slot] & (1u << i) ? state.pad_bindings[slot][i] : pc_default_controller_binding(i, std::clamp(state.pad_presets[slot], 0, 1)));
             g_device_bindings[slot][i].store(std::clamp(binding, 0, int(kPcControlCount) - 1));
         }
         g_keyboard_bindings[i].store(std::clamp(state.keyboard_bindings[i], 0, 255), std::memory_order_relaxed);
@@ -472,6 +472,7 @@ static void save_pc_settings() {
          << "\naspect_ratio=" << std::max(0, g_pc_settings.aspect_ratio)
          << "\ninternal_resolution=" << g_pc_settings.internal_resolution << "\nmuted=" << g_pc_settings.muted << "\nfullscreen=" << g_pc_settings.fullscreen
          << "\nalways_on_top=" << g_pc_settings.always_on_top << "\nlanguage=" << g_pc_settings.language
+         << "\ntheme=" << g_pc_settings.theme
          << "\ngame_language=" << g_pc_settings.game_language
          << "\ngame_language_version=2"
          << "\nmemory_limit_gb=" << g_pc_settings.memory_limit_gb
@@ -492,6 +493,7 @@ static void save_pc_settings() {
     for (size_t slot = 0; slot < 4; ++slot) {
         file << "player_device_" << slot << '=' << g_pc_settings.player_devices[slot] << '\n';
         if (slot) {
+            file << "pad_preset_" << slot << '=' << std::clamp(g_pc_settings.pad_presets[slot], 0, 1) << '\n';
             file << "pad_mask_" << slot << '=' << g_pc_settings.pad_custom_mask[slot] << '\n';
             for (size_t action = 0; action < kPcControlCount; ++action)
                 file << "pad_" << slot << '_' << action << '=' << g_pc_settings.pad_bindings[slot][action] << '\n';
@@ -521,6 +523,7 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) state.fullscreen = value != 0;
         else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) state.always_on_top = value != 0;
         else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) state.language = std::clamp(value, 0, 12);
+        else if (std::sscanf(line.c_str(), "theme=%d", &value) == 1) state.theme = std::clamp(value, 0, 4);
         else if (std::sscanf(line.c_str(), "game_language=%d", &value) == 1)
             state.game_language = std::clamp(value, 0, 11);
         else if (std::sscanf(line.c_str(), "game_language_version=%d", &value) == 1)
@@ -528,8 +531,10 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         else if (std::sscanf(line.c_str(), "memory_limit_gb=%d", &value) == 1) state.memory_limit_gb = std::clamp(value, 2, 32);
         else if (std::sscanf(line.c_str(), "low_vram_profile=%d", &value) == 1) state.low_vram_profile = value != 0;
         else if (std::sscanf(line.c_str(), "keyboard_separate=%d", &value) == 1) state.keyboard_separate = value != 0;
-        else if (std::sscanf(line.c_str(), "controller_preset=%d", &value) == 1)
+        else if (std::sscanf(line.c_str(), "controller_preset=%d", &value) == 1) {
             state.controller_preset = std::clamp(value, 0, 1);
+            state.pad_presets[0] = state.controller_preset;
+        }
         else if (std::sscanf(line.c_str(), "button_icons=%d", &value) == 1)
             state.button_icons = std::clamp(value, 0, 3);
         else if (std::sscanf(line.c_str(), "metrics_enabled=%d", &value) == 1) state.metrics_enabled = value != 0;
@@ -561,6 +566,8 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
             unsigned mask = 0;
             if (std::sscanf(line.c_str(), "player_device_%d=%d", &index, &binding) == 2 && index >= 0 && index < 4 && binding >= 0 && binding <= 6)
                 state.player_devices[size_t(index)] = binding;
+            else if (std::sscanf(line.c_str(), "pad_preset_%d=%d", &slot, &binding) == 2 && slot > 0 && slot < 4)
+                state.pad_presets[size_t(slot)] = std::clamp(binding, 0, 1);
             else if (std::sscanf(line.c_str(), "pad_mask_%d=%u", &slot, &mask) == 2 && slot > 0 && slot < 4)
                 state.pad_custom_mask[size_t(slot)] = mask;
             else if (std::sscanf(line.c_str(), "pad_%d_%d=%d", &slot, &index, &binding) == 3 && slot > 0 && slot < 4 && index >= 0 && index < int(kPcControlCount) && binding >= 0 && binding < int(kPcControlCount))
@@ -1061,6 +1068,7 @@ static void window_thread(std::atomic<bool>* ready) {
         overlay::Host host;
         host.apply = overlay_apply;
         host.key_name = overlay_key_name;
+        host.default_keyboard_bindings = PcMenuState{}.keyboard_bindings;
         overlay::init(host, to_overlay(g_pc_settings));
     }
     metrics_init(g_window);
