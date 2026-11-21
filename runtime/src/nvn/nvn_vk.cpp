@@ -838,6 +838,10 @@ bool present_ui_frame() {
 
 uint64_t gpu_vram_bytes() {
     if (!g_physical) return 0;
+    if (const char* e = std::getenv("NX_VRAM_IMAGE_BUDGET_GB"); e && *e) {
+        const double gb = std::atof(e);
+        if (gb > 0.0) return uint64_t(gb * double(1ull << 30));
+    }
     VkPhysicalDeviceMemoryProperties mp{};
     p_vkGetPhysicalDeviceMemoryProperties(g_physical, &mp);
     uint64_t total = 0;
