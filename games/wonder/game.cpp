@@ -518,6 +518,7 @@ void game::after_init() {
     static Fn demo_update_orig = nullptr;
     static Fn player_dead_orig = nullptr;
     static Fn actor_reset_orig = nullptr;
+    static Fn stage_info_parse_orig = nullptr;
     const auto find_ro_string = [](const ModuleInfo* main, const char* needle) -> uint64_t {
         const size_t nlen = std::strlen(needle);
         if (!main || main->ro_size < nlen + 2) return UINT64_MAX;
@@ -688,6 +689,43 @@ void game::after_init() {
                            actor_reset_orig(c);
                        },
                        actor_reset_orig);
+    // Enable Wonder's native Pause Menu "Restart Course" (L_RetryBtn, right above Exit Course) in every level.
+    {
+        const ModuleInfo* main = game_lib().main;
+        const LoadedModule* m = main ? module_at(main->base) : nullptr;
+        const uint64_t str_off = main ? find_ro_string(main, "IsEnablePauseMenuRestart") : UINT64_MAX;
+        if (main && m && str_off != UINT64_MAX) {
+            const uint64_t str_page = str_off & ~0xfffull;
+            const uint32_t add_x8 = 0x91000108u | uint32_t((str_off & 0xfffu) << 10);
+            for (uint64_t off = main->text + 0x40; off + 8 <= main->text + main->text_size; off += 4) {
+                if (ld<uint32_t>(main->base + off + 4) != add_x8) continue;
+                const uint32_t i0 = ld<uint32_t>(main->base + off);
+                if ((i0 & 0x9f00001fu) != 0x90000008u) continue;
+                const int32_t immlo = int32_t((i0 >> 29) & 3u);
+                const int32_t immhi = int32_t((i0 >> 5) & 0x7ffffu);
+                int64_t imm = (int64_t(immhi) << 2) | immlo;
+                if (imm & (1ll << 20)) imm -= (1ll << 21);
+                if (((off & ~0xfffull) + uint64_t(imm << 12)) != str_page) continue;
+                for (uint64_t fn = off - 0x40; fn < off; fn += 4) {
+                    if (ld<uint32_t>(main->base + fn) == 0xd10143ffu &&
+                        ld<uint32_t>(main->base + fn + 4) == 0xa9027bfdu && m->table[fn / 4]) {
+                        stage_info_parse_orig = m->table[fn / 4];
+                        m->table[fn / 4] = [](CPU& c) {
+                            const uint64_t info = c.x[0];
+                            stage_info_parse_orig(c);
+                            if (info) {
+                                st<uint8_t>(info + 0x39, 1);
+                                st<uint8_t>(info + 0x47, ld<uint8_t>(info + 0x47) | 1u);
+                            }
+                        };
+                        log("menu: enabled Pause Menu Restart at main+%llx", (unsigned long long)fn);
+                        break;
+                    }
+                }
+                if (stage_info_parse_orig) break;
+            }
+        }
+    }
     if (const uint64_t demo_node = find_ainb_node_fn("PlayerCourseInDemo"); demo_node != UINT64_MAX) {
         const ModuleInfo* main = game_lib().main;
         const LoadedModule* m = main ? module_at(main->base) : nullptr;
@@ -929,16 +967,17 @@ void game::frame_presented(uint64_t now_ns, int present_interval) {
                 }
             }
         }
-        if (overlay::speedrun_is_armed() && now_ns - armed_since_ns >= 15'000'000'000ull) {
+        const uint64_t failsafe_ns = g_player_died.load(std::memory_order_relaxed) ? 1'500'000'000ull : 15'000'000'000ull;
+        if (overlay::speedrun_is_armed() && now_ns - armed_since_ns >= failsafe_ns) {
             saw_fade_out = false;
             armed_since_ns = 0;
             prev_faded = -1;
             g_stage_load_ended.store(false, std::memory_order_relaxed);
             g_course_demo_active.store(false, std::memory_order_relaxed);
-            g_player_died.store(false, std::memory_order_relaxed);
+            const bool was_respawn = g_player_died.exchange(false, std::memory_order_relaxed);
             g_stage_ready_ns.store(0, std::memory_order_relaxed);
             overlay::speedrun_begin_play();
-            log("speedrun: started (15s failsafe)");
+            log("speedrun: started (%s)", was_respawn ? "respawn" : "15s failsafe");
         }
     } else {
         saw_fade_out = false;
