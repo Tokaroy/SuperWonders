@@ -255,9 +255,16 @@ const AstcPipeline* astc_pipeline() {
 bool decode_astc_gpu(VkCommandBuffer cb, uint32_t format, const std::vector<uint8_t>& linear,
                      std::vector<LinearLevel>& levels, uint32_t layers, uint32_t bw, uint32_t bh, Upload& u,
                      uint64_t& size) {
-    static const bool cpu = [] {  // NX_ASTC_CPU=1: the CPU decoder; unset or 0: the GPU one
-        const char* e = std::getenv("NX_ASTC_CPU");
-        return e && e[0] && e[0] != '0';
+    static const bool cpu = [] {  // NX_ASTC_CPU=1: CPU decoder; 0: GPU; unset: CPU on NVIDIA Pascal
+        if (const char* e = std::getenv("NX_ASTC_CPU"); e && *e) return e[0] != '0';
+        VkPhysicalDeviceProperties props{};
+        if (vk_physical()) p_vkGetPhysicalDeviceProperties(vk_physical(), &props);
+        const bool nvidia_pascal = props.vendorID == 0x10de &&
+            ((props.deviceID >= 0x1b00 && props.deviceID <= 0x1dff) ||
+             (props.deviceID >= 0x15f0 && props.deviceID <= 0x15ff));
+        if (nvidia_pascal)
+            log("nvn/vk: ASTC decoded on the CPU by default for NVIDIA Pascal (NX_ASTC_CPU=0 to override)");
+        return nvidia_pascal;
     }();
     static uint64_t textures = 0, bytes = 0, ns = 0;
     const AstcPipeline* p = cpu ? nullptr : astc_pipeline();
