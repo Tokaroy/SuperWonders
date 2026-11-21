@@ -1128,6 +1128,141 @@ void page_quit() {
     rows::end();
 }
 
+void low_vram_warning_dialog(float w, float h, float k) {
+    struct LowVramText {
+        const char* title;
+        const char* body;
+        const char* activate;
+        const char* dismiss;
+    };
+    static constexpr LowVramText kLowVramText[13] = {
+        {"Low VRAM Detected",
+         "Your GPU has less than 6 GB of VRAM and Low VRAM Mode is currently off. You may experience crashes, "
+         "slowdowns, or graphical glitches. Activating Low VRAM Mode is recommended.",
+         "Activate Low VRAM Mode", "Dismiss"},
+        {"VRAM insufficiente rilevata",
+         "La tua GPU ha meno di 6 GB di VRAM e la modalita Low VRAM non e attiva. Potresti riscontrare crash, "
+         "rallentamenti o glitch grafici. Si consiglia di attivarla.",
+         "Attiva modalita Low VRAM", "Ignora"},
+        {"Wenig VRAM erkannt",
+         "Deine GPU hat weniger als 6 GB VRAM und der Low-VRAM-Modus ist aus. Es kann zu Absturzen, Rucklern oder "
+         "Grafikfehlern kommen. Es wird empfohlen, ihn zu aktivieren.",
+         "Low-VRAM-Modus aktivieren", "Schliessen"},
+        {"VRAM faible detectee",
+         "Votre GPU dispose de moins de 6 Go de VRAM et le mode Low VRAM est desactive. Vous pouvez rencontrer des "
+         "crashs, ralentissements ou bugs graphiques. Il est recommande de l'activer.",
+         "Activer le mode Low VRAM", "Ignorer"},
+        {"VRAM baja detectada",
+         "Tu GPU tiene menos de 6 GB de VRAM y el modo Low VRAM esta desactivado. Puedes sufrir cierres, "
+         "ralentizaciones o fallos graficos. Se recomienda activarlo.",
+         "Activar modo Low VRAM", "Descartar"},
+        {"VRAM 적음",
+         "GPU VRAM이 6 GB 이하고 저 VRAM 모드가 사용 안 됨입니다. 강제 종료, 속도 저하 또는 화면 이상이 있을 수 "
+         "있습니다. 저 VRAM 모드 사용이 필요합니다.",
+         "저 VRAM 모드 사용", "닫기"},
+        {"VRAMが少ないです",
+         "GPUのVRAMが6 GB以下で、低VRAMモードがオフです。動作低下、画面の乱れ、強制終了が起きることがあります。"
+         "低VRAMモードを使用してください。",
+         "低VRAMモードを使用", "閉じる"},
+        {"تم اكتشاف VRAM منخفض",
+         "بطاقة الرسومات لديك تحتوي على أقل من 6 جيجابايت من VRAM ووضع VRAM المنخفض غير مفعل. قد تواجه أعطالاً أو "
+         "بطئاً أو أخطاءً رسومية. يُنصح بتفعيله.",
+         "تفعيل وضع VRAM المنخفض", "تجاهل"},
+        {"Мало видеопамяти (VRAM)",
+         "У вашей видеокарты менее 6 ГБ VRAM, а режим Low VRAM выключен. Возможны вылеты, тормоза и графические "
+         "сбои. Рекомендуется включить этот режим.",
+         "Включить режим Low VRAM", "Закрыть"},
+        {"Dusuk VRAM Algilandi",
+         "GPU'nuzda 6 GB'tan az VRAM var ve Dusuk VRAM Modu kapali. Cokmeler, yavaslamalar veya grafik hatalari "
+         "yasayabilirsiniz. Etkinlestirmeniz onerilir.",
+         "Dusuk VRAM Modunu Etkinlestir", "Kapat"},
+        {"Weinig VRAM gedetecteerd",
+         "Je GPU heeft minder dan 6 GB VRAM en de Low VRAM-modus staat uit. Je kunt crashes, vertragingen of "
+         "grafische fouten ervaren. Activeren wordt aanbevolen.",
+         "Low VRAM-modus activeren", "Negeren"},
+        {"VRAM 不足",
+         "GPU 的 VRAM 不足 6 GB, 低 VRAM 模式未开启. 游玩时可能出现画面异常或变慢, 请开启低 VRAM 模式.",
+         "开启低 VRAM 模式", "关闭"},
+        {"VRAM 不足",
+         "GPU 的 VRAM 不足 6 GB, 低 VRAM 模式未開啟. 遊玩時可能出現畫面異常或變慢, 請開啟低 VRAM 模式.",
+         "開啟低 VRAM 模式", "關閉"},
+    };
+
+    static bool checked = false;
+    static bool should_open = false;
+    const fs::path marker = u8(plat::data_root()) / "low_vram_prompt_seen";
+    if (!checked) {
+        const uint64_t vram = nvn::gpu_vram_bytes();
+        if (vram > 0) {
+            checked = true;
+            constexpr uint64_t kSixGiB = 6ull * 1024ull * 1024ull * 1024ull;
+            if (vram < kSixGiB && !overlay::low_vram_profile() && !file(marker)) should_open = true;
+        }
+    }
+    if (should_open) {
+        ImGui::OpenPopup("##low_vram_warning");
+        should_open = false;
+    }
+
+    const int lang = std::clamp(overlay::menu_language(), 0, 12);
+    const LowVramText& t = kLowVramText[lang];
+    const ui::Theme& th = ui::theme();
+    ImGui::SetNextWindowPos({w * 0.5f, h * 0.5f}, ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSize({std::min(w * 0.85f, 660 * k), 0}, ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {28 * k, 24 * k});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 14 * k);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8 * k);
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGui::ColorConvertU32ToFloat4(th.card));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(th.warn));
+    const bool open = ImGui::BeginPopupModal(
+        "##low_vram_warning", nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+    if (open) {
+        auto mark_seen = [&] {
+            if (FILE* f = plat::fopen_utf8(str(marker), "wb")) {
+                std::fwrite("1\n", 1, 2, f);
+                std::fclose(f);
+            }
+        };
+        ImGui::PushFont(ui::title());
+        ImGui::SetWindowFontScale(0.62f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.warn));
+        ImGui::TextUnformatted(t.title);
+        ImGui::PopStyleColor();
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::PopFont();
+        ImGui::Dummy({0, 8 * k});
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text));
+        ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 28 * k);
+        ImGui::TextUnformatted(t.body);
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+        ImGui::Dummy({0, 18 * k});
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(th.accent));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(th.accent2));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(th.accent));
+        if (ImGui::Button(t.activate, {0, 44 * k})) {
+            overlay::set_low_vram_profile(true);
+            mark_seen();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::SameLine(0, 12 * k);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(th.panel));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(th.card));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(th.panel));
+        if (ImGui::Button(t.dismiss, {0, 44 * k})) {
+            mark_seen();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(3);
+}
+
 void screen(float w, float h) {
     if (!g) return;
     if (g->follow_hold > 0) g->follow_hold--;
@@ -1346,6 +1481,7 @@ void screen(float w, float h) {
     // the controls, along the bottom
     const ui::Hint hints[] = {{"A", lt(LtSelect)}, {"B", lt(LtBack)}, {"L", ""}, {"R", lt(LtPages)}, {"+", lt(LtPlayHint)}};
     ui::hints(dl, w * 0.5f, h - margin * 0.7f, 34 * k, hints, 5);
+    low_vram_warning_dialog(w, h, k);
     ImGui::End();
     ImGui::PopStyleColor();
     ImGui::PopStyleVar();

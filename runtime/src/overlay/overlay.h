@@ -32,6 +32,8 @@ bool enabled();  // NX_IMGUI_MENU, default on
 int menu_language();  // selected launcher / in-game menu language, 0..12
 int aspect_ratio();
 void set_aspect_ratio(int ratio);
+bool low_vram_profile();
+void set_low_vram_profile(bool on);
 void set_theme_index(int index);
 void init(const Host& host, const Settings& s);  // before the first frame
 void sync(const Settings& s);                    // the platform changed settings itself (F11, window resize)
