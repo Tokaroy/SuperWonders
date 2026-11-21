@@ -1,7 +1,10 @@
 // acc:u0 (accounts) and the storage objects am hands out (launch parameters).
 #include "ipc.h"
+#include "kernel.h"
 #include "user_profiles.h"
 #include "profile_image.h"
+#include "hle_net.h"
+#include "nextendo_client.h"
 
 #include <algorithm>
 #include <fstream>
@@ -103,8 +106,48 @@ std::shared_ptr<Service> profile() {
 
 std::shared_ptr<Service> manager_for_application() {
     auto s = std::make_shared<Service>("IManagerForApplication");
-    s->cmds[0] = [](IpcCtx& c) { c.push<uint8_t>(0); return 0u; };  // CheckAvailability
-    s->cmds[1] = [](IpcCtx& c) { c.push<uint64_t>(0x1234ABCD5678EF90ull); return 0u; };  // GetAccountId
+    s->cmds[0] = [](IpcCtx& c) {  // CheckAvailability -> Result (0 when available)
+        const bool avail = net::online_enabled() && nextendo::current_pid() != 0;
+        log("acc: CheckAvailability -> %d (online=%d pid=%llu)", int(avail), int(net::online_enabled()),
+            (unsigned long long)nextendo::current_pid());
+        return avail ? 0u : ((124u << 9) | 200u);
+    };
+    s->cmds[1] = [](IpcCtx& c) {  // GetAccountId
+        const uint64_t pid = nextendo::current_pid();
+        log("acc: GetAccountId -> %llu", (unsigned long long)pid);
+        c.push<uint64_t>(pid ? pid : 0x1234ABCD5678EF90ull);
+        return 0u;
+    };
+    s->cmds[2] = [](IpcCtx& c) {  // EnsureIdTokenCacheAsync -> IAsyncContext
+        log("acc: EnsureIdTokenCacheAsync");
+        auto ev = std::make_shared<KEvent>();
+        ev->state = std::make_shared<EventState>();
+        ev->state->signaled = true;
+        auto ctx = std::make_shared<Service>("IAsyncContext");
+        ctx->cmds[0] = [ev](IpcCtx& ac) {  // GetSystemEvent
+            ac.out_copy.push_back(handle_add(ev));
+            return 0u;
+        };
+        ctx->cmds[1] = [](IpcCtx&) { return 0u; };                             // Cancel
+        ctx->cmds[2] = [](IpcCtx& ac) { ac.push<uint8_t>(1); return 0u; };   // HasDone = true
+        ctx->cmds[3] = [](IpcCtx&) {                                           // GetResult
+            if (!net::online_enabled()) return (124u << 9) | 200u;
+            const std::string tok = nextendo::get_baas_id_token("1.2.1");
+            log("acc: AsyncContext::GetResult -> tok_len=%zu", tok.size());
+            return tok.empty() ? ((124u << 9) | 200u) : 0u;
+        };
+        c.push_object(ctx);
+        return 0u;
+    };
+    s->cmds[3] = [](IpcCtx& c) {  // LoadIdTokenCache(out buffer) -> u32 size
+        const std::string jwt = nextendo::get_baas_id_token("1.2.1");
+        Buffer out = c.out_buf(0);
+        const uint32_t n = (out.addr && !jwt.empty()) ? uint32_t(std::min<size_t>(out.size, jwt.size())) : 0u;
+        if (n) std::memcpy(reinterpret_cast<void*>(out.addr), jwt.data(), n);
+        log("acc: LoadIdTokenCache -> %u bytes", n);
+        c.push<uint32_t>(n);
+        return jwt.empty() ? ((124u << 9) | 200u) : 0u;
+    };
     return s;
 }
 

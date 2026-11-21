@@ -104,7 +104,8 @@ def system_font():
 def harness_command():
     """The shader translator: a release's own build, NX_SPIRV_HARNESS, or a checkout's (docs/nvn/TRANSLATOR.md)."""
     exe = "spirv_harness.exe" if WIN else "spirv_harness"
-    for p in (os.environ.get("NX_SPIRV_HARNESS"), os.path.join(ROOT, "translator", exe)):
+    for p in (os.environ.get("NX_SPIRV_HARNESS"), os.path.join(ROOT, "translator", exe),
+              os.path.join(os.path.dirname(ROOT), "SuperWonders-builder-portable", "tools", "portable", "bin", exe)):
         if p and os.path.isfile(p):
             if not WIN and not p.endswith(".dll") and not os.access(p, os.X_OK):
                 try:  # (copied without its executable bit; inside a read-only AppImage the packer has set it)

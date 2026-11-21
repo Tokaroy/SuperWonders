@@ -349,11 +349,15 @@ static uint32_t svc_wait_synchronization(CPU& c, uint64_t handles, int32_t count
     };
     auto until = std::chrono::steady_clock::now() + std::chrono::nanoseconds(timeout < 0 ? 0 : timeout);
     KThread* self = t_self;
-    self->cancel = false;
+    self->wait_handles.clear();
+    for (int i = 0; i < count; i++) self->wait_handles.push_back(ld<uint32_t>(handles + 4 * i));
     g_sync_waiters.push_back(self);
     struct Leave {
         KThread* t;
-        ~Leave() { remove(g_sync_waiters, t); }
+        ~Leave() {
+            remove(g_sync_waiters, t);
+            t->wait_handles.clear();
+        }
     } leave{self};
     for (;;) {
         int i = ready();

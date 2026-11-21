@@ -588,6 +588,12 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                 (fs->hash == "46841c209865a1c0" || fs->hash == "49add6de02fe8180") &&
                 std::fabs(f[3] - flower_x * flower_proj_x) < 32.0f && std::fabs(f[7] - flower_y * flower_proj_y) < 100.0f)
                 flower_offset = (flower_x - (flower_direction == 2.0f ? 384.0f : 0.0f)) * (uw_factor() - 1.0f);
+            for (const ResolvedTexture& r : g_textures.resolved) {
+                if (r.image && r.object && r.image->logical_width == 1920 && r.image->logical_height == 1080) {
+                    flower_seen = false;
+                    break;
+                }
+            }
         }
     }
     // World-map course cards use world-projected positions but are drawn in the
@@ -674,6 +680,54 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                            std::fabs(f[7] - msg_x * msg_proj_x) < 24.0f) {
                     flower_offset = msg_x * (uw_factor() - 1.0f);
                 }
+            }
+            bool menu_blur = false;
+            for (const ResolvedTexture& r : g_textures.resolved) {
+                GpuImage* img = r.image;
+                Texture* src = r.object;
+                if (img && src && img->logical_width == 1920 && img->logical_height == 1080) menu_blur = true;
+            }
+            if (menu_blur) {
+                card_seen = false;
+                flower_seen = false;
+            }
+        }
+    }
+    if (g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0]) {
+        GpuImage* target = primary_target;
+        const Range& u = g_state.uniforms[0][0];
+        const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
+        if (target && target->logical_width == 1920 && target->logical_height == 1080 && f) {
+            // Online world-projected player nameplates (360x60/f25) and friend-race bubbles.
+            bool online_nameplate = false, online_bubble_mask = false, online_bubble_body = false;
+            for (const ResolvedTexture& r : g_textures.resolved) {
+                GpuImage* img = r.image;
+                Texture* src = r.object;
+                if (!img || !src) continue;
+                if (src->format == 0x25 && img->logical_width == 360 && img->logical_height == 60)
+                    online_nameplate = true;
+                if (src->format == 0x49 && img->logical_width == 150 && img->logical_height == 150) {
+                    for (const ResolvedTexture& r2 : g_textures.resolved) {
+                        if (!r2.image || !r2.object) continue;
+                        if (r2.object->format == 0x87 && r2.image->logical_width == 1920 &&
+                            r2.image->logical_height == 2)
+                            online_bubble_mask = true;
+                        if (r2.object->format == 0x87 && r2.image->logical_width == 320 &&
+                            r2.image->logical_height == 320)
+                            online_bubble_body = true;
+                    }
+                }
+            }
+            if ((online_nameplate &&
+                 ((vs->hash == "5587b5f73977f07e" && fs->hash == "e4ff94e7165656b5") ||
+                  (vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406"))) ||
+                (online_bubble_mask &&
+                 ((vs->hash == "1b11e4e08801f8aa" && fs->hash == "708acb7a19fccd21") ||
+                  (vs->hash == "beb4ee08b0251d69" && fs->hash == "d37ad47acbe02764"))) ||
+                (online_bubble_body &&
+                 ((vs->hash == "6a4179388f4b1b2e" && fs->hash == "1642a92d1f3d654a") ||
+                  (vs->hash == "e66384ab092a9d27" && fs->hash == "32686281e07a9149")))) {
+                flower_offset = f[19] * (uw_factor() - 1.0f);
             }
         }
     }
@@ -773,6 +827,33 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                 log("nvn: UW powerup trace: frame=%llu vs=%s fs=%s count=%u sources=%s",
                     (unsigned long long)g_frame.load(), vs->hash.c_str(), fs->hash.c_str(),
                     indexed ? unsigned(c.i[0]) : unsigned(c.i[1]), shapes.c_str());
+        }
+    }
+    static const bool marker_trace = std::getenv("NX_UW_MARKER_TRACE") &&
+                                       std::string(std::getenv("NX_UW_MARKER_TRACE")) == "1";
+    if (marker_trace && g_uw_wide && !g_state.depth.depth_test && vs && fs && t.color_count && t.colors[0] &&
+        flower_offset == 0.0f && !anchor_hud_left && g_frame.load() > 1500) {
+        GpuImage* target = image_of(t.colors[0]);
+        const Range& u = g_state.uniforms[0][0];
+        const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
+        if (target && target->logical_width == 1920 && target->logical_height == 1080 && f &&
+            (std::fabs(f[19]) > 20.0f || std::fabs(f[3]) > 20.0f)) {
+            std::string src;
+            for (const ResolvedTexture& r : g_textures.resolved) {
+                GpuImage* img = r.image;
+                Texture* tex = r.object;
+                if (!img || !tex) continue;
+                char b[64];
+                std::snprintf(b, sizeof b, "%ux%u/f%x ", img->logical_width, img->logical_height, tex->format);
+                src += b;
+            }
+            const std::string sig = vs->hash + ":" + fs->hash + ":" + src;
+            static std::set<std::string> seen_marker;
+            if (seen_marker.size() < 150 && seen_marker.insert(sig).second) {
+                log("uw_marker_trace: frame=%llu vs=%s fs=%s mat=%g,%g model=%g,%g proj=%g,%g f16=%g src=%s",
+                    (unsigned long long)g_frame.load(), vs->hash.c_str(), fs->hash.c_str(), f[3], f[7],
+                    f[19], f[23], f[0], f[5], f[16], src.c_str());
+            }
         }
     }
     if (uw_trace && t.color_count && t.colors[0]) {

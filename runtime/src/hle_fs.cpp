@@ -301,7 +301,7 @@ void OpenFile(CPU& c) {  // (FileHandle* out, path, int mode: 1 read, 2 write, 4
     }
     std::error_code ec;
     if (p.empty() || !fs::is_regular_file(p, ec)) {
-        if (trace_fs()) log("fs: OpenFile(%s) not found", guest.c_str());
+        if (trace_fs() || guest.rfind("_npln:", 0) == 0) log("fs: OpenFile(%s) not found", guest.c_str());
         c.x[0] = kPathNotFound;
         return;
     }

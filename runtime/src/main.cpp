@@ -11,6 +11,7 @@
 #include <nx/runtime.h>
 
 #include "discord_rpc.h"
+#include "nextendo_client.h"
 #include "kernel.h"
 #if NX_GAME_LIBRARY
 #include "launcher/launcher.h"
@@ -147,6 +148,7 @@ void boot() {
     if (const char* t = std::getenv("NX_TRACE")) g_trace = *t == '1';
     if (plat::setting("trace") == "1") g_trace = true;
     discord::init("1573462667874537472");  // override via NX_DISCORD_APP_ID
+    nextendo::init(plat::data_root());
     memory_init();
 #if NX_GAME_LIBRARY
     // The start screen, when the game isn't set up or with --config: after the guest memory is reserved (so nothing it
@@ -154,6 +156,7 @@ void boot() {
     launcher::run();
     launcher::prepare_ultrawide_layouts();
 #endif
+    nextendo::start_session_heartbeat();
     kernel_init();
     const ModuleInfo* mods[] = {&main_module(), &sdk_module()};
     load_modules(mods, 2, plat::data_root() + "/analysis");

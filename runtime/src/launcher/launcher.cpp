@@ -114,7 +114,7 @@ Kit find_kit() {
         std::ifstream f(kit / "kit-id.txt");
         std::getline(f, k.id);
     } else {
-        // Fallback for local CMake builds (e.g. build-git-win): locate checkout tools/.
+        // Fallback for local CMake builds (e.g. build-git-win): locate checkout tools/ and portable python.
         fs::path cur = u8(program_dir());
         for (int depth = 0; depth < 4 && !cur.empty(); ++depth) {
             for (const fs::path& cand : {cur / "tools" / "setup_game.py",
@@ -124,6 +124,15 @@ Kit find_kit() {
                     break;
                 }
             }
+#if defined(_WIN32)
+            for (const fs::path& py_cand : {cur / "SuperWonders-builder-portable" / "tools" / "portable" / "python" / "python.exe",
+                                            cur / "tools" / "portable" / "python" / "python.exe"}) {
+                if (file(py_cand)) {
+                    k.python = str(py_cand);
+                    break;
+                }
+            }
+#endif
             if (!k.script.empty()) break;
             fs::path parent = cur.parent_path();
             if (parent == cur) break;

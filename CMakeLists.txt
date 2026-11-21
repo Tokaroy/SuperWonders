@@ -240,6 +240,10 @@ set(NX_RUNTIME_SOURCES
     runtime/src/svc_process.cpp
     runtime/src/hle_fs.cpp
     runtime/src/svc_account.cpp
+    runtime/src/svc_fiber.cpp
+    runtime/src/svc_friends.cpp
+    runtime/src/svc_ssl.cpp
+    runtime/src/nextendo_client.cpp
     runtime/src/user_profiles.cpp
     runtime/src/profile_image.cpp
     runtime/src/hle_ro.cpp
@@ -461,7 +465,7 @@ else()
     if(MINGW)
         # LLVM-MinGW ships the XAudio2 2.9 import library under its SDK name. Its plain "xinput" is XInput 1.3 (the
         # DirectX 2010 redistributable, missing on a clean Windows); 1.4 ships with Windows 8 and later.
-        target_link_libraries(${NX_GAME} PRIVATE ${NX_GAME_MODULES} xinput1_4 xaudio2_9 ole32 psapi shell32 uuid winhttp)
+        target_link_libraries(${NX_GAME} PRIVATE ${NX_GAME_MODULES} xinput1_4 xaudio2_9 ole32 psapi shell32 uuid winhttp ws2_32 secur32 crypt32 bcrypt)
         if(NX_GAME_LIBRARY)
             # The C++ runtime shared with the game code library (one copy: LongJmp is thrown here and caught there),
             # so libc++.dll and libunwind.dll go next to the program. The UCRT stays a system DLL.
@@ -475,7 +479,7 @@ else()
             target_link_options(${NX_GAME} PRIVATE -static)
         endif()
     else()
-        target_link_libraries(${NX_GAME} PRIVATE ${NX_GAME_MODULES} xinput xaudio2 ole32 psapi winhttp)
+        target_link_libraries(${NX_GAME} PRIVATE ${NX_GAME_MODULES} xinput xaudio2 ole32 psapi winhttp ws2_32 secur32 crypt32 bcrypt)
     endif()
     if(WIN32)
         target_link_libraries(${NX_GAME} PRIVATE SDL3::SDL3-static)

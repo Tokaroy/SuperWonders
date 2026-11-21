@@ -16,6 +16,7 @@
 #include "overlay/option_rows.h"
 #include "overlay/overlay_internal.h"
 #include "overlay/overlay_ui.h"
+#include "nextendo_client.h"
 #include "svc_am.h"
 
 namespace nx::overlay {
@@ -1079,6 +1080,33 @@ void system_tab(MenuContext& c, const Labels& l) {
     };
     if (rows::toggle("Discord Rich Presence", &s.discord_rpc, kDefaults.discord_rpc, kDiscordDesc[lang]))
         settings_changed(true);
+    {
+        const nextendo::Status nx_st = nextendo::status();
+        bool nx_on = nx_st.enabled;
+        rows::section("Nextendo Network");
+        if (rows::toggle("Nextendo Online", &nx_on, false,
+                         "Enable online multiplayer via Nextendo Network (requires sign-in and Wonder 1.2.1 NPLN patch).")) {
+            nextendo::set_enabled(nx_on);
+            ui::notify(nx_on ? "Nextendo Online enabled (restart to apply)." : "Nextendo Online disabled.");
+        }
+        std::string acc_val = nx_st.login_in_progress
+            ? "Signing in (check browser)..."
+            : (nx_st.signed_in
+                   ? (nx_st.username.empty() ? ("PID " + std::to_string(nx_st.pid))
+                                             : (nx_st.username + " (" + nx_st.friend_code + ")"))
+                   : (nx_st.last_error.empty() ? "Not signed in" : nx_st.last_error));
+        if (rows::action(nx_st.signed_in ? "Nextendo Sign Out" : "Sign in with Nextendo", acc_val.c_str(),
+                         "Authenticate your Nextendo account via OAuth 2.0 PKCE in your browser.",
+                         !nx_st.login_in_progress, nx_st.signed_in)) {
+            if (nx_st.signed_in) {
+                nextendo::sign_out();
+                ui::notify("Signed out from Nextendo.");
+            } else {
+                nextendo::begin_oauth_login();
+                ui::notify("Browser opened for Nextendo OAuth login.");
+            }
+        }
+    }
     rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
