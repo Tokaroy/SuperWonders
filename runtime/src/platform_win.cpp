@@ -355,6 +355,9 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.metric_fps = s.metric_fps, o.metric_one_percent_low = s.metric_one_percent_low;
     o.metric_game_speed = s.metric_game_speed, o.metric_frametime_graph = s.metric_frametime_graph;
     o.overlay_position = s.overlay_position, o.controller_custom_mask = s.controller_custom_mask;
+    o.speedrun_timer = s.speedrun_timer, o.speedrun_timer_mode = s.speedrun_timer_mode;
+    o.speedrun_timer_position = s.speedrun_timer_position, o.speedrun_timer_size = s.speedrun_timer_size;
+    o.speedrun_timer_color = s.speedrun_timer_color;
     o.upscaler = s.upscaler, o.fsr_sharpness = s.fsr_sharpness, o.antialiasing = s.antialiasing;
     o.anisotropy = s.anisotropy, o.rumble = s.rumble, o.vsync = s.vsync, o.frame_cap = s.frame_cap;
     for (size_t i = 0; i < kPcControlCount; ++i)
@@ -374,6 +377,9 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.metric_fps = o.metric_fps, s.metric_one_percent_low = o.metric_one_percent_low;
     s.metric_game_speed = o.metric_game_speed, s.metric_frametime_graph = o.metric_frametime_graph;
     s.overlay_position = o.overlay_position, s.controller_custom_mask = o.controller_custom_mask;
+    s.speedrun_timer = o.speedrun_timer, s.speedrun_timer_mode = o.speedrun_timer_mode;
+    s.speedrun_timer_position = o.speedrun_timer_position, s.speedrun_timer_size = o.speedrun_timer_size;
+    s.speedrun_timer_color = o.speedrun_timer_color;
     s.upscaler = o.upscaler, s.fsr_sharpness = o.fsr_sharpness, s.antialiasing = o.antialiasing;
     s.anisotropy = o.anisotropy, s.rumble = o.rumble, s.vsync = o.vsync, s.frame_cap = o.frame_cap;
     for (size_t i = 0; i < kPcControlCount; ++i)
@@ -485,6 +491,11 @@ static void save_pc_settings() {
          << "\nmetric_game_speed=" << g_pc_settings.metric_game_speed
          << "\nmetric_frametime_graph=" << g_pc_settings.metric_frametime_graph
          << "\noverlay_position=" << g_pc_settings.overlay_position
+         << "\nspeedrun_timer=" << g_pc_settings.speedrun_timer
+         << "\nspeedrun_timer_mode=" << g_pc_settings.speedrun_timer_mode
+         << "\nspeedrun_timer_position=" << g_pc_settings.speedrun_timer_position
+         << "\nspeedrun_timer_size=" << g_pc_settings.speedrun_timer_size
+         << "\nspeedrun_timer_color=" << g_pc_settings.speedrun_timer_color
          << "\ncontroller_custom_mask=" << g_pc_settings.controller_custom_mask
          << "\nupscaler=" << g_pc_settings.upscaler << "\nfsr_sharpness=" << g_pc_settings.fsr_sharpness
          << "\nantialiasing=" << g_pc_settings.antialiasing << "\nanisotropy=" << g_pc_settings.anisotropy
@@ -549,6 +560,16 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
             state.metric_frametime_graph = value != 0;
         else if (std::sscanf(line.c_str(), "overlay_position=%d", &value) == 1)
             state.overlay_position = std::clamp(value, 0, 3);
+        else if (std::sscanf(line.c_str(), "speedrun_timer=%d", &value) == 1)
+            state.speedrun_timer = value != 0;
+        else if (std::sscanf(line.c_str(), "speedrun_timer_mode=%d", &value) == 1)
+            state.speedrun_timer_mode = std::clamp(value, 0, 2);
+        else if (std::sscanf(line.c_str(), "speedrun_timer_position=%d", &value) == 1)
+            state.speedrun_timer_position = std::clamp(value, 0, 5);
+        else if (std::sscanf(line.c_str(), "speedrun_timer_size=%d", &value) == 1)
+            state.speedrun_timer_size = std::clamp(value, 0, 3);
+        else if (std::sscanf(line.c_str(), "speedrun_timer_color=%d", &value) == 1)
+            state.speedrun_timer_color = std::clamp(value, 0, 5);
         else if (std::sscanf(line.c_str(), "controller_custom_mask=%u", &state.controller_custom_mask) == 1) {}
         else if (std::sscanf(line.c_str(), "upscaler=%d", &value) == 1) state.upscaler = std::clamp(value, 0, 1);
         else if (std::sscanf(line.c_str(), "fsr_sharpness=%d", &value) == 1)

@@ -179,7 +179,7 @@ constexpr const char* kPhysical[kControlCount] = {
     "A / Cross", "B / Circle", "X / Square", "Y / Triangle", "LB / L1", "RB / R1", "LT / L2", "RT / R2",
     "Start / +", "Back / -", "L3 / LS", "R3 / RS", "D-pad Left", "D-pad Up", "D-pad Right", "D-pad Down",
 };
-constexpr int kTabs = 6;
+constexpr int kTabs = 7;
 
 namespace desc {
 constexpr const char* language = "Language of this menu.";
@@ -1133,7 +1133,13 @@ void network_tab(MenuContext& c) {
     if (rows::toggle("Nextendo Online", &nx_on, false,
                      "Enable online multiplayer via Nextendo Network (requires sign-in and Wonder 1.2.1 NPLN patch).")) {
         nextendo::set_enabled(nx_on);
-        ui::notify(nx_on ? "Nextendo Online enabled (restart to apply)." : "Nextendo Online disabled.");
+        if (nx_on && c.settings.speedrun_timer) {
+            c.settings.speedrun_timer = false;
+            settings_changed(true);
+            ui::notify("Nextendo Online enabled (Speedrun options disabled).");
+        } else {
+            ui::notify(nx_on ? "Nextendo Online enabled (restart to apply)." : "Nextendo Online disabled.");
+        }
     }
     std::string acc_val = nx_st.login_in_progress
         ? "Signing in (check browser)..."
@@ -1152,6 +1158,206 @@ void network_tab(MenuContext& c) {
             ui::notify("Browser opened for Nextendo OAuth login.");
         }
     }
+    rows::end();
+}
+
+struct SpeedrunLabels {
+    const char *section, *timer_toggle, *timer_desc, *mode_label, *mode_desc, *pos_label, *pos_desc, *size_label,
+        *size_desc, *color_label, *color_desc, *online_warning;
+};
+
+constexpr SpeedrunLabels kSpeedrunLabels[13] = {
+    {"Course Timer", "Course timer",
+     "Automatically starts a Wonder-styled timer when you enter a course and resets it on exit or restart.",
+     "Timer mode", "Choose In-Game Time (IGT, pauses in menu), Real Time (RTA), or both.",
+     "Timer position", "Where on the screen the course timer is shown.",
+     "Timer size", "Adjust the scale of the on-screen course timer.",
+     "Timer color", "Choose the color of the timer numerals.",
+     "Nextendo Online is active. Disable Nextendo Online in the Network tab to enable Speedrun options."},
+    {"Timer Livello", "Timer livello",
+     "Avvia automaticamente un timer in stile Wonder quando entri in un livello e lo azzera all'uscita.",
+     "Modalità timer", "Scegli tra Tempo di gioco (IGT, si ferma nel menu), Tempo reale (RTA) o entrambi.",
+     "Posizione timer", "Posizione sullo schermo in cui mostrare il timer del livello.",
+     "Grandezza timer", "Regola la dimensione del timer su schermo.",
+     "Colore timer", "Scegli il colore delle cifre del timer.",
+     "Nextendo Online è attivo. Disattiva Nextendo Online nella scheda Network per attivare le opzioni Speedrun."},
+    {"Level-Timer", "Level-Timer",
+     "Startet beim Betreten eines Levels automatisch einen Timer im Wonder-Stil und setzt ihn beim Verlassen zurück.",
+     "Timer-Modus", "Wähle Spielzeit (IGT, pausiert im Menü), Echtzeit (RTA) oder beides.",
+     "Timer-Position", "Position auf dem Bildschirm, an der der Level-Timer angezeigt wird.",
+     "Timer-Größe", "Skalierung des Level-Timers anpassen.",
+     "Timer-Farbe", "Farbe der Timer-Ziffern auswählen.",
+     "Nextendo Online ist aktiv. Deaktiviere Nextendo Online im Tab Network, um Speedrun-Optionen zu aktivieren."},
+    {"Chronomètre de niveau", "Chronomètre de niveau",
+     "Démarre automatiquement un chronomètre style Wonder à l'entrée d'un niveau et le réinitialise à la sortie.",
+     "Mode du chronomètre", "Choisissez Temps en jeu (IGT, en pause dans le menu), Temps réel (RTA) ou les deux.",
+     "Position du chronomètre", "Emplacement à l'écran où le chronomètre est affiché.",
+     "Taille du chronomètre", "Ajuster la taille du chronomètre à l'écran.",
+     "Couleur du chronomètre", "Choisir la couleur des chiffres du chronomètre.",
+     "Nextendo Online est actif. Désactivez Nextendo Online dans l'onglet Network pour activer les options Speedrun."},
+    {"Cronómetro de nivel", "Cronómetro de nivel",
+     "Inicia automáticamente un cronómetro estilo Wonder al entrar en un nivel y lo reinicia al salir.",
+     "Modo del cronómetro", "Elige Tiempo de juego (IGT, se pausa en el menú), Tiempo real (RTA) o ambos.",
+     "Posición del cronómetro", "Ubicación en pantalla donde se muestra el cronómetro.",
+     "Tamaño del cronómetro", "Ajusta el tamaño del cronómetro en pantalla.",
+     "Color del cronómetro", "Elige el color de los números del cronómetro.",
+     "Nextendo Online está activo. Desactiva Nextendo Online en la pestaña Network para activar las opciones Speedrun."},
+    {"코스 타이머", "코스 타이머",
+     "코스에 입장하면 Wonder 스타일 타이머가 자동으로 시작되고 퇴장 시 초기화됩니다.",
+     "타이머 모드", "게임 내 시간(IGT, 메뉴에서 일시정지), 실제 시간(RTA) 또는 둘 다 선택합니다.",
+     "타이머 위치", "코스 타이머를 표시할 화면 위치입니다.",
+     "타이머 크기", "화면에 표시되는 코스 타이머의 크기를 조절합니다.",
+     "타이머 색상", "타이머 숫자의 색상을 선택합니다.",
+     "Nextendo Online이 활성화되어 있습니다. Speedrun 옵션을 켜려면 Network 탭에서 Nextendo Online을 비활성화하세요."},
+    {"コースタイマー", "コースタイマー",
+     "コースに入るとWonder風タイマーが自動で開始し、退出時にリセットされます。",
+     "タイマーモード", "ゲーム内時間(IGT・メニューで停止)、実時間(RTA)、または両方を選択します。",
+     "タイマー位置", "コースタイマーを表示する画面上の位置を選択します。",
+     "タイマーサイズ", "画面上のコースタイマーの大きさを調整します。",
+     "タイマーの色", "タイマーの数字の色を選択します。",
+     "Nextendo Onlineが有効です。Speedrunオプションを有効にするにはNetworkタブでNextendo Onlineを無効にしてください。"},
+    {"مؤقت المرحلة", "مؤقت المرحلة",
+     "يبدأ مؤقت بنمط Wonder تلقائيا عند دخول المرحلة ويعاد ضبطه عند الخروج.",
+     "وضع المؤقت", "اختر وقت اللعب (IGT يتوقف في القائمة) أو الوقت الحقيقي (RTA) أو كليهما.",
+     "موضع المؤقت", "موضع ظهور مؤقت المرحلة على الشاشة.",
+     "حجم المؤقت", "اضبط حجم مؤقت المرحلة على الشاشة.",
+     "لون المؤقت", "اختر لون أرقام المؤقت.",
+     "Nextendo Online نشط. عطل Nextendo Online من تبويب Network لتفعيل خيارات Speedrun."},
+    {"Таймер уровня", "Таймер уровня",
+     "Автоматически запускает таймер в стиле Wonder при входе на уровень и сбрасывает его при выходе.",
+     "Режим таймера", "Выберите игровое время (IGT, пауза в меню), реальное время (RTA) или оба варианта.",
+     "Положение таймера", "Место на экране, где отображается таймер уровня.",
+     "Размер таймера", "Настройка масштаба таймера на экране.",
+     "Цвет таймера", "Выберите цвет цифр таймера.",
+     "Nextendo Online активен. Отключите Nextendo Online на вкладке Network, чтобы включить параметры Speedrun."},
+    {"Bölüm Zamanlayıcı", "Bölüm zamanlayıcı",
+     "Bir bölüme girdiğinizde Wonder tarzı zamanlayıcıyı otomatik başlatır ve çıkışta sıfırlar.",
+     "Zamanlayıcı modu", "Oyun İçi Süre (IGT, menüde durur), Gerçek Süre (RTA) veya ikisini birden seçin.",
+     "Zamanlayıcı konumu", "Bölüm zamanlayıcısının ekranda gösterileceği konum.",
+     "Zamanlayıcı boyutu", "Ekrandaki bölüm zamanlayıcısının boyutunu ayarlayın.",
+     "Zamanlayıcı rengi", "Zamanlayıcı rakamlarının rengini seçin.",
+     "Nextendo Online etkin. Speedrun seçeneklerini açmak için Network sekmesinden Nextendo Online'ı devre dışı bırakın."},
+    {"Leveltimer", "Leveltimer",
+     "Start automatisch een timer in Wonder-stijl bij het betreden van een level en reset bij verlaten.",
+     "Timermodus", "Kies speeltijd (IGT, pauzeert in menu), echte tijd (RTA) of beide.",
+     "Timerpositie", "Plaats op het scherm waar de leveltimer wordt getoond.",
+     "Timergrootte", "Pas de grootte van de leveltimer op het scherm aan.",
+     "Timerkleur", "Kies de kleur van de timercijfers.",
+     "Nextendo Online is actief. Schakel Nextendo Online uit op het tabblad Network om Speedrun-opties in te schakelen."},
+    {"关卡计时器", "关卡计时器",
+     "进入关卡时自动启动 Wonder 风格计时器，退出关卡时重置。",
+     "计时器模式", "选择游戏内时间 (IGT，菜单中暂停)、真实时间 (RTA) 或同时显示。",
+     "计时器位置", "在屏幕上显示关卡计时器的位置。",
+     "计时器大小", "调整屏幕上关卡计时器的显示大小。",
+     "计时器颜色", "选择计时器数字的颜色。",
+     "Nextendo Online 已启用。请在 Network 选项卡中禁用 Nextendo Online 以启用 Speedrun 选项。"},
+    {"關卡計時器", "關卡計時器",
+     "進入關卡時自動啟動 Wonder 風格計時器，離開關卡時重設。",
+     "計時器模式", "選擇遊戲內時間 (IGT，選單中暫停)、真實時間 (RTA) 或同時顯示。",
+     "計時器位置", "在螢幕上顯示關卡計時器的位置。",
+     "計時器大小", "調整螢幕上關卡計時器的顯示大小。",
+     "計時器顏色", "選擇計時器數字的顏色。",
+     "Nextendo Online 已啟用。請在 Network 分頁中停用 Nextendo Online 以啟用 Speedrun 選項。"},
+};
+
+constexpr const char* kSpeedrunPositions[13][6] = {
+    {"Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right"},
+    {"In alto a sinistra", "In alto al centro", "In alto a destra", "In basso a sinistra", "In basso al centro", "In basso a destra"},
+    {"Oben links", "Oben Mitte", "Oben rechts", "Unten links", "Unten Mitte", "Unten rechts"},
+    {"En haut à gauche", "En haut au centre", "En haut à droite", "En bas à gauche", "En bas au centre", "En bas à droite"},
+    {"Arriba izquierda", "Arriba centro", "Arriba derecha", "Abajo izquierda", "Abajo centro", "Abajo derecha"},
+    {"좌측 상단", "중앙 상단", "우측 상단", "좌측 하단", "중앙 하단", "우측 하단"},
+    {"左上", "中央上", "右上", "左下", "中央下", "右下"},
+    {"أعلى اليسار", "أعلى الوسط", "أعلى اليمين", "أسفل اليسار", "أسفل الوسط", "أسفل اليمين"},
+    {"Сверху слева", "Сверху по центру", "Сверху справа", "Снизу слева", "Снизу по центру", "Снизу справа"},
+    {"Sol üst", "Orta üst", "Sağ üst", "Sol alt", "Orta alt", "Sağ alt"},
+    {"Linksboven", "Middenboven", "Rechtsboven", "Linksonder", "Middenonder", "Rechtsonder"},
+    {"左上", "中上", "右上", "左下", "中下", "右下"},
+    {"左上", "中上", "右上", "左下", "中下", "右下"},
+};
+
+constexpr const char* kSpeedrunSizes[13][4] = {
+    {"Small", "Normal", "Large", "Extra large"},
+    {"Piccolo", "Normale", "Grande", "Molto grande"},
+    {"Klein", "Normal", "Groß", "Sehr groß"},
+    {"Petit", "Normal", "Grand", "Très grand"},
+    {"Pequeño", "Normal", "Grande", "Muy grande"},
+    {"작게", "보통", "크게", "매우 크게"},
+    {"小", "標準", "大", "特大"},
+    {"صغير", "عادي", "كبير", "كبير جدا"},
+    {"Маленький", "Обычный", "Большой", "Очень большой"},
+    {"Küçük", "Normal", "Büyük", "Çok büyük"},
+    {"Klein", "Normaal", "Groot", "Extra groot"},
+    {"小", "标准", "大", "超大"},
+    {"小", "標準", "大", "特大"},
+};
+
+constexpr const char* kSpeedrunColors[13][6] = {
+    {"White", "Gold", "Cyan", "Green", "Red", "Pink"},
+    {"Bianco", "Oro", "Ciano", "Verde", "Rosso", "Rosa"},
+    {"Weiß", "Gold", "Cyan", "Grün", "Rot", "Rosa"},
+    {"Blanc", "Or", "Cyan", "Vert", "Rouge", "Rose"},
+    {"Blanco", "Oro", "Cian", "Verde", "Rojo", "Rosa"},
+    {"흰색", "금색", "청록", "초록", "빨강", "분홍"},
+    {"白", "ゴールド", "シアン", "緑", "赤", "ピンク"},
+    {"أبيض", "ذهبي", "سماوي", "أخضر", "أحمر", "وردي"},
+    {"Белый", "Золотой", "Голубой", "Зелёный", "Красный", "Розовый"},
+    {"Beyaz", "Altın", "Camgöbeği", "Yeşil", "Kırmızı", "Pembe"},
+    {"Wit", "Goud", "Cyaan", "Groen", "Rood", "Roze"},
+    {"白色", "金色", "青色", "绿色", "红色", "粉色"},
+    {"白色", "金色", "青色", "綠色", "紅色", "粉色"},
+};
+
+constexpr const char* kSpeedrunModes[13][3] = {
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+    {"IGT", "RTA", "IGT + RTA"},
+};
+
+void speedrun_tab(MenuContext& c) {
+    Settings& s = c.settings;
+    const int lang = std::clamp(s.language, 0, 12);
+    const SpeedrunLabels& sl = kSpeedrunLabels[lang];
+    const bool online_on = nextendo::status().enabled;
+    rows::begin("##speedrun", c.height);
+    if (online_on) rows::page_note(sl.online_warning);
+    rows::section(sl.section);
+    bool timer_val = online_on ? false : s.speedrun_timer;
+    if (online_on) rows::disable_next();
+    if (rows::toggle(sl.timer_toggle, &timer_val, false, online_on ? sl.online_warning : sl.timer_desc) && !online_on) {
+        s.speedrun_timer = timer_val;
+        settings_changed(true);
+    }
+    if (online_on || !s.speedrun_timer) rows::disable_next();
+    if (rows::choice(sl.mode_label, &s.speedrun_timer_mode, kSpeedrunModes[lang], 3, 0,
+                     online_on ? sl.online_warning : sl.mode_desc) &&
+        !online_on)
+        settings_changed(true);
+    if (online_on || !s.speedrun_timer) rows::disable_next();
+    if (rows::choice(sl.pos_label, &s.speedrun_timer_position, kSpeedrunPositions[lang], 6, 2,
+                     online_on ? sl.online_warning : sl.pos_desc) &&
+        !online_on)
+        settings_changed(true);
+    if (online_on || !s.speedrun_timer) rows::disable_next();
+    if (rows::choice(sl.size_label, &s.speedrun_timer_size, kSpeedrunSizes[lang], 4, 1,
+                     online_on ? sl.online_warning : sl.size_desc) &&
+        !online_on)
+        settings_changed(true);
+    if (online_on || !s.speedrun_timer) rows::disable_next();
+    if (rows::choice(sl.color_label, &s.speedrun_timer_color, kSpeedrunColors[lang], 6, 0,
+                     online_on ? sl.online_warning : sl.color_desc) &&
+        !online_on)
+        settings_changed(true);
     rows::end();
 }
 
@@ -1220,7 +1426,7 @@ void draw_menu(MenuContext& c) {
     if (close_button(k)) c.open = false;
     ImGui::Dummy(ImVec2(0, 4 * k));
 
-    const char* names[kTabs] = {l.video, l.audio, l.controls, l.overlay, l.system, "Network"};
+    const char* names[kTabs] = {l.video, l.audio, l.controls, l.overlay, l.system, "Network", "Speedrun"};
     int current = -1;
     // Tabs follow the keyboard / controller focus: moving onto a tab with the arrows or the D-pad shows it (next
     // frame), with no Enter or A needed. The mouse still selects by clicking. Only a change of focus moves the tab: L / R
@@ -1271,7 +1477,8 @@ void draw_menu(MenuContext& c) {
                 case 2: controls(c, l); break;
                 case 3: overlay_tab(c); break;
                 case 4: system_tab(c, l); break;
-                default: network_tab(c); break;
+                case 5: network_tab(c); break;
+                default: speedrun_tab(c); break;
             }
             ImGui::EndChild();
             ImGui::PopStyleVar();

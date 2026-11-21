@@ -47,6 +47,11 @@ struct Settings {
     bool discord_rpc = true;
     bool metric_fps = true, metric_one_percent_low = true, metric_game_speed = true, metric_frametime_graph = true;
     int overlay_position = 0;  // top left, top right, bottom left, bottom right
+    bool speedrun_timer = false;
+    int speedrun_timer_mode = 0;      // 0: IGT, 1: RTA, 2: Both (IGT + RTA)
+    int speedrun_timer_position = 2;  // 0: top left, 1: top center, 2: top right, 3: bottom left, 4: bottom center, 5: bottom right
+    int speedrun_timer_size = 1;      // 0: small, 1: normal, 2: large, 3: extra large
+    int speedrun_timer_color = 0;     // 0: white, 1: gold, 2: cyan, 3: green, 4: red, 5: pink
     int upscaler = 1;          // 0 bilinear, 1 FSR 1 (when the game's image is smaller than the window)
     int fsr_sharpness = 25;    // RCAS sharpness in hundredths of a stop: 0 the sharpest, 200 the softest
     int antialiasing = 0;      // 0 off, 1 FXAA (on the presented image)

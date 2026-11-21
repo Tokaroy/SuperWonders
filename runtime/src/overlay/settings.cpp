@@ -73,6 +73,11 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "metric_game_speed=%d", &v) == 1) s.metric_game_speed = v != 0;
         else if (std::sscanf(l, "metric_frametime_graph=%d", &v) == 1) s.metric_frametime_graph = v != 0;
         else if (std::sscanf(l, "overlay_position=%d", &v) == 1) s.overlay_position = std::clamp(v, 0, 3);
+        else if (std::sscanf(l, "speedrun_timer=%d", &v) == 1) s.speedrun_timer = v != 0;
+        else if (std::sscanf(l, "speedrun_timer_mode=%d", &v) == 1) s.speedrun_timer_mode = std::clamp(v, 0, 2);
+        else if (std::sscanf(l, "speedrun_timer_position=%d", &v) == 1) s.speedrun_timer_position = std::clamp(v, 0, 5);
+        else if (std::sscanf(l, "speedrun_timer_size=%d", &v) == 1) s.speedrun_timer_size = std::clamp(v, 0, 3);
+        else if (std::sscanf(l, "speedrun_timer_color=%d", &v) == 1) s.speedrun_timer_color = std::clamp(v, 0, 5);
         else if (std::sscanf(l, "upscaler=%d", &v) == 1) s.upscaler = std::clamp(v, 0, 1);
         else if (std::sscanf(l, "fsr_sharpness=%d", &v) == 1) s.fsr_sharpness = std::clamp(v, 0, 200);
         else if (std::sscanf(l, "antialiasing=%d", &v) == 1) s.antialiasing = std::clamp(v, 0, 1);
@@ -123,7 +128,12 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\nmetrics_enabled=" << s.metrics_enabled
       << "\nmetric_fps=" << s.metric_fps << "\nmetric_one_percent_low=" << s.metric_one_percent_low
       << "\nmetric_game_speed=" << s.metric_game_speed << "\nmetric_frametime_graph=" << s.metric_frametime_graph
-      << "\noverlay_position=" << s.overlay_position << "\ncontroller_custom_mask=" << s.controller_custom_mask
+      << "\noverlay_position=" << s.overlay_position
+      << "\nspeedrun_timer=" << s.speedrun_timer << "\nspeedrun_timer_mode=" << s.speedrun_timer_mode
+      << "\nspeedrun_timer_position=" << s.speedrun_timer_position
+      << "\nspeedrun_timer_size=" << s.speedrun_timer_size
+      << "\nspeedrun_timer_color=" << s.speedrun_timer_color
+      << "\ncontroller_custom_mask=" << s.controller_custom_mask
       << "\nupscaler=" << s.upscaler << "\nfsr_sharpness=" << s.fsr_sharpness << "\nantialiasing=" << s.antialiasing
       << "\nanisotropy=" << s.anisotropy << "\nrumble=" << s.rumble << "\nvsync=" << s.vsync
       << "\nframe_cap=" << s.frame_cap << '\n';

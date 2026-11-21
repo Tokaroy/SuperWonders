@@ -10,8 +10,11 @@
 #include <atomic>
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+#include <string>
 
 #include "discord_rpc.h"
+#include "overlay/overlay.h"
 #include "platform.h"
 #include "nvn/nvn_ultrawide.h"
 
@@ -19,8 +22,14 @@ namespace nx {
 
 namespace nvn { void hold_scene_frame_cap(int fps); }
 
+static std::atomic<bool> g_stage_load_ended{false};
+static std::atomic<bool> g_course_demo_active{false};
+static std::atomic<uint64_t> g_stage_ready_ns{0};
+
 void game::file_opened(const char* path) {
     static std::atomic<bool> held{false};
+    static std::mutex world_mu;
+    static std::string current_world = "World";
     // Update Discord Rich Presence when entering a world map or course.
     if (const char* bgm = std::strstr(path, "/Sound/Resource/Stream/BGM_World_")) {
         const char* wname = "Exploring the World Map";
@@ -32,7 +41,12 @@ void game::file_opened(const char* path) {
         else if (std::strstr(bgm, "World_06") || std::strstr(bgm, "World06")) wname = "World 6: Deep Magma Bog";
         else if (std::strstr(bgm, "Special")) wname = "Special World";
         else if (std::strstr(bgm, "Main") || std::strstr(bgm, "Petal")) wname = "Petal Isles";
+        {
+            std::lock_guard<std::mutex> lk(world_mu);
+            current_world = wname;
+        }
         discord::set_activity("On the World Map", wname);
+        overlay::speedrun_set_course(false);
     }
     // The map can remain resident while entering a course, so returning to it does not necessarily reopen its
     // StageLoadInfo. Its world music does reopen when the player returns from this house.
@@ -49,6 +63,22 @@ void game::file_opened(const char* path) {
     else if (std::strncmp(scene, "Course", 6) == 0) discord::set_activity("Playing a Course", "Flower Kingdom");
     constexpr const char* house = "Course500_Course.game__stage__StageLoadInfo.bgyml";
     const bool in_house = std::strcmp(scene, house) == 0;
+    if (std::strncmp(scene, "World", 5) == 0) overlay::speedrun_set_course(false);
+    else if (std::strncmp(scene, "Course", 6) == 0) {
+        std::string wname;
+        {
+            std::lock_guard<std::mutex> lk(world_mu);
+            wname = current_world;
+        }
+        char cname[64]{};
+        const char* end = std::strstr(scene, "_Course.");
+        const size_t len = end ? size_t(end - scene) : std::strlen(scene);
+        std::snprintf(cname, sizeof cname, "%.*s", int(std::min(len, sizeof cname - 1)), scene);
+        g_stage_load_ended.store(false, std::memory_order_relaxed);
+        g_course_demo_active.store(false, std::memory_order_relaxed);
+        g_stage_ready_ns.store(0, std::memory_order_relaxed);
+        overlay::speedrun_set_course(!in_house, wname.c_str(), cname);
+    }
     if (held.exchange(in_house) != in_house) {
         nvn::hold_scene_frame_cap(in_house ? 60 : 0);
         log("wonder: first house scene %s: %s", in_house ? "loading" : "left",
@@ -61,6 +91,50 @@ const game::Info game::kInfo = {"wonder", "Super Mario Bros. Wonder", 0x01001510
                                 0x1000000 /* main.npdm: 16 MiB system resource */};
 
 namespace {
+
+std::atomic<uint64_t> g_fade_mgr_off{0};
+std::atomic<uint64_t> g_gamedata_mgr_off{0};
+
+bool is_faded_in() {
+    const uint64_t off = g_fade_mgr_off.load(std::memory_order_relaxed);
+    const ModuleInfo* main = game_lib().main;
+    if (!off || !main) return true;
+    const uint64_t mgr = ld<uint64_t>(main->base + off);
+    if (!mgr) return false;
+    const uint64_t f = ld<uint64_t>(mgr + 0x20);
+    if (!f) return false;
+    return (ld<uint32_t>(f + 0x8) | ld<uint32_t>(f + 0x48)) == 0 && ld<uint32_t>(f + 0x10) == 2;
+}
+
+bool is_game_paused() {
+    const uint64_t off = g_gamedata_mgr_off.load(std::memory_order_relaxed);
+    const ModuleInfo* main = game_lib().main;
+    if (!off || !main) return false;
+    const uint64_t mgr = ld<uint64_t>(main->base + off);
+    if (!mgr) return false;
+    const uint64_t bitset = mgr + 0x30;
+    const uint64_t tbl = ld<uint64_t>(bitset + 0x8);
+    if (!tbl) return false;
+    const uint32_t cap = ld<uint32_t>(tbl + 0x14);
+    if (!cap) return false;
+    const uint64_t hashes = ld<uint64_t>(tbl);
+    const uint64_t indices = ld<uint64_t>(tbl + 0x8);
+    if (!hashes || !indices) return false;
+    constexpr uint32_t kHash = 0x35db180eu;  // "IsGamePause"
+    const uint32_t start = kHash % cap;
+    uint32_t idx = start;
+    for (uint32_t step = 0; step < cap; ++step) {
+        const uint32_t h = ld<uint32_t>(hashes + uint64_t(idx) * 4);
+        if (h == kHash) {
+            const uint8_t bit = ld<uint8_t>(indices + idx);
+            return ((ld<uint64_t>(bitset) >> (bit & 63u)) & 1ull) != 0;
+        }
+        if (h == 0) return false;
+        idx = (idx + 1 < cap) ? (idx + 1) : 0;
+        if (idx == start) return false;
+    }
+    return false;
+}
 
 std::atomic<uint64_t> g_wide_calls{0};
 Fn g_wide_original = nullptr;
@@ -376,6 +450,148 @@ void game::after_init() {
     install_wide_probe();
     wonder::menu_init();
     wonder::seed_guard_init();
+
+    // Hook Goal Pole slide-down & Course Clear AINB nodes via getNodeName() + adjacent enter(), and
+    // resolve IsEndFadeIn / IsGamePause singletons for accurate course start & pause detection on 1.0.0 and 1.2.1.
+    static Fn goal_pole_orig = nullptr;
+    static Fn course_clear_orig = nullptr;
+    static Fn end_load_orig = nullptr;
+    static Fn demo_enter_orig = nullptr;
+    static Fn demo_update_orig = nullptr;
+    const auto find_ro_string = [](const ModuleInfo* main, const char* needle) -> uint64_t {
+        const size_t nlen = std::strlen(needle);
+        if (!main || main->ro_size < nlen + 2) return UINT64_MAX;
+        const char* base = reinterpret_cast<const char*>(main->base + main->ro);
+        for (size_t i = 1; i + nlen < main->ro_size; ++i) {
+            if (base[i - 1] == '\0' && base[i] == needle[0] && std::memcmp(base + i, needle, nlen + 1) == 0)
+                return main->ro + i;
+        }
+        return UINT64_MAX;
+    };
+    const auto find_ainb_node_fn = [&](const char* node_name) -> uint64_t {
+        const ModuleInfo* main = game_lib().main;
+        if (!main || main->text_size < 0x20) return UINT64_MAX;
+        const uint64_t str_off = find_ro_string(main, node_name);
+        if (str_off == UINT64_MAX) return UINT64_MAX;
+        const uint64_t str_page = str_off & ~0xfffull;
+        const uint32_t add_x0 = 0x91000000u | uint32_t((str_off & 0xfffu) << 10);
+        for (uint64_t off = main->text; off + 12 <= main->text + main->text_size; off += 4) {
+            if (ld<uint32_t>(main->base + off + 4) != add_x0) continue;
+            if (ld<uint32_t>(main->base + off + 8) != 0xd65f03c0u) continue;
+            const uint32_t i0 = ld<uint32_t>(main->base + off);
+            if ((i0 & 0x9f00001fu) != 0x90000000u) continue;
+            const int32_t immlo = int32_t((i0 >> 29) & 3u);
+            const int32_t immhi = int32_t((i0 >> 5) & 0x7ffffu);
+            int64_t imm = (int64_t(immhi) << 2) | immlo;
+            if (imm & (1ll << 20)) imm -= (1ll << 21);
+            if (((off & ~0xfffull) + uint64_t(imm << 12)) == str_page) return off;
+        }
+        return UINT64_MAX;
+    };
+    const auto install_ainb_enter = [&](const char* node_name, const uint32_t (&sig)[3], Fn repl, Fn& orig) {
+        const ModuleInfo* main = game_lib().main;
+        const LoadedModule* m = main ? module_at(main->base) : nullptr;
+        const uint64_t node_fn = find_ainb_node_fn(node_name);
+        if (!main || !m || node_fn == UINT64_MAX) {
+            log("speedrun: getNodeName for %s not found", node_name);
+            return;
+        }
+        uint64_t target = UINT64_MAX;
+        for (uint64_t off = node_fn + 0x18; off + 12 <= std::min(node_fn + 0x80, main->text + main->text_size); off += 4) {
+            if (ld<uint32_t>(main->base + off) == sig[0] && ld<uint32_t>(main->base + off + 4) == sig[1] &&
+                ld<uint32_t>(main->base + off + 8) == sig[2] && m->table[off / 4]) {
+                target = off;
+                break;
+            }
+        }
+        if (target == UINT64_MAX) {
+            log("speedrun: enter() for %s not found near main+%llx", node_name, (unsigned long long)node_fn);
+            return;
+        }
+        orig = m->table[target / 4];
+        m->table[target / 4] = repl;
+        log("speedrun: hooked %s at main+%llx", node_name, (unsigned long long)target);
+    };
+    const auto extract_adrp_ldr_x8 = [&](const char* node_name) -> uint64_t {
+        const ModuleInfo* main = game_lib().main;
+        const uint64_t node_fn = find_ainb_node_fn(node_name);
+        if (!main || node_fn == UINT64_MAX) return 0;
+        const uint64_t end = std::min(node_fn + 0x60, main->text + main->text_size);
+        for (uint64_t off = node_fn + 0x18; off + 16 <= end; off += 4) {
+            const uint32_t i0 = ld<uint32_t>(main->base + off);
+            if ((i0 & 0x9f00001fu) != 0x90000008u) continue;  // adrp x8, ...
+            const int32_t immlo = int32_t((i0 >> 29) & 3u);
+            const int32_t immhi = int32_t((i0 >> 5) & 0x7ffffu);
+            int64_t imm = (int64_t(immhi) << 2) | immlo;
+            if (imm & (1ll << 20)) imm -= (1ll << 21);
+            const uint64_t page = (off & ~0xfffull) + uint64_t(imm << 12);
+            for (uint64_t k = off + 4; k <= std::min(off + 16, end - 4); k += 4) {
+                const uint32_t i1 = ld<uint32_t>(main->base + k);
+                if ((i1 & 0xffc003ffu) == 0xf9400108u) {  // ldr x8, [x8, #imm12*8]
+                    const uint64_t imm12 = uint64_t((i1 >> 10) & 0xfffu) << 3;
+                    return page + imm12;
+                }
+            }
+        }
+        return 0;
+    };
+    static constexpr uint32_t kSlidePoleSig[3] = {0xb9401808, 0x52b00009, 0x33007509};
+    static constexpr uint32_t kCourseClearSig[3] = {0xd10243ff, 0xa9037bfd, 0xa9046ffc};
+    install_ainb_enter("NotifyStartSlideDownGoalPoleToCourseMgr", kSlidePoleSig,
+                       [](CPU& c) {
+                           overlay::speedrun_finish_course();
+                           goal_pole_orig(c);
+                       },
+                       goal_pole_orig);
+    install_ainb_enter("SetCourseClearFlagToGameData", kCourseClearSig,
+                       [](CPU& c) {
+                           overlay::speedrun_finish_course();
+                           course_clear_orig(c);
+                       },
+                       course_clear_orig);
+    static constexpr uint32_t kEndLoadSig[3] = {0xd100c3ff, 0xa9017bfd, 0xf90013f3};
+    install_ainb_enter("EndLoadStage", kEndLoadSig,
+                       [](CPU& c) {
+                           g_stage_load_ended.store(true, std::memory_order_relaxed);
+                           end_load_orig(c);
+                       },
+                       end_load_orig);
+    install_ainb_enter("PlayerCourseInDemo", kEndLoadSig,
+                       [](CPU& c) {
+                           g_course_demo_active.store(true, std::memory_order_relaxed);
+                           demo_enter_orig(c);
+                       },
+                       demo_enter_orig);
+    if (const uint64_t demo_node = find_ainb_node_fn("PlayerCourseInDemo"); demo_node != UINT64_MAX) {
+        const ModuleInfo* main = game_lib().main;
+        const LoadedModule* m = main ? module_at(main->base) : nullptr;
+        if (main && m) {
+            const uint64_t limit = std::min(demo_node + 0x600, main->text + main->text_size);
+            for (uint64_t off = demo_node + 0x100; off + 20 <= limit; off += 4) {
+                if (ld<uint32_t>(main->base + off) == 0xd100c3ffu &&
+                    ld<uint32_t>(main->base + off + 4) == 0xa9017bfdu &&
+                    ld<uint32_t>(main->base + off + 8) == 0xf90013f3u &&
+                    ld<uint32_t>(main->base + off + 16) == 0xf9403008u && m->table[off / 4]) {
+                    demo_update_orig = m->table[off / 4];
+                    m->table[off / 4] = [](CPU& c) {
+                        const uint64_t node = c.x[0];
+                        demo_update_orig(c);
+                        if (node && ((ld<uint32_t>(node + 0x18) >> 30) & 3u) == 2u) {
+                            g_course_demo_active.store(false, std::memory_order_relaxed);
+                            if (overlay::speedrun_is_armed()) overlay::speedrun_begin_play();
+                        }
+                    };
+                    log("speedrun: hooked PlayerCourseInDemo update at main+%llx", (unsigned long long)off);
+                    break;
+                }
+            }
+        }
+    }
+    g_fade_mgr_off.store(extract_adrp_ldr_x8("IsEndFadeIn"), std::memory_order_relaxed);
+    g_gamedata_mgr_off.store(extract_adrp_ldr_x8("IsGamePause"), std::memory_order_relaxed);
+    log("speedrun: fade_mgr=main+%llx gamedata_mgr=main+%llx",
+        (unsigned long long)g_fade_mgr_off.load(std::memory_order_relaxed),
+        (unsigned long long)g_gamedata_mgr_off.load(std::memory_order_relaxed));
 }
 void game::renderer_start() {}
 void game::first_frame() {}
@@ -453,6 +669,24 @@ void game::frame_presented(uint64_t now_ns, int present_interval) {
     }
 
     store_frame_step(float(seconds));
+    if (overlay::speedrun_is_armed()) {
+        if (g_stage_load_ended.load(std::memory_order_relaxed) && is_faded_in() &&
+            !g_course_demo_active.load(std::memory_order_relaxed)) {
+            uint64_t ready_ns = g_stage_ready_ns.load(std::memory_order_relaxed);
+            if (!ready_ns) {
+                g_stage_ready_ns.store(now_ns, std::memory_order_relaxed);
+            } else if (now_ns - ready_ns >= 350'000'000ull) {
+                g_stage_load_ended.store(false, std::memory_order_relaxed);
+                g_stage_ready_ns.store(0, std::memory_order_relaxed);
+                overlay::speedrun_begin_play();
+            }
+        }
+    } else {
+        g_stage_load_ended.store(false, std::memory_order_relaxed);
+        g_course_demo_active.store(false, std::memory_order_relaxed);
+        g_stage_ready_ns.store(0, std::memory_order_relaxed);
+    }
+    overlay::speedrun_tick(seconds, dt, is_game_paused());
     speed_elapsed += dt;
     speed_simulated += seconds;
     if (speed_elapsed >= 0.5) {

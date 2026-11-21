@@ -101,6 +101,7 @@ const char kLauncherLocalizedGlyphs[] = "开始文件模组更新退出";
 const char kKoreanHelpGlyphs[] = "가값강계과근꾸끄끕널넘높누느닙단당대된두듬딩록릅린묘미바번범분수습식압약없와유으은의인입있장절접줄중증직질집찢초최축충패할행확환황흐히";
 const char kAdditionalHelpGlyphs[] = "三十叉圆圓块塊字角왼향،ヤ一个从入別备家從无機独獨玩立続線自裝连連결끔됨르별연켬ТЧщёآあえかずせちとどなほぼみめもらりわんギザ不与丢两中为也乱会保個側儲兩关减分切利効卡即压取变可号合后和回围圍圧増壓多够夠失対将將少幀平式強强微応慢或押拡择持换接提換撕擇改数整數斜明是晰替最會板柄染案檔檻次正此毎每毫況消済減渲滑為無状现現电省码确確碼秒稍算節範糊約素細組緣縮繪细缘缩耗脑腦至與节范荷號行裂見認調請變认请调負超足軽較輪较辨边近这进选這通進遅遺邊郭释釋銳門關闭離電需頂高鮮";
 const char kExtraLocalizedGlyphs[] = "ؤ〜ノ之例具在宽寬広果標比环環相离繞绕聲道노양우운율좌커테퍼폭피효（），：Цّべカ主介初厂复已廠復恢有界色頁預題项题默눌돌든런립색었타탭《》ワ兄奇弟惊欧歐狀瑪級级驚马태";
+const char kSpeedrunLocalizedGlyphs[] = "ÇßàáäçèéñóöùúüğİışАБВГЗКМНОПРСТЦабвгдежзийклмнопрстуфхцчшыьэюяёأؤئابةتجحخدذرسشصضطظعغفقكلمنهوىي、。いがきくさしすただてでとにのはまるれをアイオクゲコゴサシスズセタットドニピブプマムメモュョリルン・ー上下両中以位停入內关内准出分动効動单卡右同启啟單器在大央始字实実實小屏左已幕式戏或戲択择擇数整數方时显時暂暫有标格標模止游準無特用画白的真示禁粉紅綠緑红绿置自色菜螢表計設調請计请调赤超进退选進遊選重金開間關间離青面頁項顏顯项颜風风가간강게고금기내뉴는니다단동되됩둘드또려로록를매머메면모보분비빨상색서선성세션숫스습시실앙어에옵요우위으을의이일임입있자작장절정제조좌중지청초측치켜코크타택탭통퇴표하할합홍화활흰，";
 
 const char* const kScriptFonts[] = {
 #if defined(_WIN32)
@@ -295,6 +296,7 @@ void load_fonts() {
     glyph_builder.AddText(kKoreanHelpGlyphs);
     glyph_builder.AddText(kAdditionalHelpGlyphs);
     glyph_builder.AddText(kExtraLocalizedGlyphs);
+    glyph_builder.AddText(kSpeedrunLocalizedGlyphs);
     // ImGui keeps this pointer in the font config and consumes it later, when the
     // Vulkan backend builds the atlas on its first NewFrame. Keep it alive beyond
     // this function; a local vector here leaves every merged fallback with a
