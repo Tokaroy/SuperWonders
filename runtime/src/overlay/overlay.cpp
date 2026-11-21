@@ -520,6 +520,15 @@ void speedrun_set_course(bool in_course, const char* world_name, const char* cou
     }
 }
 
+void speedrun_reset_course() {
+    g_speedrun_igt_ns.store(0, std::memory_order_relaxed);
+    g_speedrun_rta_ns.store(0, std::memory_order_relaxed);
+    g_speedrun_finished.store(false, std::memory_order_relaxed);
+    g_speedrun_exiting.store(false, std::memory_order_relaxed);
+    g_speedrun_in_course.store(false, std::memory_order_relaxed);
+    g_speedrun_armed.store(true, std::memory_order_relaxed);
+}
+
 void speedrun_begin_play() {
     if (!g_speedrun_armed.exchange(false, std::memory_order_relaxed)) return;
     g_speedrun_igt_ns.store(0, std::memory_order_relaxed);

@@ -72,6 +72,7 @@ void game_speed(double percent);  // applied simulation time divided by elapsed 
 
 // ---- speedrun timer (any thread) ----
 void speedrun_set_course(bool in_course, const char* world_name = nullptr, const char* course_name = nullptr);
+void speedrun_reset_course();
 void speedrun_begin_play();
 bool speedrun_is_armed();
 void speedrun_finish_course();
