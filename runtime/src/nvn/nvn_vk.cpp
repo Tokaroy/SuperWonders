@@ -800,9 +800,11 @@ static void present_overlay_frame() {
     }
     static const bool shared_sem = std::getenv("NX_SHARED_PRESENT_SEMAPHORE") != nullptr;
     VkSemaphore rendered = async_gpu() || !shared_sem ? frame_rendered_semaphore(index) : g_rendered;
-    if (async_gpu())
+    if (async_gpu()) {
         frame_submit(acquired, rendered, {}, dump);
-    else
+        // Keep launcher/compile frames synchronous so ImGui buffer resizes cannot race in-flight GPU reads.
+        frame_wait_all();
+    } else
         end_and_wait(acquired, rendered);
     if (dump) frame_dump_write(dst, 900000 + shown);
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
