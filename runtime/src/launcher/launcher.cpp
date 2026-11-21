@@ -17,6 +17,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #else
+#include <cerrno>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -56,6 +57,13 @@ bool file(const fs::path& p) {
     std::error_code ec;
     return fs::is_regular_file(p, ec);
 }
+#if !defined(_WIN32)
+fs::path self_exe_path() {
+    std::error_code ec;
+    fs::path p = fs::read_symlink("/proc/self/exe", ec);
+    return ec ? fs::path{} : p;
+}
+#endif
 std::string read_line(const fs::path& p, const char* key) {  // "key value" lines (build-id.txt)
     std::ifstream f(p);
     std::string line, k = std::string(key) + " ";
@@ -1522,6 +1530,10 @@ bool wanted(const std::vector<std::string>& args, bool& config_mode) {
         const auto name = fs::path(path).filename().wstring();
         if (_wcsicmp(name.c_str(), L"wonder.exe") == 0 && !config_mode) return false;
     }
+#else
+    const fs::path self = self_exe_path();
+    if (!self.empty() && self.filename() == "wonder" && !config_mode && file(self.parent_path() / "wonder-launcher"))
+        return false;
 #endif
     auto env_on = [](const char* n) {
         const char* e = std::getenv(n);
@@ -1582,6 +1594,22 @@ void run() {
                     MessageBoxA(nullptr, message.c_str(), "SuperWonders - Game setup required", MB_OK | MB_ICONINFORMATION);
                     plat::exit_process(1);
                 }
+            }
+        }
+#else
+        const char* headless = std::getenv("NX_HEADLESS");
+        const fs::path self = self_exe_path();
+        if ((!headless || !*headless || std::strcmp(headless, "0") == 0) && !self.empty() &&
+            self.filename() == "wonder" && file(self.parent_path() / "wonder-launcher")) {
+            const Status status = check_status(find_kit());
+            if (status.ready != Ready::Yes) {
+                log("game: cannot start: %s", status.why.c_str());
+                std::fprintf(
+                    stderr,
+                    "SuperWonders - Game setup required\n%s\n\nOpen wonder-launcher, select your game files and "
+                    "complete Set up game files.\n",
+                    status.why.c_str());
+                plat::exit_process(1);
             }
         }
 #endif
@@ -1668,6 +1696,23 @@ void run() {
                         }
                         log("launcher: could not start wonder.exe (Windows error %lu)", GetLastError());
                         ui::notify("Could not start wonder.exe. Check that it is in the same folder as the launcher.");
+                        g->play = false;
+                        continue;
+                    }
+                }
+#else
+                const fs::path self = self_exe_path();
+                if (!self.empty() && self.filename() == "wonder-launcher") {
+                    const fs::path game = self.parent_path() / "wonder";
+                    if (file(game)) {
+                        setenv("NX_DATA_ROOT", plat::data_root().c_str(), 1);
+                        const std::string game_s = str(game);
+                        char arg0[] = "wonder";
+                        char arg1[] = "--play";
+                        char* argv[] = {arg0, arg1, nullptr};
+                        execv(game_s.c_str(), argv);
+                        log("launcher: could not start wonder (errno %d)", errno);
+                        ui::notify("Could not start wonder. Check that it is in the same folder as the launcher.");
                         g->play = false;
                         continue;
                     }

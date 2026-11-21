@@ -464,9 +464,9 @@ def main():
         if not os.path.isfile(os.path.join(a.build, f)):
             raise SystemExit(f"{a.build}: no {f} (a build with NX_GAME_LIBRARY=ON)")
         copy(os.path.join(a.build, f), os.path.join(folder, f))
-    if WIN:
-        # The runtime selects launcher or direct game boot from its executable name.
-        copy(os.path.join(a.build, exe), os.path.join(folder, "wonder-launcher.exe"))
+    # The runtime selects launcher or direct game boot from its executable name.
+    launcher_exe = f"{GAME}-launcher" + (".exe" if WIN else "")
+    copy(os.path.join(a.build, exe), os.path.join(folder, launcher_exe))
     if os.path.isfile(os.path.join(a.build, f"{GAME}_game.dll")) or os.path.isfile(os.path.join(a.build, f"lib{GAME}_game.so")):
         print("note: the build's game code library is not packed (it holds the game)")
     with open(os.path.join(folder, "VERSION"), "w", newline="\n") as f:
