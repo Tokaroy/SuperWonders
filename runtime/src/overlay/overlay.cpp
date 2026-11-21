@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -17,6 +20,7 @@
 #include "overlay/overlay_internal.h"
 #include "overlay/overlay_ui.h"
 #include "discord_rpc.h"
+#include "nextendo_client.h"
 
 namespace nx::overlay {
 
@@ -62,6 +66,17 @@ size_t g_next = 0, g_count = 0;
 uint64_t g_previous_ns = 0;
 std::atomic<int> g_game_interval{1};
 std::atomic<double> g_game_speed{100.0};
+std::atomic<bool> g_speedrun_armed{false};
+std::atomic<bool> g_speedrun_in_course{false};
+std::atomic<bool> g_speedrun_finished{false};
+std::atomic<bool> g_speedrun_exiting{false};
+std::atomic<uint64_t> g_speedrun_igt_ns{0};
+std::atomic<uint64_t> g_speedrun_rta_ns{0};
+std::atomic<uint64_t> g_speedrun_finish_ns{0};
+std::atomic<uint64_t> g_speedrun_exit_ns{0};
+std::mutex g_speedrun_meta_mu;
+std::string g_speedrun_world = "Unknown World";
+std::string g_speedrun_course = "Unknown Course";
 
 ImGuiKey imgui_key(Key k) {
     switch (k) {
@@ -191,6 +206,134 @@ void draw_metrics(float height) {
     ImGui::End();
     ImGui::PopStyleVar(4);
     ImGui::PopStyleColor();
+}
+
+bool speedrun_timer_wanted() {
+    return g_settings.speedrun_timer &&
+           (g_speedrun_in_course.load(std::memory_order_relaxed) || g_speedrun_exiting.load(std::memory_order_relaxed)) &&
+           !nextendo::status().enabled;
+}
+
+void format_speedrun_time(uint64_t ns, char* buf, size_t n) {
+    const uint64_t total_ms = ns / 1'000'000ull;
+    const uint64_t ms = total_ms % 1000ull;
+    const uint64_t total_s = total_ms / 1000ull;
+    const uint64_t s = total_s % 60ull;
+    const uint64_t total_m = total_s / 60ull;
+    const uint64_t m = total_m % 60ull;
+    const uint64_t h = total_m / 60ull;
+    if (h > 0) std::snprintf(buf, n, "%llu:%02llu:%02llu.%03llu", (unsigned long long)h, (unsigned long long)m, (unsigned long long)s, (unsigned long long)ms);
+    else std::snprintf(buf, n, "%02llu:%02llu.%03llu", (unsigned long long)m, (unsigned long long)s, (unsigned long long)ms);
+}
+
+void draw_speedrun_timer(float height) {
+    const Settings& st = g_settings;
+    const bool exiting = g_speedrun_exiting.load(std::memory_order_relaxed);
+    const bool finished = g_speedrun_finished.load(std::memory_order_relaxed);
+    const uint64_t now = plat::monotonic_ns();
+    constexpr float kSizeMul[4] = {0.78f, 1.0f, 1.30f, 1.65f};
+    const float sz_mul = kSizeMul[std::clamp(st.speedrun_timer_size, 0, 3)];
+    const float base_k = std::clamp(height / 1080.0f, 0.5f, 3.0f);
+    const float k = base_k * sz_mul;
+    const ImVec2 size = ImGui::GetIO().DisplaySize;
+    const float m = 18 * base_k;
+    const int pos = std::clamp(st.speedrun_timer_position, 0, 5);
+    const int col = pos % 3;
+    const int row = pos / 3;
+    const float px = col == 0 ? m : col == 1 ? size.x * 0.5f : size.x - m;
+    float py = row == 0 ? m : size.y - m;
+    const float ax = col == 0 ? 0.0f : col == 1 ? 0.5f : 1.0f;
+    const float ay = row == 0 ? 0.0f : 1.0f;
+
+    if (exiting) {
+        const double t = double(now - g_speedrun_exit_ns.load(std::memory_order_relaxed)) / 550'000'000.0;
+        if (t >= 1.0) {
+            g_speedrun_exiting.store(false, std::memory_order_relaxed);
+            g_speedrun_finished.store(false, std::memory_order_relaxed);
+            return;
+        }
+        const float ft = float(t);
+        const float dip = 18.0f * k;
+        if (ft < 0.25f) {
+            py += dip * std::sin((ft / 0.25f) * 1.5707963f);
+        } else {
+            const float u = (ft - 0.25f) / 0.75f;
+            const float ease = u * u * u;
+            const float fly_to = -(py + 180.0f * k);
+            py += dip + (fly_to - dip) * ease;
+        }
+    } else if (finished) {
+        const uint64_t elapsed_ms = (now - g_speedrun_finish_ns.load(std::memory_order_relaxed)) / 1'000'000ull;
+        if (((elapsed_ms / 350ull) % 2ull) == 1ull) return;
+    }
+
+    static constexpr ImU32 kTimerColors[6] = {
+        IM_COL32(255, 255, 255, 255),  // White
+        IM_COL32(255, 224, 92, 255),   // Gold
+        IM_COL32(118, 234, 255, 255),  // Cyan
+        IM_COL32(130, 245, 138, 255),  // Green
+        IM_COL32(255, 110, 110, 255),  // Red
+        IM_COL32(255, 148, 218, 255),  // Pink
+    };
+    const ImU32 num_col = kTimerColors[std::clamp(st.speedrun_timer_color, 0, 5)];
+    ImGui::SetNextWindowPos({px, py}, ImGuiCond_Always, {ax, ay});
+
+    if (finished) {
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4 * k, 2 * k));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 4 * k));
+    } else {
+        // Mario Wonder UI aesthetic: deep plum-navy pill, warm golden border, crisp shadowed tabular numerals.
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(22, 18, 36, 222));
+        ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 214, 58, 245));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18 * k, 11 * k));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 18 * k);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, std::max(1.5f, 2.5f * k));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10 * k, 4 * k));
+    }
+    const ImGuiWindowFlags f = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                               ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
+                               ImGuiWindowFlags_NoSavedSettings |
+                               (finished ? ImGuiWindowFlags_NoBackground : 0);
+    if (ImGui::Begin("##speedrun_timer", nullptr, f)) {
+        const int mode = std::clamp(st.speedrun_timer_mode, 0, 2);
+        const uint64_t igt = g_speedrun_igt_ns.load(std::memory_order_relaxed);
+        const uint64_t rta = g_speedrun_rta_ns.load(std::memory_order_relaxed);
+        const float num_fs = ImGui::GetFontSize() * 1.18f * sz_mul;
+        const float tag_fs = ImGui::GetFontSize() * 0.72f * sz_mul;
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const auto draw_row = [&](const char* tag, uint64_t ns, ImU32 tag_col) {
+            char buf[32];
+            format_speedrun_time(ns, buf, sizeof buf);
+            const ImVec2 num_sz = ui::title()->CalcTextSizeA(num_fs, FLT_MAX, 0, buf);
+            if (finished) {
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                ImGui::Dummy(num_sz);
+                dl->AddText(ui::title(), num_fs, ImVec2(p.x + 2.5f * k, p.y + 2.5f * k), IM_COL32(8, 6, 14, 240), buf);
+                dl->AddText(ui::title(), num_fs, p, num_col, buf);
+                return;
+            }
+            const ImVec2 tag_sz = ui::body()->CalcTextSizeA(tag_fs, FLT_MAX, 0, tag);
+            const float row_h = std::max(tag_sz.y, num_sz.y);
+            const float tag_w = 38 * k;
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(tag_w + 8 * k + num_sz.x, row_h));
+            const ImVec2 tp{p.x, p.y + (row_h - tag_sz.y) * 0.55f};
+            const ImVec2 np{p.x + tag_w + 8 * k, p.y + (row_h - num_sz.y) * 0.5f};
+            dl->AddText(ui::body(), tag_fs, ImVec2(tp.x + 1.5f * k, tp.y + 1.5f * k), IM_COL32(8, 6, 14, 210), tag);
+            dl->AddText(ui::body(), tag_fs, tp, tag_col, tag);
+            dl->AddText(ui::title(), num_fs, ImVec2(np.x + 2.0f * k, np.y + 2.0f * k), IM_COL32(8, 6, 14, 230), buf);
+            dl->AddText(ui::title(), num_fs, np, num_col, buf);
+        };
+        if (mode == 0 || mode == 2) draw_row("IGT", igt, IM_COL32(255, 222, 89, 255));
+        if (mode == 1 || mode == 2) draw_row("RTA", rta, IM_COL32(138, 228, 255, 255));
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(4);
+    ImGui::PopStyleColor(2);
 }
 
 // Controller navigation: the pad (Nintendo button meanings) as ImGui's gamepad keys. A confirms, B cancels.
@@ -352,8 +495,89 @@ void presented(uint64_t now_ns) {
 void game_interval(int interval) { g_game_interval = std::max(1, interval); }
 void game_speed(double percent) { g_game_speed.store(std::clamp(percent, 0.0, 1000.0), std::memory_order_relaxed); }
 
+void speedrun_set_course(bool in_course, const char* world_name, const char* course_name) {
+    if (in_course) {
+        {
+            std::lock_guard<std::mutex> lk(g_speedrun_meta_mu);
+            if (world_name && *world_name) g_speedrun_world = world_name;
+            if (course_name && *course_name) g_speedrun_course = course_name;
+        }
+        g_speedrun_igt_ns.store(0, std::memory_order_relaxed);
+        g_speedrun_rta_ns.store(0, std::memory_order_relaxed);
+        g_speedrun_finished.store(false, std::memory_order_relaxed);
+        g_speedrun_exiting.store(false, std::memory_order_relaxed);
+        g_speedrun_in_course.store(false, std::memory_order_relaxed);
+        g_speedrun_armed.store(true, std::memory_order_relaxed);
+    } else {
+        g_speedrun_armed.store(false, std::memory_order_relaxed);
+        if (g_speedrun_in_course.exchange(false, std::memory_order_relaxed) && g_settings.speedrun_timer &&
+            !nextendo::status().enabled) {
+            g_speedrun_exit_ns.store(plat::monotonic_ns(), std::memory_order_relaxed);
+            g_speedrun_exiting.store(true, std::memory_order_relaxed);
+        } else if (!g_speedrun_exiting.load(std::memory_order_relaxed)) {
+            g_speedrun_finished.store(false, std::memory_order_relaxed);
+        }
+    }
+}
+
+void speedrun_begin_play() {
+    if (!g_speedrun_armed.exchange(false, std::memory_order_relaxed)) return;
+    g_speedrun_igt_ns.store(0, std::memory_order_relaxed);
+    g_speedrun_rta_ns.store(0, std::memory_order_relaxed);
+    g_speedrun_finished.store(false, std::memory_order_relaxed);
+    g_speedrun_in_course.store(true, std::memory_order_relaxed);
+}
+
+bool speedrun_is_armed() { return g_speedrun_armed.load(std::memory_order_relaxed); }
+
+void speedrun_finish_course() {
+    if (!g_speedrun_in_course.load(std::memory_order_relaxed)) return;
+    if (g_speedrun_finished.exchange(true, std::memory_order_relaxed)) return;
+    g_speedrun_finish_ns.store(plat::monotonic_ns(), std::memory_order_relaxed);
+    if (!g_settings.speedrun_timer || nextendo::status().enabled) return;
+
+    std::string world, course;
+    {
+        std::lock_guard<std::mutex> lk(g_speedrun_meta_mu);
+        world = g_speedrun_world;
+        course = g_speedrun_course;
+    }
+    const double igt_s = double(g_speedrun_igt_ns.load(std::memory_order_relaxed)) * 1e-9;
+    const double rta_s = double(g_speedrun_rta_ns.load(std::memory_order_relaxed)) * 1e-9;
+    const int mode = std::clamp(g_settings.speedrun_timer_mode, 0, 2);
+    char line[256];
+    if (mode == 0) {
+        std::snprintf(line, sizeof line, "%s: %s - %.3fs\n", world.c_str(), course.c_str(), igt_s);
+    } else if (mode == 1) {
+        std::snprintf(line, sizeof line, "%s: %s - %.3fs\n", world.c_str(), course.c_str(), rta_s);
+    } else {
+        std::snprintf(line, sizeof line, "%s: %s - IGT %.3fs | RTA %.3fs\n", world.c_str(), course.c_str(), igt_s, rta_s);
+    }
+    const std::string& root = plat::data_root();
+    if (!root.empty()) {
+        std::ofstream f(std::filesystem::u8path(root) / "speedrun_times.txt", std::ios::app);
+        if (f) f << line;
+    }
+    nx::log("speedrun: %s", line);
+}
+
+void speedrun_tick(double game_seconds, double wall_seconds, bool game_paused) {
+    if (!g_speedrun_in_course.load(std::memory_order_relaxed)) return;
+    if (g_speedrun_finished.load(std::memory_order_relaxed)) return;
+    if (!g_settings.speedrun_timer || nextendo::status().enabled) return;
+    if (wall_seconds > 0.0) {
+        const uint64_t add = uint64_t(wall_seconds * 1e9);
+        g_speedrun_rta_ns.fetch_add(add, std::memory_order_relaxed);
+    }
+    if (!g_open && !game_paused && game_seconds > 0.0) {
+        const uint64_t add = uint64_t(game_seconds * 1e9);
+        g_speedrun_igt_ns.fetch_add(add, std::memory_order_relaxed);
+    }
+}
+
 bool frame_wanted() {
-    return g_open || g_screen.load() || g_metrics || g_input_frames > 0 || g_fading || progress_wanted() || ui::notices_active();
+    return g_open || g_screen.load() || g_metrics || speedrun_timer_wanted() || g_input_frames > 0 || g_fading ||
+           progress_wanted() || ui::notices_active();
 }
 
 void notify(const char* text) { ui::notify(text); }
@@ -435,6 +659,7 @@ ImDrawData* build_frame(uint32_t w, uint32_t h) {
     if (screen) screen(float(w), float(h));  // under the menu, which the screen can open (its Settings)
     if (progress_wanted()) draw_progress(float(h));
     if (g_settings.metrics_enabled && !progress_wanted() && !screen) draw_metrics(float(h));  // (no game frames to measure yet)
+    if (speedrun_timer_wanted() && !progress_wanted() && !screen) draw_speedrun_timer(float(h));
     if (open || reveal > 0.0f) {
         const float a = ui::smoothstep(reveal);
         ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, IM_COL32(4, 2, 10, int(120 * a)));

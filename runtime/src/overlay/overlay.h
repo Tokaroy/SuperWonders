@@ -70,6 +70,13 @@ void presented(uint64_t now_ns);   // after each present (plat::overlay_presente
 void game_interval(int interval);  // the game's swap interval in 60 Hz ticks (plat::overlay_game_interval)
 void game_speed(double percent);  // applied simulation time divided by elapsed wall time
 
+// ---- speedrun timer (any thread) ----
+void speedrun_set_course(bool in_course, const char* world_name = nullptr, const char* course_name = nullptr);
+void speedrun_begin_play();
+bool speedrun_is_armed();
+void speedrun_finish_course();
+void speedrun_tick(double game_seconds, double wall_seconds, bool game_paused = false);
+
 // ---- startup shader preparation (any thread) ----
 // What the compile screen shows: `done` of `total`, kind 0 compiling the game's shaders, 1 preparing pipelines seen in
 // earlier sessions. visible false: finished (the screen fades out over the first game frames).

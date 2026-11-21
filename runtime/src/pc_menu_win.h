@@ -61,6 +61,11 @@ struct PcMenuState {
     bool metric_game_speed = true;
     bool metric_frametime_graph = true;
     int overlay_position = 0;  // top left, top right, bottom left, bottom right
+    bool speedrun_timer = false;
+    int speedrun_timer_mode = 0;
+    int speedrun_timer_position = 2;
+    int speedrun_timer_size = 1;
+    int speedrun_timer_color = 0;
     int upscaler = 1;          // overlay menu: 0 bilinear, 1 FSR 1
     int fsr_sharpness = 25;    // overlay menu: RCAS stops x 100
     int antialiasing = 0;      // overlay menu: 0 off, 1 FXAA
