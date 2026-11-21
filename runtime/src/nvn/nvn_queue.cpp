@@ -404,19 +404,27 @@ uint64_t pace_present(int interval) {
         return fps == 90 || fps == 120 || fps == 144 ? fps : 0;
     }();
     static uint64_t custom_next = 0;
+    static int prev_fps = 0;
+    if (off || interval <= 0 || plat::fast_forward()) {
+        custom_next = 0;
+        return 0;
+    }
     int custom_fps = env_fps ? env_fps : frame_cap();
     for (int hold : {g_cap_hold.load(std::memory_order_relaxed), g_scene_cap_hold.load(std::memory_order_relaxed)})
         if (hold && hold < custom_fps) custom_fps = hold;
-    if (custom_fps > 60 && !plat::fast_forward()) {
+    if (interval > 1) custom_fps = std::min(custom_fps, std::max(1, 60 / interval));
+    if (custom_fps > 0) {
         const uint64_t period = 1'000'000'000ull / uint64_t(custom_fps);
         const uint64_t now = plat::monotonic_ns();
-        if (!custom_next) {
+        if (!custom_next || prev_fps != custom_fps) {
+            prev_fps = custom_fps;
             custom_next = now;
             return 0;
         }
         custom_next += period;
         if (now >= custom_next) {
-            // Never sleep on an already-late frame; clamp drift so the next frame is not compressed into a burst.
+            // Never sleep on an already-late frame (including FIFO vblank waits); clamp drift so the next frame
+            // stays phase-locked instead of compounding with swapchain FIFO waits.
             if (now - custom_next > period / 4) custom_next = now;
             return 0;
         }
@@ -428,29 +436,7 @@ uint64_t pace_present(int interval) {
         return done > now ? done - now : 0;
     }
     custom_next = 0;
-    static uint64_t next = 0;
-    if (off || interval <= 0 || plat::fast_forward()) return 0;
-    const uint64_t wait_from = plat::monotonic_ns();
-    uint64_t now = vsync_wait(next);
-    static uint64_t presents = 0, at2 = 0;  // how often the game asks for 30 fps (interval 2), per 600 presents
-    // Pacing: presents more than a vsync later than asked (a frame shown late or twice), and the longest gap.
-    static uint64_t last_ns = 0, late = 0, worst = 0;
-    const uint64_t t = plat::monotonic_ns();
-    if (last_ns) {
-        worst = std::max(worst, t - last_ns);
-        late += t - last_ns > uint64_t(interval + 1) * 16'666'667ull;
-    }
-    last_ns = t;
-    at2 += interval >= 2;
-    if (++presents % 600 == 0) {
-        log("nvn: of the last 600 presents %llu at interval >= 2, %llu late, longest gap %.1f ms",
-            (unsigned long long)at2, (unsigned long long)late, double(worst) / 1e6);
-        at2 = late = worst = 0;
-        log_wait_sites();
-    }
-    next = now + uint64_t(interval);
-    const uint64_t waited = plat::monotonic_ns();
-    return waited > wait_from ? waited - wait_from : 0;
+    return 0;
 }
 
 void QueuePresentTexture(CPU& c) {
