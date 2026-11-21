@@ -270,6 +270,13 @@ void set_aspect_ratio(int ratio) {
     settings_changed(true);
 }
 
+bool low_vram_profile() { return g_settings.low_vram_profile; }
+
+void set_low_vram_profile(bool on) {
+    g_settings.low_vram_profile = on;
+    settings_changed(true);
+}
+
 void set_theme_index(int index) {
     const int clamped = std::clamp(index, 0, ui::theme_count() - 1);
     ui::set_theme(clamped);

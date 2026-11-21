@@ -179,7 +179,7 @@ constexpr const char* kPhysical[kControlCount] = {
     "A / Cross", "B / Circle", "X / Square", "Y / Triangle", "LB / L1", "RB / R1", "LT / L2", "RT / R2",
     "Start / +", "Back / -", "L3 / LS", "R3 / RS", "D-pad Left", "D-pad Up", "D-pad Right", "D-pad Down",
 };
-constexpr int kTabs = 5;
+constexpr int kTabs = 6;
 
 namespace desc {
 constexpr const char* language = "Language of this menu.";
@@ -1080,33 +1080,6 @@ void system_tab(MenuContext& c, const Labels& l) {
     };
     if (rows::toggle("Discord Rich Presence", &s.discord_rpc, kDefaults.discord_rpc, kDiscordDesc[lang]))
         settings_changed(true);
-    {
-        const nextendo::Status nx_st = nextendo::status();
-        bool nx_on = nx_st.enabled;
-        rows::section("Nextendo Network");
-        if (rows::toggle("Nextendo Online", &nx_on, false,
-                         "Enable online multiplayer via Nextendo Network (requires sign-in and Wonder 1.2.1 NPLN patch).")) {
-            nextendo::set_enabled(nx_on);
-            ui::notify(nx_on ? "Nextendo Online enabled (restart to apply)." : "Nextendo Online disabled.");
-        }
-        std::string acc_val = nx_st.login_in_progress
-            ? "Signing in (check browser)..."
-            : (nx_st.signed_in
-                   ? (nx_st.username.empty() ? ("PID " + std::to_string(nx_st.pid))
-                                             : (nx_st.username + " (" + nx_st.friend_code + ")"))
-                   : (nx_st.last_error.empty() ? "Not signed in" : nx_st.last_error));
-        if (rows::action(nx_st.signed_in ? "Nextendo Sign Out" : "Sign in with Nextendo", acc_val.c_str(),
-                         "Authenticate your Nextendo account via OAuth 2.0 PKCE in your browser.",
-                         !nx_st.login_in_progress, nx_st.signed_in)) {
-            if (nx_st.signed_in) {
-                nextendo::sign_out();
-                ui::notify("Signed out from Nextendo.");
-            } else {
-                nextendo::begin_oauth_login();
-                ui::notify("Browser opened for Nextendo OAuth login.");
-            }
-        }
-    }
     rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
@@ -1149,6 +1122,36 @@ void system_tab(MenuContext& c, const Labels& l) {
         armed_at = ImGui::GetTime();
     }
     rows::page_note(l.restart_low_vram);
+    rows::end();
+}
+
+void network_tab(MenuContext& c) {
+    rows::begin("##network", c.height);
+    const nextendo::Status nx_st = nextendo::status();
+    bool nx_on = nx_st.enabled;
+    rows::section("Nextendo Network");
+    if (rows::toggle("Nextendo Online", &nx_on, false,
+                     "Enable online multiplayer via Nextendo Network (requires sign-in and Wonder 1.2.1 NPLN patch).")) {
+        nextendo::set_enabled(nx_on);
+        ui::notify(nx_on ? "Nextendo Online enabled (restart to apply)." : "Nextendo Online disabled.");
+    }
+    std::string acc_val = nx_st.login_in_progress
+        ? "Signing in (check browser)..."
+        : (nx_st.signed_in
+               ? (nx_st.username.empty() ? ("PID " + std::to_string(nx_st.pid))
+                                         : (nx_st.username + " (" + nx_st.friend_code + ")"))
+               : (nx_st.last_error.empty() ? "Not signed in" : nx_st.last_error));
+    if (rows::action(nx_st.signed_in ? "Nextendo Sign Out" : "Sign in with Nextendo", acc_val.c_str(),
+                     "Authenticate your Nextendo account via OAuth 2.0 PKCE in your browser.",
+                     !nx_st.login_in_progress, nx_st.signed_in)) {
+        if (nx_st.signed_in) {
+            nextendo::sign_out();
+            ui::notify("Signed out from Nextendo.");
+        } else {
+            nextendo::begin_oauth_login();
+            ui::notify("Browser opened for Nextendo OAuth login.");
+        }
+    }
     rows::end();
 }
 
@@ -1217,7 +1220,7 @@ void draw_menu(MenuContext& c) {
     if (close_button(k)) c.open = false;
     ImGui::Dummy(ImVec2(0, 4 * k));
 
-    const char* names[kTabs] = {l.video, l.audio, l.controls, l.overlay, l.system};
+    const char* names[kTabs] = {l.video, l.audio, l.controls, l.overlay, l.system, "Network"};
     int current = -1;
     // Tabs follow the keyboard / controller focus: moving onto a tab with the arrows or the D-pad shows it (next
     // frame), with no Enter or A needed. The mouse still selects by clicking. Only a change of focus moves the tab: L / R
@@ -1267,7 +1270,8 @@ void draw_menu(MenuContext& c) {
                 case 1: audio(c, l); break;
                 case 2: controls(c, l); break;
                 case 3: overlay_tab(c); break;
-                default: system_tab(c, l); break;
+                case 4: system_tab(c, l); break;
+                default: network_tab(c); break;
             }
             ImGui::EndChild();
             ImGui::PopStyleVar();

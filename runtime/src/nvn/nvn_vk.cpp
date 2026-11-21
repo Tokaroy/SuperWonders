@@ -836,6 +836,20 @@ bool present_ui_frame() {
     return true;
 }
 
+uint64_t gpu_vram_bytes() {
+    if (!g_physical) return 0;
+    if (const char* e = std::getenv("NX_VRAM_IMAGE_BUDGET_GB"); e && *e) {
+        const double gb = std::atof(e);
+        if (gb > 0.0) return uint64_t(gb * double(1ull << 30));
+    }
+    VkPhysicalDeviceMemoryProperties mp{};
+    p_vkGetPhysicalDeviceMemoryProperties(g_physical, &mp);
+    uint64_t total = 0;
+    for (uint32_t i = 0; i < mp.memoryHeapCount; ++i)
+        if (mp.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) total += mp.memoryHeaps[i].size;
+    return total;
+}
+
 void gpu_present(uint64_t texture, const int32_t* crop) {
     plat::perf_hint_thread();  // the thread that presents takes part in the frame (perf_hint.cpp)
     std::lock_guard lk(g_gpu);
