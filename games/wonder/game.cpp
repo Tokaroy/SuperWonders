@@ -24,6 +24,9 @@ namespace nvn { void hold_scene_frame_cap(int fps); }
 
 static std::atomic<bool> g_stage_load_ended{false};
 static std::atomic<bool> g_course_demo_active{false};
+static std::atomic<bool> g_in_course_session{false};
+static std::atomic<bool> g_in_house_session{false};
+static std::atomic<bool> g_player_died{false};
 static std::atomic<uint64_t> g_stage_ready_ns{0};
 
 void game::file_opened(const char* path) {
@@ -46,7 +49,10 @@ void game::file_opened(const char* path) {
             current_world = wname;
         }
         discord::set_activity("On the World Map", wname);
-        overlay::speedrun_set_course(false);
+        if (!overlay::speedrun_is_armed()) {
+            g_in_course_session.store(false, std::memory_order_relaxed);
+            overlay::speedrun_set_course(false);
+        }
     }
     // The map can remain resident while entering a course, so returning to it does not necessarily reopen its
     // StageLoadInfo. Its world music does reopen when the player returns from this house.
@@ -63,8 +69,12 @@ void game::file_opened(const char* path) {
     else if (std::strncmp(scene, "Course", 6) == 0) discord::set_activity("Playing a Course", "Flower Kingdom");
     constexpr const char* house = "Course500_Course.game__stage__StageLoadInfo.bgyml";
     const bool in_house = std::strcmp(scene, house) == 0;
-    if (std::strncmp(scene, "World", 5) == 0) overlay::speedrun_set_course(false);
-    else if (std::strncmp(scene, "Course", 6) == 0) {
+    if (std::strncmp(scene, "World", 5) == 0) {
+        if (!overlay::speedrun_is_armed()) {
+            g_in_course_session.store(false, std::memory_order_relaxed);
+            overlay::speedrun_set_course(false);
+        }
+    } else if (std::strncmp(scene, "Course", 6) == 0) {
         std::string wname;
         {
             std::lock_guard<std::mutex> lk(world_mu);
@@ -74,10 +84,14 @@ void game::file_opened(const char* path) {
         const char* end = std::strstr(scene, "_Course.");
         const size_t len = end ? size_t(end - scene) : std::strlen(scene);
         std::snprintf(cname, sizeof cname, "%.*s", int(std::min(len, sizeof cname - 1)), scene);
+        g_in_course_session.store(!in_house, std::memory_order_relaxed);
+        g_in_house_session.store(in_house, std::memory_order_relaxed);
+        g_player_died.store(false, std::memory_order_relaxed);
         g_stage_load_ended.store(false, std::memory_order_relaxed);
         g_course_demo_active.store(false, std::memory_order_relaxed);
         g_stage_ready_ns.store(0, std::memory_order_relaxed);
         overlay::speedrun_set_course(!in_house, wname.c_str(), cname);
+        if (!in_house) log("speedrun: armed course %s (%s)", cname, wname.c_str());
     }
     if (held.exchange(in_house) != in_house) {
         nvn::hold_scene_frame_cap(in_house ? 60 : 0);
@@ -94,6 +108,8 @@ namespace {
 
 std::atomic<uint64_t> g_fade_mgr_off{0};
 std::atomic<uint64_t> g_gamedata_mgr_off{0};
+std::atomic<uint64_t> g_course_mgr_off{0};
+std::atomic<uint64_t> g_stage_mgr_off{0};
 
 bool is_faded_in() {
     const uint64_t off = g_fade_mgr_off.load(std::memory_order_relaxed);
@@ -134,6 +150,48 @@ bool is_game_paused() {
         if (idx == start) return false;
     }
     return false;
+}
+
+bool is_all_players_dead() {
+    const uint64_t off = g_course_mgr_off.load(std::memory_order_relaxed);
+    const ModuleInfo* main = game_lib().main;
+    if (!off || !main) return false;
+    const uint64_t mgr = ld<uint64_t>(main->base + off);
+    if (!mgr) return false;
+    const uint64_t pinfo = ld<uint64_t>(mgr + 0x40);
+    if (!pinfo) return false;
+    const int32_t count = int32_t(ld<uint32_t>(pinfo + 0x7e4));
+    if (count < 1) return false;
+    uint32_t dead = 0;
+    const int32_t n = std::min(count, 4);
+    for (int32_t i = 0; i < n; ++i) dead += ld<uint8_t>(pinfo + 0x7ca + uint64_t(i));
+    return dead >= uint32_t(n);
+}
+
+bool is_world_map_stage() {
+    const uint64_t off = g_stage_mgr_off.load(std::memory_order_relaxed);
+    const ModuleInfo* main = game_lib().main;
+    if (!off || !main) return false;
+    const uint64_t mgr = ld<uint64_t>(main->base + off);
+    if (!mgr) return false;
+    const uint64_t a = ld<uint64_t>(mgr + 0x30);
+    const uint64_t b = a ? ld<uint64_t>(a + 0x8) : 0;
+    if (!b) return false;
+    const uint32_t cnt = ld<uint32_t>(b);
+    const uint64_t arr = ld<uint64_t>(b + 0x8);
+    if (!arr) return false;
+    return ld<uint64_t>(arr + (cnt > 1 ? 8ull : 0ull)) != 0;
+}
+
+int32_t course_player_count() {
+    const uint64_t off = g_course_mgr_off.load(std::memory_order_relaxed);
+    const ModuleInfo* main = game_lib().main;
+    if (!off || !main) return 0;
+    const uint64_t mgr = ld<uint64_t>(main->base + off);
+    if (!mgr) return 0;
+    const uint64_t pinfo = ld<uint64_t>(mgr + 0x40);
+    if (!pinfo) return 0;
+    return int32_t(ld<uint32_t>(pinfo + 0x7e4));
 }
 
 std::atomic<uint64_t> g_wide_calls{0};
@@ -458,6 +516,8 @@ void game::after_init() {
     static Fn end_load_orig = nullptr;
     static Fn demo_enter_orig = nullptr;
     static Fn demo_update_orig = nullptr;
+    static Fn player_dead_orig = nullptr;
+    static Fn actor_reset_orig = nullptr;
     const auto find_ro_string = [](const ModuleInfo* main, const char* needle) -> uint64_t {
         const size_t nlen = std::strlen(needle);
         if (!main || main->ro_size < nlen + 2) return UINT64_MAX;
@@ -552,16 +612,82 @@ void game::after_init() {
     static constexpr uint32_t kEndLoadSig[3] = {0xd100c3ff, 0xa9017bfd, 0xf90013f3};
     install_ainb_enter("EndLoadStage", kEndLoadSig,
                        [](CPU& c) {
-                           g_stage_load_ended.store(true, std::memory_order_relaxed);
+                           if (!g_stage_load_ended.exchange(true, std::memory_order_relaxed))
+                               log("speedrun: EndLoadStage");
                            end_load_orig(c);
                        },
                        end_load_orig);
     install_ainb_enter("PlayerCourseInDemo", kEndLoadSig,
                        [](CPU& c) {
-                           g_course_demo_active.store(true, std::memory_order_relaxed);
+                           if (overlay::speedrun_is_armed()) {
+                               g_course_demo_active.store(true, std::memory_order_relaxed);
+                               log("speedrun: PlayerCourseInDemo::enter");
+                           }
                            demo_enter_orig(c);
                        },
                        demo_enter_orig);
+    static Fn demo_calc_orig = nullptr;
+    if (const uint64_t demo_node = find_ainb_node_fn("PlayerCourseInDemo"); demo_node != UINT64_MAX) {
+        const ModuleInfo* main = game_lib().main;
+        const LoadedModule* m = main ? module_at(main->base) : nullptr;
+        if (main && m) {
+            const uint64_t limit = std::min(demo_node + 0x600, main->text + main->text_size);
+            for (uint64_t off = demo_node + 0x80; off + 32 <= limit; off += 4) {
+                if (ld<uint32_t>(main->base + off) == 0xd10183ffu && m->table[off / 4]) {
+                    bool has_ldr60 = false;
+                    for (uint64_t k = off + 4; k + 8 <= off + 0x30; k += 4) {
+                        if (ld<uint32_t>(main->base + k) == 0xf9403008u) {
+                            has_ldr60 = true;
+                            break;
+                        }
+                    }
+                    if (!has_ldr60) continue;
+                    demo_calc_orig = m->table[off / 4];
+                    m->table[off / 4] = [](CPU& c) {
+                        demo_calc_orig(c);
+                        if (uint32_t(c.x[0]) != 2u) {
+                            g_course_demo_active.store(false, std::memory_order_relaxed);
+                            g_player_died.store(false, std::memory_order_relaxed);
+                            if (overlay::speedrun_is_armed()) {
+                                overlay::speedrun_begin_play();
+                                log("speedrun: started after PlayerCourseInDemo::calc");
+                            }
+                        }
+                    };
+                    log("speedrun: hooked PlayerCourseInDemo calc at main+%llx", (unsigned long long)off);
+                    break;
+                }
+            }
+        }
+    }
+    static constexpr uint32_t kDeadSig[3] = {0xf9400408, 0xf9400508, 0xf940fd09};
+    install_ainb_enter("SetPlayerDeadMorphRelease", kDeadSig,
+                       [](CPU& c) {
+                           if (g_in_course_session.load(std::memory_order_relaxed) &&
+                               !g_player_died.exchange(true, std::memory_order_relaxed)) {
+                               g_stage_load_ended.store(false, std::memory_order_relaxed);
+                               g_course_demo_active.store(false, std::memory_order_relaxed);
+                               g_stage_ready_ns.store(0, std::memory_order_relaxed);
+                               overlay::speedrun_reset_course();
+                               log("speedrun: player died, timer reset and armed");
+                           }
+                           player_dead_orig(c);
+                       },
+                       player_dead_orig);
+    static constexpr uint32_t kActorResetSig[3] = {0xf9401c08, 0xb9401809, 0x39400108};
+    install_ainb_enter("ActorResetOnRetryCourse", kActorResetSig,
+                       [](CPU& c) {
+                           if (g_in_course_session.load(std::memory_order_relaxed) &&
+                               !g_player_died.exchange(true, std::memory_order_relaxed)) {
+                               g_stage_load_ended.store(false, std::memory_order_relaxed);
+                               g_course_demo_active.store(false, std::memory_order_relaxed);
+                               g_stage_ready_ns.store(0, std::memory_order_relaxed);
+                               overlay::speedrun_reset_course();
+                               log("speedrun: ActorResetOnRetryCourse, timer reset and armed");
+                           }
+                           actor_reset_orig(c);
+                       },
+                       actor_reset_orig);
     if (const uint64_t demo_node = find_ainb_node_fn("PlayerCourseInDemo"); demo_node != UINT64_MAX) {
         const ModuleInfo* main = game_lib().main;
         const LoadedModule* m = main ? module_at(main->base) : nullptr;
@@ -576,9 +702,13 @@ void game::after_init() {
                     m->table[off / 4] = [](CPU& c) {
                         const uint64_t node = c.x[0];
                         demo_update_orig(c);
-                        if (node && ((ld<uint32_t>(node + 0x18) >> 30) & 3u) == 2u) {
+                        if (node && ((ld<uint32_t>(node + 0x18) >> 30) & 3u) != 2u) {
                             g_course_demo_active.store(false, std::memory_order_relaxed);
-                            if (overlay::speedrun_is_armed()) overlay::speedrun_begin_play();
+                            g_player_died.store(false, std::memory_order_relaxed);
+                            if (overlay::speedrun_is_armed()) {
+                                overlay::speedrun_begin_play();
+                                log("speedrun: started after PlayerCourseInDemo");
+                            }
                         }
                     };
                     log("speedrun: hooked PlayerCourseInDemo update at main+%llx", (unsigned long long)off);
@@ -589,9 +719,45 @@ void game::after_init() {
     }
     g_fade_mgr_off.store(extract_adrp_ldr_x8("IsEndFadeIn"), std::memory_order_relaxed);
     g_gamedata_mgr_off.store(extract_adrp_ldr_x8("IsGamePause"), std::memory_order_relaxed);
-    log("speedrun: fade_mgr=main+%llx gamedata_mgr=main+%llx",
+    g_course_mgr_off.store(extract_adrp_ldr_x8("IsAllPlayerDead"), std::memory_order_relaxed);
+    // Resolve StageMgr from main_01C3B304 (loads "IsWorldMapStage" into x8 via adrp+add, then loads StageMgr into x8).
+    {
+        const ModuleInfo* main = game_lib().main;
+        const uint64_t str_off = main ? find_ro_string(main, "IsWorldMapStage") : UINT64_MAX;
+        if (main && str_off != UINT64_MAX) {
+            const uint64_t str_page = str_off & ~0xfffull;
+            const uint32_t add_x8 = 0x91000108u | uint32_t((str_off & 0xfffu) << 10);
+            for (uint64_t off = main->text; off + 20 <= main->text + main->text_size; off += 4) {
+                if (ld<uint32_t>(main->base + off + 4) != add_x8) continue;
+                const uint32_t i0 = ld<uint32_t>(main->base + off);
+                if ((i0 & 0x9f00001fu) != 0x90000008u) continue;
+                const int32_t immlo = int32_t((i0 >> 29) & 3u);
+                const int32_t immhi = int32_t((i0 >> 5) & 0x7ffffu);
+                int64_t imm = (int64_t(immhi) << 2) | immlo;
+                if (imm & (1ll << 20)) imm -= (1ll << 21);
+                if (((off & ~0xfffull) + uint64_t(imm << 12)) != str_page) continue;
+                for (uint64_t k = off + 8; k + 8 <= std::min(off + 0x24, main->text + main->text_size); k += 4) {
+                    const uint32_t s0 = ld<uint32_t>(main->base + k);
+                    const uint32_t s1 = ld<uint32_t>(main->base + k + 4);
+                    if ((s0 & 0x9f00001fu) == 0x90000008u && (s1 & 0xffc003ffu) == 0xf9400108u) {
+                        const int32_t slo = int32_t((s0 >> 29) & 3u);
+                        const int32_t shi = int32_t((s0 >> 5) & 0x7ffffu);
+                        int64_t simm = (int64_t(shi) << 2) | slo;
+                        if (simm & (1ll << 20)) simm -= (1ll << 21);
+                        const uint64_t mgr_off = ((k & ~0xfffull) + uint64_t(simm << 12)) + (uint64_t((s1 >> 10) & 0xfffu) << 3);
+                        g_stage_mgr_off.store(mgr_off, std::memory_order_relaxed);
+                        break;
+                    }
+                }
+                if (g_stage_mgr_off.load(std::memory_order_relaxed)) break;
+            }
+        }
+    }
+    log("speedrun: fade_mgr=main+%llx gamedata_mgr=main+%llx course_mgr=main+%llx stage_mgr=main+%llx",
         (unsigned long long)g_fade_mgr_off.load(std::memory_order_relaxed),
-        (unsigned long long)g_gamedata_mgr_off.load(std::memory_order_relaxed));
+        (unsigned long long)g_gamedata_mgr_off.load(std::memory_order_relaxed),
+        (unsigned long long)g_course_mgr_off.load(std::memory_order_relaxed),
+        (unsigned long long)g_stage_mgr_off.load(std::memory_order_relaxed));
 }
 void game::renderer_start() {}
 void game::first_frame() {}
@@ -669,19 +835,115 @@ void game::frame_presented(uint64_t now_ns, int present_interval) {
     }
 
     store_frame_step(float(seconds));
-    if (overlay::speedrun_is_armed()) {
-        if (g_stage_load_ended.load(std::memory_order_relaxed) && is_faded_in() &&
-            !g_course_demo_active.load(std::memory_order_relaxed)) {
-            uint64_t ready_ns = g_stage_ready_ns.load(std::memory_order_relaxed);
-            if (!ready_ns) {
-                g_stage_ready_ns.store(now_ns, std::memory_order_relaxed);
-            } else if (now_ns - ready_ns >= 350'000'000ull) {
+    // Detect exiting to World Map or entering/re-entering a cached course even when file_opened does not fire.
+    {
+        static int32_t prev_pcount = 0;
+        static int prev_wmap = -1;
+        const int32_t pcount = course_player_count();
+        const bool wmap = is_world_map_stage();
+        if (prev_wmap != int(wmap)) {
+            log("speedrun: stage wmap=%d pcount=%d session=%d", int(wmap), pcount,
+                int(g_in_course_session.load(std::memory_order_relaxed)));
+            prev_wmap = int(wmap);
+        }
+        if (g_in_course_session.load(std::memory_order_relaxed)) {
+            if (wmap || (prev_pcount > 0 && pcount == 0)) {
+                g_in_course_session.store(false, std::memory_order_relaxed);
+                g_in_house_session.store(false, std::memory_order_relaxed);
+                g_player_died.store(false, std::memory_order_relaxed);
                 g_stage_load_ended.store(false, std::memory_order_relaxed);
+                g_course_demo_active.store(false, std::memory_order_relaxed);
                 g_stage_ready_ns.store(0, std::memory_order_relaxed);
-                overlay::speedrun_begin_play();
+                overlay::speedrun_set_course(false);
+                log("speedrun: exited course (wmap=%d pcount=%d)", int(wmap), pcount);
+            }
+        } else if (wmap || (prev_pcount > 0 && pcount == 0)) {
+            g_in_house_session.store(false, std::memory_order_relaxed);
+        } else if (!wmap && pcount > 0 && !g_in_house_session.load(std::memory_order_relaxed) &&
+                   g_stage_mgr_off.load(std::memory_order_relaxed) != 0) {
+            g_in_course_session.store(true, std::memory_order_relaxed);
+            g_player_died.store(false, std::memory_order_relaxed);
+            g_stage_load_ended.store(false, std::memory_order_relaxed);
+            g_course_demo_active.store(false, std::memory_order_relaxed);
+            g_stage_ready_ns.store(0, std::memory_order_relaxed);
+            overlay::speedrun_set_course(true);
+            log("speedrun: armed course (re-entry/cached)");
+        }
+        prev_pcount = pcount;
+    }
+    if (g_in_course_session.load(std::memory_order_relaxed)) {
+        const uint64_t off = g_course_mgr_off.load(std::memory_order_relaxed);
+        const ModuleInfo* main = game_lib().main;
+        const uint64_t mgr = (off && main) ? ld<uint64_t>(main->base + off) : 0;
+        const uint64_t pinfo = mgr ? ld<uint64_t>(mgr + 0x40) : 0;
+        if (pinfo) {
+            static int32_t prev_flag = -1;
+            const int32_t count = int32_t(ld<uint32_t>(pinfo + 0x7e4));
+            const int32_t flag0 = count > 0 ? int32_t(ld<uint8_t>(pinfo + 0x7ca)) : -1;
+            if (flag0 != prev_flag) {
+                log("speedrun: pinfo count=%d flag0=%d armed=%d", count, flag0, int(overlay::speedrun_is_armed()));
+                prev_flag = flag0;
             }
         }
+        if (!overlay::speedrun_is_armed() && is_all_players_dead()) {
+            if (!g_player_died.exchange(true, std::memory_order_relaxed)) {
+                g_stage_load_ended.store(false, std::memory_order_relaxed);
+                g_course_demo_active.store(false, std::memory_order_relaxed);
+                g_stage_ready_ns.store(0, std::memory_order_relaxed);
+                overlay::speedrun_reset_course();
+                log("speedrun: all players dead, timer reset and armed");
+            }
+        }
+    }
+    static bool saw_fade_out = false;
+    static uint64_t armed_since_ns = 0;
+    static int prev_faded = -1;
+    if (overlay::speedrun_is_armed()) {
+        if (!armed_since_ns) armed_since_ns = now_ns;
+        const bool faded_in = is_faded_in();
+        if (prev_faded != int(faded_in)) {
+            prev_faded = int(faded_in);
+            log("speedrun: armed fade=%d load_ended=%d demo=%d", int(faded_in),
+                int(g_stage_load_ended.load(std::memory_order_relaxed)),
+                int(g_course_demo_active.load(std::memory_order_relaxed)));
+        }
+        if (!faded_in) {
+            saw_fade_out = true;
+            g_stage_ready_ns.store(0, std::memory_order_relaxed);
+        } else if (!g_course_demo_active.load(std::memory_order_relaxed)) {
+            const bool load_ended = g_stage_load_ended.load(std::memory_order_relaxed);
+            const bool respawned = g_player_died.load(std::memory_order_relaxed) && saw_fade_out;
+            if (load_ended || respawned) {
+                uint64_t ready_ns = g_stage_ready_ns.load(std::memory_order_relaxed);
+                if (!ready_ns) {
+                    g_stage_ready_ns.store(now_ns, std::memory_order_relaxed);
+                } else if (now_ns - ready_ns >= 350'000'000ull) {
+                    saw_fade_out = false;
+                    armed_since_ns = 0;
+                    prev_faded = -1;
+                    g_stage_load_ended.store(false, std::memory_order_relaxed);
+                    g_player_died.store(false, std::memory_order_relaxed);
+                    g_stage_ready_ns.store(0, std::memory_order_relaxed);
+                    overlay::speedrun_begin_play();
+                    log("speedrun: started (%s)", load_ended ? "EndLoadStage+fade" : "respawn+fade");
+                }
+            }
+        }
+        if (overlay::speedrun_is_armed() && now_ns - armed_since_ns >= 15'000'000'000ull) {
+            saw_fade_out = false;
+            armed_since_ns = 0;
+            prev_faded = -1;
+            g_stage_load_ended.store(false, std::memory_order_relaxed);
+            g_course_demo_active.store(false, std::memory_order_relaxed);
+            g_player_died.store(false, std::memory_order_relaxed);
+            g_stage_ready_ns.store(0, std::memory_order_relaxed);
+            overlay::speedrun_begin_play();
+            log("speedrun: started (15s failsafe)");
+        }
     } else {
+        saw_fade_out = false;
+        armed_since_ns = 0;
+        prev_faded = -1;
         g_stage_load_ended.store(false, std::memory_order_relaxed);
         g_course_demo_active.store(false, std::memory_order_relaxed);
         g_stage_ready_ns.store(0, std::memory_order_relaxed);
