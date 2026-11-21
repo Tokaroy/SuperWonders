@@ -14,6 +14,10 @@
 #include "kernel_state.h"
 #include "platform.h"
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace nx {
 
 using namespace kstate;
@@ -134,22 +138,44 @@ static void watchdog(void*) {
 // NX_THREAD_DUMP_AT=<seconds>: once, every guest thread's call chain (frame-pointer walk), to see what a stuck game
 // waits for.
 static void dump_threads() {
-    std::lock_guard al(g_all_lock);
-    for (auto& w : g_all) {
-        auto t = w.lock();
-        if (!t || !t->started || t->exited) continue;
-        std::string chain = describe(t->ctx.x[30]);
-        uint64_t fp = t->ctx.x[29];
-        for (int k = 0; k < 12 && fp && (fp & 7) == 0 && fp >= kModuleBase; k++) {
-            uint64_t lr = ld<uint64_t>(fp + 8);
-            if (!lr) break;
-            chain += " < " + describe(lr);
-            uint64_t next = ld<uint64_t>(fp);
-            if (next <= fp) break;
-            fp = next;
+    extern void dump_active_fibers(std::string (*describe)(uint64_t));
+    extern void dump_net_state();
+    {
+        std::lock_guard al(g_all_lock);
+        for (auto& w : g_all) {
+            auto t = w.lock();
+            if (!t || !t->started || t->exited) continue;
+            std::string chain = describe(t->ctx.x[30]);
+            uint64_t fp = t->ctx.x[29];
+            for (int k = 0; k < 12 && fp && (fp & 7) == 0 && fp >= kModuleBase; k++) {
+                uint64_t lr = ld<uint64_t>(fp + 8);
+                if (!lr) break;
+                chain += " < " + describe(lr);
+                uint64_t next = ld<uint64_t>(fp);
+                if (next <= fp) break;
+                fp = next;
+            }
+            log("threads: %llx (tid=%lld) %s", (unsigned long long)t->id, (long long)t->host_tid, chain.c_str());
+            if (!t->wait_handles.empty()) {
+                std::string hs;
+                for (uint32_t h : t->wait_handles) {
+                    auto o = handle_get(h);
+                    char buf[48];
+                    std::snprintf(buf, sizeof(buf), "%s%x:%d", hs.empty() ? "" : ",", h, o && o->signaled() ? 1 : 0);
+                    hs += buf;
+                }
+                log("threads: %llx wait_handles=[%s]", (unsigned long long)t->id, hs.c_str());
+            }
         }
-        log("threads: %llx %s", (unsigned long long)t->id, chain.c_str());
     }
+    dump_active_fibers(describe);
+    dump_net_state();
+}
+
+static std::atomic<uint64_t> g_dump_threads_at_ns{0};
+
+void request_thread_dump_in_ms(uint64_t ms) {
+    g_dump_threads_at_ns.store(plat::monotonic_ns() + ms * 1'000'000ull, std::memory_order_relaxed);
 }
 
 static void stall_sampler(void*) {
@@ -161,6 +187,17 @@ static void stall_sampler(void*) {
         plat::sleep_ns(5'000'000);
         uint64_t f = g_frame, now = plat::monotonic_ns();
         if (dump_at && now >= dump_at) dump_threads(), dump_at = 0;
+        const uint64_t req = g_dump_threads_at_ns.load(std::memory_order_relaxed);
+        if (req && now >= req) {
+            g_dump_threads_at_ns.store(0, std::memory_order_relaxed);
+            dump_threads();
+        }
+#if defined(_WIN32)
+        static bool f8_down = false;
+        const bool f8_now = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
+        if (f8_now && !f8_down) dump_threads();
+        f8_down = f8_now;
+#endif
         if (f != last_frame || plat::window_minimized()) {
             uint64_t ms = (now - since) / 1'000'000;
             if (last_frame && ms > 100 && !hits.empty()) {

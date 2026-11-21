@@ -348,6 +348,14 @@ void call(CPU& c, uint64_t t) {
         t_missing_name = prev;
         return;
     }
+    for (uint64_t fp = c.x[29], k = 0; k < 16 && fp && (fp & 7) == 0 && fp >= kModuleBase; ++k) {
+        const uint64_t lr = ld<uint64_t>(fp + 8);
+        if (!lr) break;
+        log("  #%llu  %s  (fp %llx)", (unsigned long long)k, describe(lr).c_str(), (unsigned long long)fp);
+        const uint64_t next = ld<uint64_t>(fp);
+        if (next <= fp) break;
+        fp = next;
+    }
     fatal("call to %llx (%s), lr %s", (unsigned long long)t, describe(t).c_str(), describe(c.x[30]).c_str());
 }
 

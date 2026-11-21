@@ -42,6 +42,10 @@ HUD_WRAPS = {
     'CourseInCourseName': (('N_Pos', -1),),
     'TalkFlowerCutIn': (('N_Anchor00', 1), ('N_Anchor01', -1), ('N_Anchor02', 1), ('N_Anchor03', -1)),
     'Result': (('N_FlashA', -1), ('N_FlashB', 1)),
+    'MemberList': (('P_ZigZagBG', -1), ('T_HeaderTitle', -1), ('T_Title', -1)),
+    'MemberListS': (('N_MemberList', -1),),
+    'GameDisplayOverlay': (('N_State', -1), ('N_StateHertPoint', -1)),
+    'RaceTimer': (('N_All', 1),),
     'StaffCreditsDisplay': (
         ('N_OverlapArea00', -1),
         ('N_Cap', -1),

@@ -83,7 +83,8 @@ class Kit:
 
     def find_compiler(self):
         exe = "clang++.exe" if WIN else "clang++"
-        for c in (os.environ.get("NX_GAMEBUILD_CXX"), os.path.join(HERE, "toolchain", "bin", exe)):
+        for c in (os.environ.get("NX_GAMEBUILD_CXX"), os.path.join(HERE, "toolchain", "bin", exe),
+                  os.path.join(os.path.dirname(self.root), "SuperWonders-builder-portable", "tools", "portable", "llvm-mingw", "bin", exe)):
             if c and os.path.isfile(c):
                 return c
         return shutil.which(exe) or shutil.which("clang++")
@@ -236,11 +237,63 @@ def recompile(kit, exefs, gen, done_before, share):
     """python -m recomp for each module, with the recompiler's own progress lines turned into ours."""
     env = dict(os.environ, PYTHONPATH=kit.root + os.pathsep + os.environ.get("PYTHONPATH", ""))
     env.pop("NX_TRACE_SP", None)
+    # Apply verified Nextendo NPLN IPS32 guards for Wonder 1.2.1 (010015100b514000) when recompiling main.
+    WONDER_121_NPLN_GUARDS = (
+        (11545508, bytes.fromhex("C10D0054"), bytes.fromhex("1F2003D5")),
+        (11545788, bytes.fromhex("00040035"), bytes.fromhex("1F2003D5")),
+        (11548200, bytes.fromhex("AAE24039"), bytes.fromhex("2A008052")),
+    )
+
+    def prepare_main_nso(exefs_dir, tmp_dir):
+        src_path = os.path.join(exefs_dir, "main")
+        with open(src_path, "rb") as f:
+            raw = f.read()
+        if len(raw) < 0x100 or raw[:4] != b"NSO0":
+            return src_path
+        bid = raw[0x40:0x54].hex().upper()
+        if bid != "FF773E90972D544EB79406EAA65396D53C43EFB9":
+            return src_path
+        import lz4.block
+        flags = struct.unpack_from("<I", raw, 0x0C)[0]
+        segs = []
+        for i in range(3):
+            file_off, mem_off, size = struct.unpack_from("<III", raw, 0x10 + i * 0x10)
+            comp = struct.unpack_from("<I", raw, 0x60 + i * 4)[0]
+            blob = raw[file_off:file_off + comp]
+            if flags & (1 << i):
+                blob = lz4.block.decompress(blob, uncompressed_size=size)
+            segs.append((mem_off, bytearray(blob)))
+        text = segs[0][1]
+        for off_nso, orig, patched in WONDER_121_NPLN_GUARDS:
+            off = off_nso - 0x100
+            if off < 0 or off + 4 > len(text) or bytes(text[off:off + 4]) != orig:
+                return src_path
+        for off_nso, _, patched in WONDER_121_NPLN_GUARDS:
+            off = off_nso - 0x100
+            text[off:off + 4] = patched
+        hdr = bytearray(raw[:0x100])
+        struct.pack_into("<I", hdr, 0x0C, 0)
+        cursor = 0x100
+        out_blobs = []
+        for i, (mem_off, blob) in enumerate(segs):
+            struct.pack_into("<III", hdr, 0x10 + i * 0x10, cursor, mem_off, len(blob))
+            struct.pack_into("<I", hdr, 0x60 + i * 4, len(blob))
+            cursor += len(blob)
+            out_blobs.append(bytes(blob))
+        patched_path = os.path.join(tmp_dir, "main.npln_patched.nso")
+        with open(patched_path, "wb") as f:
+            f.write(bytes(hdr))
+            for b in out_blobs:
+                f.write(b)
+        return patched_path
+
     for k, (name, base) in enumerate(MODULES):
         part = share * (0.85 if name == "main" else 0.15)
         start = done_before + (0 if k == 0 else share * 0.85)
+        os.makedirs(gen, exist_ok=True)
+        nso_input = prepare_main_nso(exefs, gen) if (GAME == "wonder" and name == "main") else os.path.join(exefs, name)
         # (-u: the recompiler's progress lines as they come, not all at the end)
-        cmd = [sys.executable, "-u", "-m", "recomp", os.path.join(exefs, name), os.path.join(gen, name),
+        cmd = [sys.executable, "-u", "-m", "recomp", nso_input, os.path.join(gen, name),
                "--name", name, "--base", base]
         if GAME == "wonder" and name == "main":
             cmd.append("--wonder-realtime")
