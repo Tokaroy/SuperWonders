@@ -737,12 +737,34 @@ uint64_t present_headless(uint64_t texture) {
 // gpu_present, under the GPU lock, before the game has drawn anything. Its progress goes to the platform (the Win32
 // window's painted screen when the ImGui overlay is off) and to the overlay's compile screen, which is presented here
 // on its own: a cleared swapchain image with the overlay on top, at most 30 times a second.
+static bool swapchain_size_mismatch() {
+    uint32_t pw = 0, ph = 0;
+    plat::window_size(pw, ph);
+    if (!pw || !ph) return false;
+    bool sideways = g_sc_transform & (VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR | VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR);
+    uint32_t ew = sideways ? g_sc_extent.height : g_sc_extent.width;
+    uint32_t eh = sideways ? g_sc_extent.width : g_sc_extent.height;
+    return pw != ew || ph != eh;
+}
+
+static bool swapchain_needs_remake(VkResult r) {
+    if (r == VK_ERROR_OUT_OF_DATE_KHR) return true;
+    if (r == VK_SUBOPTIMAL_KHR) {
+        VkSurfaceCapabilitiesKHR caps{};
+        p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_physical, g_surface, &caps);
+        if (caps.currentExtent.width != g_sc_current.width || caps.currentExtent.height != g_sc_current.height ||
+            (present_pass_wanted() && !present_pass_failed() && caps.currentTransform != g_sc_transform))
+            return true;
+    }
+    return swapchain_size_mismatch();
+}
+
 // A frame of the overlay alone: a cleared swapchain image with the overlay on top (the compile screen, the launcher).
 // The caller holds the GPU lock.
 static void present_overlay_frame() {
     static const bool headless_present = std::getenv("NX_HEADLESS_PRESENT") != nullptr;
     if ((plat::headless() && !headless_present) || plat::window_minimized()) return;
-    if (!g_swapchain && !make_swapchain()) return;
+    if ((!g_swapchain || swapchain_size_mismatch()) && !make_swapchain()) return;
     uint32_t index = 0;
     VkSemaphore acquired = async_gpu() ? frame_acquire_semaphore() : g_acquired;
     VkResult r = p_vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, acquired, VK_NULL_HANDLE, &index);
@@ -790,7 +812,7 @@ static void present_overlay_frame() {
     pi.pSwapchains = &g_swapchain;
     pi.pImageIndices = &index;
     r = p_vkQueuePresentKHR(g_queue, &pi);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR) make_swapchain();
+    if (swapchain_needs_remake(r)) make_swapchain();
 }
 
 void prep_progress(uint64_t done, uint64_t total, bool visible, int kind) {
@@ -950,14 +972,7 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
     plat::frame_presented();  // cores, CPU time, present intervals (frame_stats.cpp)
     // SUBOPTIMAL re-makes the swapchain only when the surface size changed: Android returns it for every present when
     // the swapchain's transform is not the display's (a Galaxy S23 did for Hades), a rebuild per frame.
-    bool remake = r == VK_ERROR_OUT_OF_DATE_KHR;
-    if (r == VK_SUBOPTIMAL_KHR) {  // compared with what the swapchain was made from (its extent may be turned)
-        VkSurfaceCapabilitiesKHR caps{};
-        p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_physical, g_surface, &caps);
-        remake = caps.currentExtent.width != g_sc_current.width || caps.currentExtent.height != g_sc_current.height ||
-                 (present_pass_wanted() && !present_pass_failed() && caps.currentTransform != g_sc_transform);
-    }
-    if (remake) make_swapchain();
+    if (swapchain_needs_remake(r)) make_swapchain();
 }
 
 }  // namespace nx::nvn
