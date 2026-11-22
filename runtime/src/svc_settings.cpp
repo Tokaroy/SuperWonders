@@ -11,7 +11,7 @@ namespace nx {
 namespace {
 
 constexpr const char* kLanguages[] = {"ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt",
-                                      "ru", "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"};
+                                      "ru", "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR", "pl", "th"};
 constexpr size_t kLegacyCount = 15;
 constexpr uint32_t kInvalidLanguage = (625u << 9) | 105u;  // Settings module, invalid language
 

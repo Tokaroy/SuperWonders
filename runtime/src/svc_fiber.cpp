@@ -341,12 +341,6 @@ void hle_switch_to_fiber(CPU& c) {
             backtrace(c);
         }
     }
-    static int sw_logs = 0;
-    if (sw_logs < 80) {
-        ++sw_logs;
-        log("fiber: [tid=%lu] SwitchToFiber %llx -> %llx", current_tid(),
-            (unsigned long long)cur_guest, (unsigned long long)target_guest);
-    }
     if (target_guest == cur_guest) return;
     if (!target_win) return;
     acquire_target_fiber(target_hf);

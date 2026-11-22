@@ -33,7 +33,7 @@ struct Settings {
     int stereo_separation = 100;  // 0..100% (used in Stereo mode)
     int language = 0;       // menu language: English, Italian, German, French, Spanish, Korean, Japanese, Arabic, Russian, Turkish, Dutch, Simplified Chinese, Traditional Chinese
     int theme = 0;          // UI style color preset: 0 Obsidian, 1 Cobalt, 2 Emerald, 3 Amber, 4 Crimson
-    int game_language = 0;  // en-US, it, de, fr, pt-BR, es, ko, ja, nl, ru, zh-CN, zh-TW
+    int game_language = 0;  // en-US, it, de, fr, pt-BR, es, ko, ja, nl, ru, zh-Hans, zh-Hant, pt, es-419, fr-CA, en-GB, th, pl
     int memory_limit_gb = 8;
     std::array<int, 4> player_devices{{0, 0, 0, 0}}; // 0 automatic, 1 none, 2 keyboard, 3..6 controller slots
     std::array<std::array<int, kControlCount>, 4> pad_bindings{};

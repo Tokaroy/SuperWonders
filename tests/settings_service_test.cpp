@@ -32,18 +32,20 @@ int main() {
     c.cmd = 0;
     assert(service->handle(c) == 0 && response<uint64_t>(c) == nx::game_language_code());
 
-    uint64_t codes[18]{};
+    uint64_t codes[20]{};
     c = {};
     c.cmd = 5;
     c.b.push_back({reinterpret_cast<uint64_t>(codes), sizeof codes});
-    assert(service->handle(c) == 0 && response<int32_t>(c) == 18);
+    assert(service->handle(c) == 0 && response<int32_t>(c) == 20);
     assert(std::memcmp(&codes[15], "zh-Hans", 7) == 0);
     assert(std::memcmp(&codes[16], "zh-Hant", 7) == 0);
     assert(std::memcmp(&codes[17], "pt-BR", 5) == 0);
+    assert(std::memcmp(&codes[18], "pl", 2) == 0);
+    assert(std::memcmp(&codes[19], "th", 2) == 0);
 
     c = {};
     c.cmd = 6;
-    assert(service->handle(c) == 0 && response<int32_t>(c) == 18);
+    assert(service->handle(c) == 0 && response<int32_t>(c) == 20);
     c = {};
     c.cmd = 3;
     assert(service->handle(c) == 0 && response<int32_t>(c) == 15);

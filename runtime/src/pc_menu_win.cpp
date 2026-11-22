@@ -9,6 +9,7 @@
 #include <cwchar>
 #include <iterator>
 #include <windowsx.h>
+#include "overlay/overlay.h"
 #include "svc_am.h"
 
 namespace nx::plat {
@@ -50,7 +51,8 @@ constexpr const wchar_t* kInternalResolution[13][10] = {
 constexpr const wchar_t* kLanguageNames[] = {L"English", L"Italiano", L"Deutsch", L"Français", L"Español", L"한국어", L"日本語", L"العربية", L"Русский", L"Türkçe", L"Nederlands", L"简体中文", L"繁體中文"};
 constexpr const wchar_t* kGameLanguageNames[] = {
     L"English", L"Italiano", L"Deutsch", L"Français", L"Português (Brasil)", L"Español", L"한국어", L"日本語",
-    L"Nederlands", L"Русский", L"Simplified Chinese", L"Traditional Chinese"};
+    L"Nederlands", L"Русский", L"Simplified Chinese", L"Traditional Chinese",
+    L"Português", L"Español (Latinoamérica)", L"Français (Canada)", L"English (UK)", L"Thai", L"Polski"};
 constexpr int kGameLanguageItemHeight = 20;
 constexpr int kFrameCaps[] = {30, 60, 90, 120, 144, 240};
 
@@ -471,12 +473,18 @@ void paint(HWND h) {
         }
     }
     if (g_game_language_dropdown && g_section == Section::Audio) {
-        for (int i = 0; i < int(std::size(kGameLanguageNames)); ++i) {
-            const int top = 386 + i * kGameLanguageItemHeight;
-            rounded(dc, RECT{44, top, 516, top + kGameLanguageItemHeight},
+        const int count = overlay::game_version() == "1.2.1" ? int(std::size(kGameLanguageNames)) : 16;
+        const int rows = (count + 1) / 2;
+        for (int i = 0; i < count; ++i) {
+            const int col = i / rows;
+            const int row = i % rows;
+            const int left = col == 0 ? 44 : 282;
+            const int right = col == 0 ? 278 : 516;
+            const int top = 386 + row * kGameLanguageItemHeight;
+            rounded(dc, RECT{left, top, right, top + kGameLanguageItemHeight},
                     i == g_state.game_language ? RGB(52, 84, 126) : RGB(35, 43, 61), RGB(92, 108, 136), 6);
-            paint_text(dc, kGameLanguageNames[i], RECT{52, top, 508, top + kGameLanguageItemHeight},
-                       RGB(238, 243, 252), 14, DT_CENTER | DT_VCENTER);
+            paint_text(dc, kGameLanguageNames[i], RECT{left + 6, top, right - 6, top + kGameLanguageItemHeight},
+                       RGB(238, 243, 252), 13, DT_CENTER | DT_VCENTER);
         }
     }
     EndPaint(h, &ps);
@@ -555,12 +563,20 @@ LRESULT CALLBACK menu_proc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                 notify(true);
                 return 0;
             }
-            if (g_game_language_dropdown && g_section == Section::Audio && x >= 44 && x <= 516 && y >= 386 &&
-                y < 386 + int(std::size(kGameLanguageNames)) * kGameLanguageItemHeight) {
-                g_state.game_language = (y - 386) / kGameLanguageItemHeight;
-                g_game_language_dropdown = false;
-                notify(true);
-                return 0;
+            if (g_game_language_dropdown && g_section == Section::Audio && x >= 44 && x <= 516 && y >= 386) {
+                const int count = overlay::game_version() == "1.2.1" ? int(std::size(kGameLanguageNames)) : 16;
+                const int rows = (count + 1) / 2;
+                if (y < 386 + rows * kGameLanguageItemHeight && (x <= 278 || x >= 282)) {
+                    const int col = x <= 278 ? 0 : 1;
+                    const int row = (y - 386) / kGameLanguageItemHeight;
+                    const int idx = col * rows + row;
+                    if (idx < count) {
+                        g_state.game_language = idx;
+                        g_game_language_dropdown = false;
+                        notify(true);
+                        return 0;
+                    }
+                }
             }
             if (g_language_dropdown && x >= kLanguageLeft && x <= kLanguageRight &&
                 y >= kLanguageBottom + 2 && y < kLanguageBottom + 2 + int(std::size(kLanguageNames)) * kLanguageItemHeight) {
