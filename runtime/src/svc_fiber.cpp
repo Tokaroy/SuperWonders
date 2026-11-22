@@ -1,4 +1,4 @@
-// nn::os::Fiber HLE backed by native Win32 Fibers (Windows) so NPLN/gRPC fibers context-switch cleanly on x86_64.
+// nn::os::Fiber HLE backed by native Win32 Fibers (Windows) or POSIX ucontext (Linux) so NPLN/gRPC fibers context-switch cleanly on x86_64.
 #include <nx/runtime.h>
 
 #include <algorithm>
@@ -7,9 +7,13 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
+#else
+#include <pthread.h>
+#include <ucontext.h>
 #endif
 
 namespace nx {
@@ -17,6 +21,14 @@ namespace nx {
 void backtrace(CPU&);
 
 namespace {
+
+unsigned long current_tid() {
+#if defined(_WIN32)
+    return static_cast<unsigned long>(GetCurrentThreadId());
+#else
+    return static_cast<unsigned long>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+#endif
+}
 
 struct HostFiber {
     uint64_t guest_fiber = 0;
@@ -27,6 +39,10 @@ struct HostFiber {
     CPU cpu{};
 #if defined(_WIN32)
     void* win_fiber = nullptr;
+#else
+    ucontext_t uctx{};
+    std::vector<uint8_t> host_stack;
+    bool has_ctx = false;
 #endif
 };
 
@@ -75,6 +91,55 @@ void release_prev_fiber() {
         st.prev_to_release->active.store(false, std::memory_order_release);
         st.prev_to_release = nullptr;
     }
+}
+#else
+struct ThreadFiberState {
+    ucontext_t root_ctx{};
+    bool has_root = false;
+    uint64_t current_guest = 0;
+    HostFiber* current_host = nullptr;
+    HostFiber* prev_to_release = nullptr;
+};
+
+pthread_key_t fiber_tls_key() {
+    static const pthread_key_t key = []() {
+        pthread_key_t k{};
+        pthread_key_create(&k, [](void* p) { delete static_cast<ThreadFiberState*>(p); });
+        return k;
+    }();
+    return key;
+}
+
+__attribute__((noinline)) ThreadFiberState& thread_fiber_state() {
+    asm volatile("" ::: "memory");
+    const pthread_key_t key = fiber_tls_key();
+    auto* st = static_cast<ThreadFiberState*>(pthread_getspecific(key));
+    if (!st) {
+        st = new ThreadFiberState();
+        pthread_setspecific(key, st);
+    }
+    return *st;
+}
+
+__attribute__((noinline)) void read_thread_tls_ptrs(uint64_t& tpidr, uint64_t& tpidrro) {
+    asm volatile("" ::: "memory");
+    CPU& c = current_cpu();
+    tpidr = c.tpidr;
+    tpidrro = c.tpidrro;
+}
+
+void release_prev_fiber() {
+    auto& st = thread_fiber_state();
+    if (st.prev_to_release) {
+        st.prev_to_release->active.store(false, std::memory_order_release);
+        st.prev_to_release = nullptr;
+    }
+}
+
+__attribute__((noinline)) void posix_switch_fiber(ucontext_t* from_ctx, ucontext_t* to_ctx) {
+    asm volatile("" ::: "memory");
+    ::swapcontext(from_ctx, to_ctx);
+    asm volatile("" ::: "memory");
 }
 #endif
 
@@ -134,6 +199,51 @@ VOID WINAPI fiber_entry_proc(PVOID param) {
     write_thread_current_fiber(tpidrro, next_guest);
     if (target_win) win_switch_fiber(target_win);
 }
+#else
+void posix_fiber_entry(uint32_t lo, uint32_t hi) {
+    release_prev_fiber();
+    const uintptr_t ptr_val = (uintptr_t(hi) << 32) | uintptr_t(lo);
+    auto* hf = reinterpret_cast<HostFiber*>(ptr_val);
+    read_thread_tls_ptrs(hf->cpu.tpidr, hf->cpu.tpidrro);
+    hf->cpu.x[0] = hf->arg;
+    hf->cpu.x[29] = 0;
+    hf->cpu.x[30] = 0;
+    hf->cpu.x[31] = hf->stack_top;
+    call(hf->cpu, hf->entry);
+    const uint64_t next_guest = hf->cpu.x[0];
+    static int ret_logs = 0;
+    if (ret_logs < 25) {
+        ++ret_logs;
+        log("fiber: [tid=%lu] entry_return %llx -> %llx", current_tid(),
+            (unsigned long long)hf->guest_fiber, (unsigned long long)next_guest);
+    }
+    HostFiber* target_hf = nullptr;
+    ucontext_t* target_ctx = nullptr;
+    if (next_guest) {
+        std::lock_guard lk(g_fiber_mu);
+        auto it = g_fibers.find(next_guest);
+        if (it != g_fibers.end() && it->second->has_ctx) {
+            target_hf = it->second;
+            target_ctx = &target_hf->uctx;
+        }
+    }
+    if (!target_ctx) target_ctx = &thread_fiber_state().root_ctx;
+    acquire_target_fiber(target_hf);
+    uint64_t tpidr = 0, tpidrro = 0;
+    read_thread_tls_ptrs(tpidr, tpidrro);
+    {
+        auto& st = thread_fiber_state();
+        st.current_guest = next_guest;
+        st.current_host = target_hf;
+        st.prev_to_release = hf;
+    }
+    if (target_hf) {
+        target_hf->cpu.tpidr = tpidr;
+        target_hf->cpu.tpidrro = tpidrro;
+    }
+    write_thread_current_fiber(tpidrro, next_guest);
+    if (target_ctx) ::setcontext(target_ctx);
+}
 #endif
 
 void hle_initialize_fiber(CPU& c) {
@@ -150,7 +260,7 @@ void hle_initialize_fiber(CPU& c) {
     if (init_logs < 200) {
         ++init_logs;
         log("fiber: [tid=%lu] InitializeFiber ptr=%llx entry=%llx arg=%llx lr=%s",
-            (unsigned long)GetCurrentThreadId(),
+            current_tid(),
             (unsigned long long)fiber_ptr, (unsigned long long)entry,
             (unsigned long long)arg, describe(c.x[30]).c_str());
     }
@@ -162,6 +272,19 @@ void hle_initialize_fiber(CPU& c) {
 #if defined(_WIN32)
     const SIZE_T host_stack = SIZE_T(std::max<uint64_t>(stack_size, 2ull * 1024 * 1024));
     hf->win_fiber = CreateFiber(host_stack, fiber_entry_proc, hf);
+#else
+    const size_t host_stack = std::max<size_t>(size_t(stack_size), 2u * 1024 * 1024);
+    hf->host_stack.resize(host_stack);
+    if (::getcontext(&hf->uctx) == 0) {
+        hf->uctx.uc_stack.ss_sp = hf->host_stack.data();
+        hf->uctx.uc_stack.ss_size = hf->host_stack.size();
+        hf->uctx.uc_link = nullptr;
+        const uintptr_t p = reinterpret_cast<uintptr_t>(hf);
+        const uint32_t lo = uint32_t(p & 0xFFFFFFFFu);
+        const uint32_t hi = uint32_t((uint64_t(p) >> 32) & 0xFFFFFFFFu);
+        ::makecontext(&hf->uctx, reinterpret_cast<void (*)()>(posix_fiber_entry), 2, lo, hi);
+        hf->has_ctx = true;
+    }
 #endif
     HostFiber* old_hf = nullptr;
     {
@@ -218,11 +341,14 @@ void hle_switch_to_fiber(CPU& c) {
             backtrace(c);
         }
     }
+    static int sw_logs = 0;
+    if (sw_logs < 80) {
+        ++sw_logs;
+        log("fiber: [tid=%lu] SwitchToFiber %llx -> %llx", current_tid(),
+            (unsigned long long)cur_guest, (unsigned long long)target_guest);
+    }
     if (target_guest == cur_guest) return;
     if (!target_win) return;
-    // Each fiber owns its own HostFiber::cpu and an `active` handoff flag so cross-thread
-    // fiber migration never runs or frees the same Win32 fiber on two threads concurrently.
-    // Never cache ThreadFiberState& or thread_local across win_switch_fiber().
     acquire_target_fiber(target_hf);
     uint64_t tpidr = 0, tpidrro = 0;
     read_thread_tls_ptrs(tpidr, tpidrro);
@@ -259,7 +385,67 @@ void hle_switch_to_fiber(CPU& c) {
     read_thread_tls_ptrs(c.tpidr, c.tpidrro);
     write_thread_current_fiber(c.tpidrro, cur_guest);
 #else
-    (void)c;
+    const uint64_t target_guest = c.x[0];
+    uint64_t cur_guest = 0;
+    HostFiber* cur_host = nullptr;
+    ucontext_t* from_ctx = nullptr;
+    {
+        auto& st = thread_fiber_state();
+        if (!st.has_root) {
+            ::getcontext(&st.root_ctx);
+            st.has_root = true;
+        }
+        cur_guest = st.current_guest;
+        cur_host = st.current_host;
+        from_ctx = cur_host ? &cur_host->uctx : &st.root_ctx;
+    }
+    HostFiber* target_hf = nullptr;
+    ucontext_t* target_ctx = nullptr;
+    if (target_guest == 0) {
+        target_ctx = &thread_fiber_state().root_ctx;
+    } else {
+        std::lock_guard lk(g_fiber_mu);
+        auto it = g_fibers.find(target_guest);
+        if (it != g_fibers.end() && it->second->has_ctx) {
+            target_hf = it->second;
+            target_ctx = &target_hf->uctx;
+        }
+    }
+    static int sw_logs = 0;
+    if (sw_logs < 80) {
+        ++sw_logs;
+        log("fiber: [tid=%lu] SwitchToFiber %llx -> %llx", current_tid(),
+            (unsigned long long)cur_guest, (unsigned long long)target_guest);
+    }
+    if (target_guest == cur_guest) return;
+    if (!target_ctx) return;
+    acquire_target_fiber(target_hf);
+    uint64_t tpidr = 0, tpidrro = 0;
+    read_thread_tls_ptrs(tpidr, tpidrro);
+    {
+        auto& st = thread_fiber_state();
+        st.current_guest = target_guest;
+        st.current_host = target_hf;
+        st.prev_to_release = cur_host;
+    }
+    if (cur_host) {
+        cur_host->cpu.x[29] = c.x[29];
+        cur_host->cpu.x[30] = c.x[30];
+    }
+    if (target_hf) {
+        target_hf->cpu.tpidr = tpidr;
+        target_hf->cpu.tpidrro = tpidrro;
+    }
+    write_thread_current_fiber(tpidrro, target_guest);
+    posix_switch_fiber(from_ctx, target_ctx);
+    release_prev_fiber();
+    {
+        auto& st = thread_fiber_state();
+        st.current_guest = cur_guest;
+        st.current_host = cur_host;
+    }
+    read_thread_tls_ptrs(c.tpidr, c.tpidrro);
+    write_thread_current_fiber(c.tpidrro, cur_guest);
 #endif
 }
 
@@ -278,7 +464,7 @@ void hle_finalize_fiber(CPU& c) {
         static int fin_logs = 0;
         if (fin_logs < 200) {
             ++fin_logs;
-            log("fiber: [tid=%lu] FinalizeFiber %llx", (unsigned long)GetCurrentThreadId(),
+            log("fiber: [tid=%lu] FinalizeFiber %llx", current_tid(),
                 (unsigned long long)fiber_ptr);
         }
         while (hf->active.load(std::memory_order_acquire)) {
@@ -292,11 +478,7 @@ void hle_finalize_fiber(CPU& c) {
 }
 
 void hle_get_current_fiber(CPU& c) {
-#if defined(_WIN32)
     c.x[0] = thread_fiber_state().current_guest;
-#else
-    c.x[0] = 0;
-#endif
 }
 
 }  // namespace

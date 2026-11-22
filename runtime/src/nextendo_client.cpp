@@ -26,6 +26,15 @@
 #include <bcrypt.h>
 #include <shellapi.h>
 #include <winhttp.h>
+#else
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <random>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace nx::nextendo {
@@ -176,8 +185,8 @@ void load_locked() {
 }
 
 #if defined(_WIN32)
-bool winhttp_request(const std::string& method, const std::string& path, const std::string& headers,
-                     const std::string& body, DWORD& out_status, std::string& out_body) {
+bool http_request(const std::string& method, const std::string& path, const std::string& headers,
+                  const std::string& body, uint32_t& out_status, std::string& out_body) {
     out_status = 0;
     out_body.clear();
     const std::string host = api_base_host();
@@ -199,9 +208,11 @@ bool winhttp_request(const std::string& method, const std::string& path, const s
                                   body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(body.data()),
                                   DWORD(body.size()), DWORD(body.size()), 0) &&
         WinHttpReceiveResponse(req, nullptr)) {
-        DWORD sz = sizeof(out_status);
+        DWORD st = 0;
+        DWORD sz = sizeof(st);
         WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-                            &out_status, &sz, WINHTTP_NO_HEADER_INDEX);
+                            &st, &sz, WINHTTP_NO_HEADER_INDEX);
+        out_status = uint32_t(st);
         DWORD avail = 0;
         while (WinHttpQueryDataAvailable(req, &avail) && avail > 0) {
             std::string chunk(avail, '\0');
@@ -218,6 +229,10 @@ bool winhttp_request(const std::string& method, const std::string& path, const s
     return ok;
 }
 
+void random_bytes(uint8_t* dst, size_t n) {
+    BCryptGenRandom(nullptr, dst, ULONG(n), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+}
+
 bool sha256_bytes(const uint8_t* in, size_t len, uint8_t out[32]) {
     BCRYPT_ALG_HANDLE alg = nullptr;
     BCRYPT_HASH_HANDLE hash = nullptr;
@@ -228,19 +243,6 @@ bool sha256_bytes(const uint8_t* in, size_t len, uint8_t out[32]) {
     if (hash) BCryptDestroyHash(hash);
     BCryptCloseAlgorithmProvider(alg, 0);
     return ok;
-}
-
-std::string random_hex(size_t bytes_count) {
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::vector<uint8_t> buf(bytes_count, 0);
-    BCryptGenRandom(nullptr, buf.data(), ULONG(buf.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-    std::string out;
-    out.reserve(bytes_count * 2);
-    for (uint8_t b : buf) {
-        out.push_back(kHex[(b >> 4) & 0xF]);
-        out.push_back(kHex[b & 0xF]);
-    }
-    return out;
 }
 
 std::string sign_rs256_jwt(const std::string& header_and_payload) {
@@ -291,19 +293,227 @@ std::string sign_rs256_jwt(const std::string& header_and_payload) {
     BCryptCloseAlgorithmProvider(rsa_alg, 0);
     return sig_b64;
 }
+
+void open_browser_url(const std::string& url) {
+    ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+#else
+bool run_exec_capture(const std::vector<std::string>& args, const std::string& stdin_data,
+                      std::string& stdout_data, int& exit_code) {
+    stdout_data.clear();
+    exit_code = -1;
+    int in_pipe[2]{-1, -1};
+    int out_pipe[2]{-1, -1};
+    if (pipe(in_pipe) != 0) return false;
+    if (pipe(out_pipe) != 0) {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        return false;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        return false;
+    }
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        std::vector<char*> argv;
+        argv.reserve(args.size() + 1);
+        for (const auto& a : args) argv.push_back(const_cast<char*>(a.c_str()));
+        argv.push_back(nullptr);
+        execvp(argv[0], argv.data());
+        _exit(127);
+    }
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    size_t written = 0;
+    while (written < stdin_data.size()) {
+        ssize_t w = write(in_pipe[1], stdin_data.data() + written, stdin_data.size() - written);
+        if (w <= 0) break;
+        written += size_t(w);
+    }
+    close(in_pipe[1]);
+    char buf[4096];
+    for (;;) {
+        ssize_t r = read(out_pipe[0], buf, sizeof(buf));
+        if (r <= 0) break;
+        stdout_data.append(buf, size_t(r));
+    }
+    close(out_pipe[0]);
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return false;
+    if (WIFEXITED(status)) exit_code = WEXITSTATUS(status);
+    return exit_code == 0;
+}
+
+bool http_request(const std::string& method, const std::string& path, const std::string& headers,
+                  const std::string& body, uint32_t& out_status, std::string& out_body) {
+    out_status = 0;
+    out_body.clear();
+    const std::string url = "https://" + api_base_host() + path;
+    std::vector<std::string> args = {
+        "curl", "-sS", "--max-time", "15", "-X", method, "-w", "\n%{http_code}", url,
+    };
+    std::istringstream hs(headers);
+    std::string line;
+    while (std::getline(hs, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+        if (!line.empty()) {
+            args.push_back("-H");
+            args.push_back(line);
+        }
+    }
+    if (!body.empty()) {
+        args.push_back("--data-binary");
+        args.push_back("@-");
+    }
+    std::string raw;
+    int rc = -1;
+    if (!run_exec_capture(args, body, raw, rc)) return false;
+    const size_t nl = raw.rfind('\n');
+    if (nl == std::string::npos) return false;
+    out_status = uint32_t(std::strtoul(raw.substr(nl + 1).c_str(), nullptr, 10));
+    out_body = raw.substr(0, nl);
+    return out_status > 0;
+}
+
+void random_bytes(uint8_t* dst, size_t n) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0) {
+        size_t got = 0;
+        while (got < n) {
+            ssize_t r = read(fd, dst + got, n - got);
+            if (r <= 0) break;
+            got += size_t(r);
+        }
+        close(fd);
+        if (got == n) return;
+    }
+    std::random_device rd;
+    for (size_t i = 0; i < n; ++i) dst[i] = uint8_t(rd());
+}
+
+bool sha256_bytes(const uint8_t* in, size_t len, uint8_t out[32]) {
+    static constexpr uint32_t k[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    auto rotr = [](uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); };
+    std::vector<uint8_t> msg(in, in + len);
+    msg.push_back(0x80);
+    while ((msg.size() % 64) != 56) msg.push_back(0);
+    const uint64_t bits = uint64_t(len) * 8;
+    for (int i = 7; i >= 0; --i) msg.push_back(uint8_t((bits >> (i * 8)) & 0xFF));
+    for (size_t off = 0; off < msg.size(); off += 64) {
+        uint32_t w[64]{};
+        for (int i = 0; i < 16; ++i)
+            w[i] = (uint32_t(msg[off + i * 4]) << 24) | (uint32_t(msg[off + i * 4 + 1]) << 16) |
+                   (uint32_t(msg[off + i * 4 + 2]) << 8) | uint32_t(msg[off + i * 4 + 3]);
+        for (int i = 16; i < 64; ++i) {
+            const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+        for (int i = 0; i < 64; ++i) {
+            const uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const uint32_t ch = (e & f) ^ ((~e) & g);
+            const uint32_t t1 = hh + S1 + ch + k[i] + w[i];
+            const uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            const uint32_t t2 = S0 + maj;
+            hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+    }
+    for (int i = 0; i < 8; ++i) {
+        out[i * 4 + 0] = uint8_t((h[i] >> 24) & 0xFF);
+        out[i * 4 + 1] = uint8_t((h[i] >> 16) & 0xFF);
+        out[i * 4 + 2] = uint8_t((h[i] >> 8) & 0xFF);
+        out[i * 4 + 3] = uint8_t(h[i] & 0xFF);
+    }
+    return true;
+}
+
+std::string sign_rs256_jwt(const std::string& header_and_payload) {
+    if (g_data_root.empty()) return {};
+    const auto key_path = std::filesystem::u8path(g_data_root) / "nextendo-rsa.pem";
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(key_path, ec)) {
+        std::string out;
+        int rc = -1;
+        run_exec_capture({"openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048",
+                          "-out", key_path.string()},
+                         "", out, rc);
+    }
+    std::string sig;
+    int rc = -1;
+    if (!run_exec_capture({"openssl", "dgst", "-sha256", "-sign", key_path.string()},
+                          header_and_payload, sig, rc) ||
+        sig.empty())
+        return {};
+    return base64url(reinterpret_cast<const uint8_t*>(sig.data()), sig.size());
+}
+
+void open_browser_url(const std::string& url) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        execlp("xdg-open", "xdg-open", url.c_str(), nullptr);
+        _exit(127);
+    }
+}
 #endif
 
+std::string random_hex(size_t bytes_count) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::vector<uint8_t> buf(bytes_count, 0);
+    random_bytes(buf.data(), buf.size());
+    std::string out;
+    out.reserve(bytes_count * 2);
+    for (uint8_t b : buf) {
+        out.push_back(kHex[(b >> 4) & 0xF]);
+        out.push_back(kHex[b & 0xF]);
+    }
+    return out;
+}
+
 bool refresh_oauth_token_locked() {
-#if defined(_WIN32)
     if (g_refresh_token.empty() || g_client_id.empty()) return false;
     const std::string form =
         "grant_type=refresh_token&refresh_token=" + url_encode(g_refresh_token) +
         "&client_id=" + url_encode(g_client_id);
-    DWORD st = 0;
+    uint32_t st = 0;
     std::string body;
     const std::string hdrs =
         "Content-Type: application/x-www-form-urlencoded\r\nX-Nextendo-Client-Id: " + g_client_id + "\r\n";
-    if (winhttp_request("POST", "/api/oauth/token", hdrs, form, st, body) && st == 200) {
+    if (http_request("POST", "/api/oauth/token", hdrs, form, st, body) && st == 200) {
         const std::string at = json_get_string(body, "access_token");
         const std::string rt = json_get_string(body, "refresh_token");
         if (!at.empty()) g_access_token = at;
@@ -313,18 +523,16 @@ bool refresh_oauth_token_locked() {
         return !at.empty();
     }
     log("nextendo: OAuth refresh failed (HTTP %lu)", (unsigned long)st);
-#endif
     return false;
 }
 
 bool fetch_nex_token_locked() {
-#if defined(_WIN32)
     if (g_access_token.empty() || g_client_id.empty()) return false;
-    DWORD st = 0;
+    uint32_t st = 0;
     std::string body;
     const std::string hdrs =
         "Authorization: Bearer " + g_access_token + "\r\nX-Nextendo-Client-Id: " + g_client_id + "\r\n";
-    if (!winhttp_request("GET", "/api/nex-token", hdrs, "", st, body)) {
+    if (!http_request("GET", "/api/nex-token", hdrs, "", st, body)) {
         g_last_error = "Network error contacting Nextendo /api/nex-token";
         return false;
     }
@@ -347,8 +555,15 @@ bool fetch_nex_token_locked() {
         }
     }
     g_last_error = "Nextendo /api/nex-token failed (HTTP " + std::to_string(st) + ")";
-#endif
     return false;
+}
+
+void set_env_var(const char* name, const char* value) {
+#if defined(_WIN32)
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
 }
 
 }  // namespace
@@ -357,7 +572,7 @@ void init(const std::string& data_root) {
     std::lock_guard lk(g_mu);
     g_data_root = data_root;
     load_locked();
-    if (g_enabled) _putenv_s("NX_ONLINE_MODE", "1");
+    if (g_enabled) set_env_var("NX_ONLINE_MODE", "1");
 }
 
 void shutdown() {
@@ -374,7 +589,7 @@ Status status() {
 void set_enabled(bool enabled) {
     std::lock_guard lk(g_mu);
     g_enabled = enabled;
-    _putenv_s("NX_ONLINE_MODE", enabled ? "1" : "0");
+    set_env_var("NX_ONLINE_MODE", enabled ? "1" : "0");
     save_locked();
 }
 
@@ -399,7 +614,6 @@ void sign_out() {
 }
 
 bool begin_oauth_login() {
-#if defined(_WIN32)
     if (g_login_busy.exchange(true)) return false;
     std::string client_id;
     {
@@ -408,24 +622,33 @@ bool begin_oauth_login() {
     }
     std::thread([client_id]() {
         uint8_t verifier_raw[32]{};
-        BCryptGenRandom(nullptr, verifier_raw, sizeof(verifier_raw), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+        random_bytes(verifier_raw, sizeof(verifier_raw));
         const std::string verifier = base64url(verifier_raw, sizeof(verifier_raw));
         uint8_t challenge_raw[32]{};
         sha256_bytes(reinterpret_cast<const uint8_t*>(verifier.data()), verifier.size(), challenge_raw);
         const std::string challenge = base64url(challenge_raw, sizeof(challenge_raw));
 
+#if defined(_WIN32)
         WSADATA wsa{};
         WSAStartup(MAKEWORD(2, 2), &wsa);
-        SOCKET srv = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        BOOL yes = TRUE;
-        if (srv != INVALID_SOCKET) setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+        using sock_t = SOCKET;
+        constexpr sock_t kBadSock = INVALID_SOCKET;
+        auto close_sock = [](sock_t s) { closesocket(s); };
+#else
+        using sock_t = int;
+        constexpr sock_t kBadSock = -1;
+        auto close_sock = [](sock_t s) { close(s); };
+#endif
+        sock_t srv = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        int yes = 1;
+        if (srv != kBadSock) setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port = htons(kCallbackPort);
-        if (srv == INVALID_SOCKET || ::bind(srv, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0 ||
+        if (srv == kBadSock || ::bind(srv, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0 ||
             ::listen(srv, 1) != 0) {
-            if (srv != INVALID_SOCKET) closesocket(srv);
+            if (srv != kBadSock) close_sock(srv);
             std::lock_guard lk(g_mu);
             g_last_error = "Could not open local OAuth callback listener on 127.0.0.1:47823";
             g_login_busy = false;
@@ -436,14 +659,19 @@ bool begin_oauth_login() {
                                      url_encode(client_id) + "&redirect_uri=" + url_encode(kRedirectUri) +
                                      "&response_type=code&scope=" + url_encode("identity friends game.matchmaking") +
                                      "&code_challenge=" + url_encode(challenge) + "&code_challenge_method=S256";
-        ShellExecuteA(nullptr, "open", auth_url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        open_browser_url(auth_url);
 
+#if defined(_WIN32)
         DWORD timeout_ms = 180000;
         setsockopt(srv, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
-        SOCKET cli = ::accept(srv, nullptr, nullptr);
-        closesocket(srv);
+#else
+        timeval tv{180, 0};
+        setsockopt(srv, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+        sock_t cli = ::accept(srv, nullptr, nullptr);
+        close_sock(srv);
         std::string code;
-        if (cli != INVALID_SOCKET) {
+        if (cli != kBadSock) {
             char req_buf[4096]{};
             int n = ::recv(cli, req_buf, sizeof(req_buf) - 1, 0);
             if (n > 0) {
@@ -460,7 +688,7 @@ bool begin_oauth_login() {
                 "<h2>Nextendo login complete</h2><p>You can close this tab and return to SuperWonders.</p>"
                 "</body></html>";
             ::send(cli, html, int(std::strlen(html)), 0);
-            closesocket(cli);
+            close_sock(cli);
         }
         if (code.empty()) {
             std::lock_guard lk(g_mu);
@@ -472,11 +700,11 @@ bool begin_oauth_login() {
         const std::string form =
             "grant_type=authorization_code&code=" + url_encode(code) + "&redirect_uri=" + url_encode(kRedirectUri) +
             "&client_id=" + url_encode(client_id) + "&code_verifier=" + url_encode(verifier);
-        DWORD st = 0;
+        uint32_t st = 0;
         std::string body;
         const std::string hdrs =
             "Content-Type: application/x-www-form-urlencoded\r\nX-Nextendo-Client-Id: " + client_id + "\r\n";
-        if (winhttp_request("POST", "/api/oauth/token", hdrs, form, st, body) && st == 200) {
+        if (http_request("POST", "/api/oauth/token", hdrs, form, st, body) && st == 200) {
             std::lock_guard lk(g_mu);
             g_access_token = json_get_string(body, "access_token");
             g_refresh_token = json_get_string(body, "refresh_token");
@@ -488,13 +716,9 @@ bool begin_oauth_login() {
         g_login_busy = false;
     }).detach();
     return true;
-#else
-    return false;
-#endif
 }
 
 std::string get_baas_id_token(const std::string& game_version) {
-#if defined(_WIN32)
     std::lock_guard lk(g_mu);
     const int64_t now = std::time(nullptr);
     if (g_nex_token.empty() || now + 60 >= g_nex_expires_at) {
@@ -528,10 +752,6 @@ std::string get_baas_id_token(const std::string& game_version) {
     g_cached_jwt = signing_input + "." + sig;
     g_cached_jwt_exp = exp;
     return g_cached_jwt;
-#else
-    (void)game_version;
-    return {};
-#endif
 }
 
 uint64_t current_pid() {
@@ -540,7 +760,6 @@ uint64_t current_pid() {
 }
 
 void start_session_heartbeat() {
-#if defined(_WIN32)
     std::lock_guard lk(g_mu);
     if (!g_enabled || g_heartbeat_thread.joinable()) return;
     g_heartbeat_stop = false;
@@ -553,17 +772,16 @@ void start_session_heartbeat() {
                 cid = g_client_id;
             }
             if (!tok.empty()) {
-                DWORD st = 0;
+                uint32_t st = 0;
                 std::string body;
                 const std::string hdrs = "Authorization: Bearer " + tok + "\r\nX-Nextendo-Client-Id: " + cid +
                                          "\r\nContent-Type: application/json\r\n";
-                winhttp_request("POST", "/api/nex-session", hdrs, "{}", st, body);
+                http_request("POST", "/api/nex-session", hdrs, "{}", st, body);
             }
             for (int i = 0; i < 60 && !g_heartbeat_stop.load(); ++i)
                 std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     });
-#endif
 }
 
 std::vector<FriendInfo> get_friends() {
@@ -596,13 +814,12 @@ std::vector<FriendInfo> get_friends() {
             if (pid != 0) out.push_back({pid, nick.empty() ? "Friend" : nick, 2, true});
         }
     }
-#if defined(_WIN32)
     if (!tok.empty() && !cid.empty()) {
-        DWORD st = 0;
+        uint32_t st = 0;
         std::string body;
         auto fetch_friends = [&](const std::string& t) {
             const std::string hdrs = "Authorization: Bearer " + t + "\r\nX-Nextendo-Client-Id: " + cid + "\r\n";
-            return winhttp_request("GET", "/api/friends", hdrs, "", st, body);
+            return http_request("GET", "/api/friends", hdrs, "", st, body);
         };
         bool ok = fetch_friends(tok);
         if (ok && st == 401) {
@@ -661,7 +878,6 @@ std::vector<FriendInfo> get_friends() {
             }
         }
     }
-#endif
     cached = out;
     cached_at = now;
     return out;

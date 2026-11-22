@@ -25,6 +25,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #if defined(__linux__)
@@ -33,6 +34,26 @@
 #endif
 
 namespace nx::net {
+
+namespace {
+
+int host_last_sock_error() {
+#if defined(_WIN32)
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+bool is_connect_in_progress(int err) {
+#if defined(_WIN32)
+    return err == WSAEWOULDBLOCK || err == WSAEINPROGRESS;
+#else
+    return err == EWOULDBLOCK || err == EINPROGRESS;
+#endif
+}
+
+}  // namespace
 
 bool online_enabled() {
     static const bool env_on = [] {
@@ -238,8 +259,14 @@ bool wait_ready_nowait(HostSocket s, short events) {
     }
     return true;
 #else
-    (void)s;
-    (void)events;
+    short ev = events;
+    if (ev & POLLRDNORM) ev = short((ev & ~POLLRDNORM) | POLLIN);
+    pollfd pfd{s, ev, 0};
+    const int ready = ::poll(&pfd, 1, 0);
+    if (ready == 0) {
+        set_guest_errno(11);  // EAGAIN / EWOULDBLOCK
+        return false;
+    }
     return true;
 #endif
 }
@@ -550,7 +577,9 @@ void sock_socket(CPU& c) {
     const int host_type = (type == net::kNxSockStream) ? SOCK_STREAM : (type == net::kNxSockDgram ? SOCK_DGRAM : type);
     const net::HostSocket s = ::socket(host_fam, host_type, proto);
     if (s == net::kBadHostSocket) {
-        c.x[0] = uint64_t(int64_t(net::capture_host_error()));
+        const int err = net::capture_host_error();
+        log("socket: Socket(fam=%d, type=%d, proto=%d) FAILED err=%d", family, type, proto, err);
+        c.x[0] = uint64_t(int64_t(err));
         return;
     }
 #ifdef _WIN32
@@ -598,15 +627,15 @@ void sock_connect(CPU& c) {
     }
     const int rc = ::connect(s, reinterpret_cast<const sockaddr*>(&sin), sizeof(sin));
     static int conn_logs = 0;
-    if (conn_logs < 15) {
+    if (conn_logs < 64) {
         ++conn_logs;
-        const int werr = rc == 0 ? 0 : WSAGetLastError();
+        const int werr = rc == 0 ? 0 : net::host_last_sock_error();
         log("socket: Connect(fd=%d, ip=%#x, port=%u) -> rc=%d werr=%d", fd, sin.sin_addr.s_addr,
             ntohs(sin.sin_port), rc, werr);
     }
     if (rc != 0) {
-        const int werr = WSAGetLastError();
-        if (werr == WSAEWOULDBLOCK || werr == WSAEINPROGRESS) {
+        const int werr = net::host_last_sock_error();
+        if (net::is_connect_in_progress(werr)) {
             net::set_guest_errno(115);  // EINPROGRESS for non-blocking connect
             c.x[0] = uint64_t(-1);
             return;
@@ -697,8 +726,8 @@ void sock_getname_impl(CPU& c, bool peer) {
     const int rc = peer ? ::getpeername(s, reinterpret_cast<sockaddr*>(&sin), &slen)
                         : ::getsockname(s, reinterpret_cast<sockaddr*>(&sin), &slen);
     if (rc != 0) {
-        const int werr = WSAGetLastError();
-        if (werr == WSAEWOULDBLOCK || werr == WSAEINPROGRESS) {
+        const int werr = net::host_last_sock_error();
+        if (net::is_connect_in_progress(werr)) {
             net::set_guest_errno(115);  // EINPROGRESS for non-blocking connect
             c.x[0] = uint64_t(-1);
             return;
@@ -759,7 +788,7 @@ void sock_sendmsg(CPU& c) {
         if (size_t(sent) < len) break;
     }
     static int sm_logs = 0;
-    if (total > 0 && (sm_logs < 120 || fd == 102)) {
+    if (total > 0 && (sm_logs < 120 || fd == 102 || fd == 106)) {
         ++sm_logs;
         log("socket: SendMsg(fd=%d, iov=%d) -> %lld", fd, iov_len, (long long)total);
     }
@@ -798,12 +827,17 @@ void sock_recvmsg(CPU& c) {
             if (total > 0) {
                 c.x[0] = uint64_t(total);
             } else {
-                net::g_last_errno = 11;  // EAGAIN
+                net::set_guest_errno(11);  // EAGAIN
                 c.x[0] = uint64_t(-1);
             }
             return;
         }
-        const int recvd = ::recv(s, reinterpret_cast<char*>(base), int(len), flags & ~net::kNxMsgDontWait);
+#if defined(_WIN32)
+        const int recv_flags = flags & ~net::kNxMsgDontWait;
+#else
+        const int recv_flags = (flags & ~net::kNxMsgDontWait) | ((flags & net::kNxMsgDontWait) ? MSG_DONTWAIT : 0);
+#endif
+        const int recvd = ::recv(s, reinterpret_cast<char*>(base), int(len), recv_flags);
         if (recvd < 0) {
             c.x[0] = total > 0 ? uint64_t(total) : uint64_t(int64_t(net::capture_host_error()));
             return;
@@ -813,7 +847,7 @@ void sock_recvmsg(CPU& c) {
     }
     st<int32_t>(msg_ptr + 0x2C, 0);
     static int rm_logs = 0;
-    if ((total > 60 && rm_logs < 80) || (total > 0 && fd == 102)) {
+    if ((total > 60 && rm_logs < 80) || (total > 0 && (fd == 102 || fd == 106))) {
         ++rm_logs;
         log("socket: RecvMsg(fd=%d, iov=%d) -> %lld", fd, iov_len, (long long)total);
     }
@@ -868,11 +902,16 @@ void sock_recv(CPU& c) {
             ++eagain_hi;
             log("socket: RecvFrom(fd=%d, len=%zu, flags=%#x) -> EAGAIN", fd, len, flags);
         }
-        net::g_last_errno = 11;
+        net::set_guest_errno(11);
         c.x[0] = uint64_t(-1);
         return;
     }
-    const int recvd = ::recv(s, reinterpret_cast<char*>(buf), int(len), flags & ~net::kNxMsgDontWait);
+#if defined(_WIN32)
+    const int recv_flags = flags & ~net::kNxMsgDontWait;
+#else
+    const int recv_flags = (flags & ~net::kNxMsgDontWait) | ((flags & net::kNxMsgDontWait) ? MSG_DONTWAIT : 0);
+#endif
+    const int recvd = ::recv(s, reinterpret_cast<char*>(buf), int(len), recv_flags);
     if (recvd < 0) {
         c.x[0] = uint64_t(int64_t(net::capture_host_error()));
         return;
@@ -915,7 +954,7 @@ void sock_fcntl(CPU& c) {
 void sock_close(CPU& c) {
     const int fd = int(int32_t(c.x[0]));
     static int close_logs = 0;
-    if (close_logs < 15) {
+    if (close_logs < 64) {
         ++close_logs;
         log("socket: Close(fd=%d)", fd);
     }
@@ -1018,12 +1057,13 @@ void sock_sendto(CPU& c) {
     const int host_flags = (flags & ~net::kNxMsgDontWait);
     const int sent = ::sendto(s, reinterpret_cast<const char*>(buf), int(len), host_flags, sa, salen);
     static int st_logs = 0;
-    static int st_hi_logs = 0;
-    if (st_logs < 15 || (fd >= 108 && st_hi_logs < 15)) {
-        if (st_logs < 15) ++st_logs;
-        else ++st_hi_logs;
-        log("socket: SendTo(fd=%d, len=%zu, ip=%#x, port=%u) -> %d", fd, len,
-            addr_ptr ? sin.sin_addr.s_addr : 0u, addr_ptr ? ntohs(sin.sin_port) : 0u, sent);
+    static int st_err_logs = 0;
+    if (st_logs < 64 || (sent < 0 && st_err_logs < 20)) {
+        if (sent < 0) ++st_err_logs;
+        else ++st_logs;
+        const int werr = sent < 0 ? net::host_last_sock_error() : 0;
+        log("socket: SendTo(fd=%d, len=%zu, ip=%#x, port=%u) -> %d (werr=%d)", fd, len,
+            addr_ptr ? sin.sin_addr.s_addr : 0u, addr_ptr ? ntohs(sin.sin_port) : 0u, sent, werr);
     }
     if (sent < 0) {
         c.x[0] = uint64_t(int64_t(net::capture_host_error()));
@@ -1059,23 +1099,27 @@ void sock_recvfrom(CPU& c) {
             ++eagain_hi;
             log("socket: RecvFrom(fd=%d, len=%zu, flags=%#x) -> EAGAIN", fd, len, flags);
         }
-        net::g_last_errno = 11;
+        net::set_guest_errno(11);
         c.x[0] = uint64_t(-1);
         return;
     }
+#if defined(_WIN32)
     const int host_flags = (flags & ~net::kNxMsgDontWait);
+#else
+    const int host_flags = (flags & ~net::kNxMsgDontWait) | ((flags & net::kNxMsgDontWait) ? MSG_DONTWAIT : 0);
+#endif
     const int recvd = ::recvfrom(s, reinterpret_cast<char*>(buf), int(len), host_flags,
                                  addr_ptr ? reinterpret_cast<sockaddr*>(&sin) : nullptr,
                                  addr_ptr ? &salen : nullptr);
-    const int werr = recvd < 0 ? WSAGetLastError() : 0;
+    const int werr = recvd < 0 ? net::host_last_sock_error() : 0;
     if (recvd < 0) {
         c.x[0] = uint64_t(int64_t(net::capture_host_error()));
     }
     static int rf_logs = 0;
-    static int rf_hi_logs = 0;
-    if (rf_logs < 20 || (fd >= 109 && rf_hi_logs < 15)) {
-        if (rf_logs < 20) ++rf_logs;
-        else ++rf_hi_logs;
+    static int rf_err_logs = 0;
+    if (rf_logs < 64 || (recvd < 0 && werr != 11 && rf_err_logs < 20)) {
+        if (recvd < 0 && werr != 11) ++rf_err_logs;
+        else ++rf_logs;
         log("socket: RecvFrom(fd=%d, len=%zu, flags=%#x) -> %d (werr=%d)", fd, len, flags, recvd, werr);
     }
     if (recvd < 0) {
@@ -1444,8 +1488,8 @@ void sock_getaddrinfo_impl(CPU& c, bool cpp_layout) {
         c.x[0] = 4;
         return;
     }
-    log("socket: GetAddrInfo(%s, %s) -> %s (%#x)", node ? node : "", service ? service : "", query_host.c_str(),
-        ipv4_be);
+    log("socket: GetAddrInfo(%s, %s, cpp=%d, st=%d, proto=%d) -> %s (%#x)", node ? node : "", service ? service : "",
+        int(cpp_layout), socktype, proto, query_host.c_str(), ipv4_be);
     if (!redir.empty() && node && *node) {
         std::lock_guard lk(net::g_net_mu);
         net::g_sni_map[ipv4_be] = node;
@@ -1537,6 +1581,18 @@ void dump_net_state() {
             getsockopt(e.sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&serr), &slen);
             log("netstate: fd=%d ev=%d avail=%lu poll=%d rev=0x%x so_err=%d",
                 fd, e.is_event ? 1 : 0, (unsigned long)avail, pr, (unsigned)pfd.revents, serr);
+#else
+            int avail = 0;
+            ::ioctl(e.sock, FIONREAD, &avail);
+            pollfd pfd{};
+            pfd.fd = e.sock;
+            pfd.events = POLLIN | POLLOUT;
+            int pr = ::poll(&pfd, 1, 0);
+            int serr = 0;
+            socklen_t slen = sizeof(serr);
+            ::getsockopt(e.sock, SOL_SOCKET, SO_ERROR, &serr, &slen);
+            log("netstate: fd=%d ev=%d avail=%d poll=%d rev=0x%x so_err=%d",
+                fd, e.is_event ? 1 : 0, avail, pr, (unsigned)pfd.revents, serr);
 #endif
         }
     }
