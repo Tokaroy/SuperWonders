@@ -95,8 +95,8 @@ simulation ratio and time step. That makes simulation speed depend on the number
 game-build verifies and rewrites those instruction sequences to load the step from an aligned page appended to the
 module's BSS. The runtime updates the page from a rolling average of elapsed time between presents (five samples,
 capped at 1/15 s to spread brief hitches). `NX_REALTIME_FRAME_STEP=0` restores the old interval-based step for
-comparison. The default presentation cap remains 60 FPS. The Video settings offer 30, 60, 90, 120, and 144 FPS;
-90/120/144 use a monotonic host-side deadline rather than the 60 Hz VI timer. `NX_FPS_LIMIT=90`, `120`, or `144`
+comparison. The default presentation cap remains 60 FPS. The Video settings offer 30, 60, 90, 120, 144, and 240 FPS;
+90/120/144/240 use a monotonic host-side deadline rather than the 60 Hz VI timer. `NX_FPS_LIMIT=90`, `120`, `144`, or `240`
 can override the saved cap and takes precedence over `NX_NO_FRAME_LIMIT`. The metrics overlay's Game speed value
 reports the applied simulation-time / elapsed-time ratio, rather than FPS divided by 60.
 

@@ -58,7 +58,7 @@ struct Settings {
     int anisotropy = 0;        // 0 the game's own, else 2, 4, 8, 16 (applies after a restart)
     int rumble = 100;          // controller rumble strength, percent (0: off)
     int vsync = 1;             // 0 On (FIFO), 1 Fast (MAILBOX, else IMMEDIATE: the default), 2 Adaptive (FIFO_RELAXED), 3 Off
-    int frame_cap = 60;        // 30, 60, 90, 120, or 144 FPS
+    int frame_cap = 60;        // 30, 60, 90, 120, 144, or 240 FPS
     std::array<int, kControlCount> keyboard_bindings{};
     std::array<int, kControlCount> controller_bindings{};
     uint32_t controller_custom_mask = 0;  // bit per action: controller_bindings[action] instead of the preset

@@ -7,6 +7,7 @@ README.
 | Variable | What it does | Code |
 |---|---|---|
 | `NX_LOG=<file>` | runtime log (use `private/wonder/nx.log`) | runtime |
+| `NX_SWITCH2=0` / `2` | Switch 2 controllers over Bluetooth LE (Windows) off / on and every LE device seen logged once (default on) | switch2/switch2_win.c |
 | `NX_DUMP_FRAMES=N` | every Nth presented window texture → `private/wonder/frames/NNNNN.ppm` | nvn_vk.cpp |
 | `NX_DUMP_TEXTURES=<hex>,<hex>` | at the same frames, those `NVNtexture*` are read back too → `NNNNN_<texture>.ppm` (blitted to RGBA8) | nvn_debug.cpp |
 | `NX_DUMP_RAW=1` | with the above: texels as stored → `.raw` (u32 width, height, VkFormat, then 4-byte texels) | nvn_debug.cpp |
