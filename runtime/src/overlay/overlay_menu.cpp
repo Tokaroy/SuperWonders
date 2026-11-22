@@ -102,7 +102,11 @@ constexpr Labels kLabels[] = {
      "重新啟動遊戲以套用材質設定。"},
 };
 constexpr const char* kLanguageNames[] = {"English", "Italiano", "Deutsch", "Français", "Español", "한국어", "日本語", "العربية", "Русский", "Türkçe", "Nederlands", "简体中文", "繁體中文"};
-constexpr const char* kGameLanguageNames[] = {"English", "Italiano", "Deutsch", "Français", "Português (Brasil)", "Español", "한국어", "日本語", "Nederlands", "Русский", "Simplified Chinese", "Traditional Chinese"};
+constexpr const char* kGameLanguageNames[] = {
+    "English", "Italiano", "Deutsch", "Français", "Português (Brasil)", "Español", "한국어", "日本語",
+    "Nederlands", "Русский", "Simplified Chinese", "Traditional Chinese",
+    "Português", "Español (Latinoamérica)", "Français (Canada)", "English (UK)", "Thai", "Polski",
+};
 constexpr int kInternalOrder[10] = {0, 9, 8, 7, 1, 2, 3, 4, 5, 6};
 constexpr const char* kInternal[13][10] = {
     {"Original / Dynamic", "640 x 360", "854 x 480", "960 x 540", "1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160", "Native (screen)"},
@@ -834,7 +838,8 @@ void audio(MenuContext& c, const Labels& l) {
         settings_changed(true);
     rows::indent(-1);
     rows::section(l.game_language);
-    if (rows::choice(l.game_language, &s.game_language, kGameLanguageNames, int(std::size(kGameLanguageNames)),
+    const int game_lang_count = overlay::game_version() == "1.2.1" ? int(std::size(kGameLanguageNames)) : 16;
+    if (rows::choice(l.game_language, &s.game_language, kGameLanguageNames, game_lang_count,
                      kDefaults.game_language, translated_desc(desc::game_language, lang)))
         settings_changed(true), ui::notify(l.game_language_restart);
     rows::section(kExtraUiText[lang].reset_sec);

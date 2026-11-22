@@ -500,6 +500,7 @@ struct State {
     uint64_t shown_ns = 0;
     std::string note;  // a line under the status (an error of the folder picker, a finished setup...)
     bool demo_progress = false;  // NX_LAUNCHER_TOUR's last step: the setup card, not running anything
+    bool open_lang_warning = false;  // 1.2.1-only game language selected on another game version
     // The controller (Savage Wind's launcher: the page list and the page are two places the cursor can be; A or right
     // goes into the page, B back to the list, L / R change the page, + plays). One request at a time, next frame.
     bool focus_list = true;   // the cursor to the selected page's name
@@ -529,6 +530,10 @@ void refresh_status() {
     g->status = check_status(g->kit);
     g->mods = list_mods();
     refresh_input_versions();
+    const std::string& active_ver =
+        !g->status.installed_version.empty() ? g->status.installed_version
+                                             : (g->exefs_info.compatible ? g->exefs_info.version : std::string{});
+    overlay::set_game_version(active_ver);
 }
 
 void apply_output_folder(const std::string& dir) {
@@ -1271,6 +1276,117 @@ void low_vram_warning_dialog(float w, float h, float k) {
     ImGui::PopStyleVar(3);
 }
 
+struct LangWarningText {
+    const char* title;
+    const char* body_fmt;
+    const char* dismiss;
+};
+constexpr LangWarningText kLangWarningText[13] = {
+    {"Unsupported Game Language",
+     "Thai and Polski are only supported in Super Mario Bros. Wonder 1.2.1, not in your selected version (%s).\n\n"
+     "Please choose another game language in Settings, or set up version 1.2.1.",
+     "Dismiss"},
+    {"Lingua di gioco non supportata",
+     "Le lingue Thai e Polski sono supportate solo nella versione 1.2.1 di Super Mario Bros. Wonder, non nella "
+     "versione selezionata (%s).\n\nSeleziona un'altra lingua di gioco nelle Impostazioni oppure configura la "
+     "versione 1.2.1.",
+     "Ignora"},
+    {"Nicht unterstutzte Spielsprache",
+     "Thai und Polski werden nur in Super Mario Bros. Wonder 1.2.1 unterstutzt, nicht in der ausgewahlten Version "
+     "(%s).\n\nBitte wahle in den Einstellungen eine andere Spielsprache oder richte Version 1.2.1 ein.",
+     "Schliessen"},
+    {"Langue du jeu non prise en charge",
+     "Thai et Polski ne sont pris en charge que dans Super Mario Bros. Wonder 1.2.1, pas dans votre version "
+     "selectionnee (%s).\n\nVeuillez choisir une autre langue dans les Parametres ou configurer la version 1.2.1.",
+     "Ignorer"},
+    {"Idioma del juego no compatible",
+     "Thai y Polski solo son compatibles con Super Mario Bros. Wonder 1.2.1, no con la version seleccionada (%s).\n\n"
+     "Elige otro idioma del juego en Ajustes o configura la version 1.2.1.",
+     "Descartar"},
+    {"지원되지 않는 게임 언어",
+     "Thai 및 Polski 언어는 Super Mario Bros. Wonder 1.2.1에서만 지원되며, 현재 선택된 버전(%s)에서는 지원되지 "
+     "않습니다.\n\n설정에서 다른 게임 언어를 선택하거나 1.2.1 버전을 설정해 주세요.",
+     "닫기"},
+    {"未対応のゲーム言語",
+     "Thai および Polski は Super Mario Bros. Wonder 1.2.1 のみでサポートされており、選択中のバージョン (%s) では"
+     "利用できません。\n\n設定で別のゲーム言語を選ぶか、1.2.1 をセットアップしてください。",
+     "閉じる"},
+    {"لغة اللعبة غير مدعومة",
+     "تتوفر لغتا Thai وPolski في Super Mario Bros. Wonder 1.2.1 فقط، وليستا مدعومتين في الإصدار المحدد (%s).\n\n"
+     "يرجى اختيار لغة أخرى من الإعدادات أو إعداد الإصدار 1.2.1.",
+     "تجاهل"},
+    {"Язык игры не поддерживается",
+     "Языки Thai и Polski поддерживаются только в Super Mario Bros. Wonder 1.2.1 и не работают в выбранной версии "
+     "(%s).\n\nВыберите другой язык игры в настройках или установите версию 1.2.1.",
+     "Закрыть"},
+    {"Desteklenmeyen Oyun Dili",
+     "Thai ve Polski yalnizca Super Mario Bros. Wonder 1.2.1 surumunde desteklenir; secili surumde (%s) desteklenmez."
+     "\n\nLutfen Ayarlar'dan baska bir oyun dili secin veya 1.2.1 surumunu kurun.",
+     "Kapat"},
+    {"Niet-ondersteunde speltaal",
+     "Thai en Polski worden alleen ondersteund in Super Mario Bros. Wonder 1.2.1, niet in de geselecteerde versie "
+     "(%s).\n\nKies een andere speltaal in Instellingen of stel versie 1.2.1 in.",
+     "Negeren"},
+    {"不支持的游戏语言",
+     "Thai 和 Polski 仅支持 Super Mario Bros. Wonder 1.2.1，不支持当前所选版本 (%s)。\n\n"
+     "请在设置中选择其他游戏语言，或配置 1.2.1 版本。",
+     "关闭"},
+    {"不支援的遊戲語言",
+     "Thai 與 Polski 僅支援 Super Mario Bros. Wonder 1.2.1，不支援目前所選版本 (%s)。\n\n"
+     "請在設定中選擇其他遊戲語言，或配置 1.2.1 版本。",
+     "關閉"},
+};
+
+void unsupported_language_warning_dialog(float w, float h, float k) {
+    if (g->open_lang_warning) {
+        ImGui::OpenPopup("##unsupported_game_language_warning");
+        g->open_lang_warning = false;
+    }
+
+    const int lang = std::clamp(overlay::menu_language(), 0, 12);
+    const LangWarningText& t = kLangWarningText[lang];
+    const ui::Theme& th = ui::theme();
+    ImGui::SetNextWindowPos({w * 0.5f, h * 0.5f}, ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSize({std::min(w * 0.85f, 660 * k), 0}, ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {28 * k, 24 * k});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 14 * k);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8 * k);
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGui::ColorConvertU32ToFloat4(th.card));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(th.warn));
+    const bool open = ImGui::BeginPopupModal(
+        "##unsupported_game_language_warning", nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+    if (open) {
+        const char* ver = g->status.installed_version.empty() ? "unknown" : g->status.installed_version.c_str();
+        char body[512];
+        std::snprintf(body, sizeof body, t.body_fmt, ver);
+
+        ImGui::PushFont(ui::title());
+        ImGui::SetWindowFontScale(0.62f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.warn));
+        ImGui::TextUnformatted(t.title);
+        ImGui::PopStyleColor();
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::PopFont();
+        ImGui::Dummy({0, 8 * k});
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text));
+        ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 28 * k);
+        ImGui::TextUnformatted(body);
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+        ImGui::Dummy({0, 18 * k});
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(th.accent));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(th.accent2));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(th.accent));
+        if (ImGui::Button(t.dismiss, {0, 44 * k})) ImGui::CloseCurrentPopup();
+        ImGui::PopStyleColor(3);
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(3);
+}
+
 void screen(float w, float h) {
     if (!g) return;
     if (g->follow_hold > 0) g->follow_hold--;
@@ -1490,6 +1606,7 @@ void screen(float w, float h) {
     const ui::Hint hints[] = {{"A", lt(LtSelect)}, {"B", lt(LtBack)}, {"L", ""}, {"R", lt(LtPages)}, {"+", lt(LtPlayHint)}};
     ui::hints(dl, w * 0.5f, h - margin * 0.7f, 34 * k, hints, 5);
     low_vram_warning_dialog(w, h, k);
+    unsupported_language_warning_dialog(w, h, k);
     ImGui::End();
     ImGui::PopStyleColor();
     ImGui::PopStyleVar();
@@ -1587,11 +1704,26 @@ void run() {
             path.resize(length);
             if (_wcsicmp(fs::path(path).filename().c_str(), L"wonder.exe") == 0) {
                 const Status status = check_status(find_kit());
+                overlay::set_game_version(status.installed_version);
                 if (status.ready != Ready::Yes) {
                     log("game: cannot start: %s", status.why.c_str());
                     const std::string message = status.why +
                         "\n\nOpen wonder-launcher.exe, select your game files and complete Set up game files.";
                     MessageBoxA(nullptr, message.c_str(), "SuperWonders - Game setup required", MB_OK | MB_ICONINFORMATION);
+                    plat::exit_process(1);
+                }
+                if (overlay::game_language() >= 16 && status.installed_version != "1.2.1") {
+                    const LangWarningText& t = kLangWarningText[std::clamp(overlay::menu_language(), 0, 12)];
+                    const char* ver = status.installed_version.empty() ? "unknown" : status.installed_version.c_str();
+                    char body[512];
+                    std::snprintf(body, sizeof body, t.body_fmt, ver);
+                    auto to_wide = [](const char* s) {
+                        int wn = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
+                        std::wstring out(size_t(std::max(1, wn)) - 1, L'\0');
+                        MultiByteToWideChar(CP_UTF8, 0, s, -1, out.data(), wn);
+                        return out;
+                    };
+                    MessageBoxW(nullptr, to_wide(body).c_str(), to_wide(t.title).c_str(), MB_OK | MB_ICONWARNING);
                     plat::exit_process(1);
                 }
             }
@@ -1602,6 +1734,7 @@ void run() {
         if ((!headless || !*headless || std::strcmp(headless, "0") == 0) && !self.empty() &&
             self.filename() == "wonder" && file(self.parent_path() / "wonder-launcher")) {
             const Status status = check_status(find_kit());
+            overlay::set_game_version(status.installed_version);
             if (status.ready != Ready::Yes) {
                 log("game: cannot start: %s", status.why.c_str());
                 std::fprintf(
@@ -1609,6 +1742,14 @@ void run() {
                     "SuperWonders - Game setup required\n%s\n\nOpen wonder-launcher, select your game files and "
                     "complete Set up game files.\n",
                     status.why.c_str());
+                plat::exit_process(1);
+            }
+            if (overlay::game_language() >= 16 && status.installed_version != "1.2.1") {
+                const LangWarningText& t = kLangWarningText[std::clamp(overlay::menu_language(), 0, 12)];
+                const char* ver = status.installed_version.empty() ? "unknown" : status.installed_version.c_str();
+                char body[512];
+                std::snprintf(body, sizeof body, t.body_fmt, ver);
+                std::fprintf(stderr, "%s\n%s\n", t.title, body);
                 plat::exit_process(1);
             }
         }
@@ -1673,6 +1814,11 @@ void run() {
         if (g->play && !g->job.running) {
             refresh_status();
             if (g->status.ready == Ready::Yes) {
+                if (overlay::game_language() >= 16 && g->status.installed_version != "1.2.1") {
+                    g->play = false;
+                    g->open_lang_warning = true;
+                    continue;
+                }
 #if defined(_WIN32)
                 std::wstring self(32768, L'\0');
                 DWORD n = GetModuleFileNameW(nullptr, self.data(), DWORD(self.size()));

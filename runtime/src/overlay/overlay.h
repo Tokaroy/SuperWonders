@@ -30,6 +30,9 @@ struct Host {
 
 bool enabled();  // NX_IMGUI_MENU, default on
 int menu_language();  // selected launcher / in-game menu language, 0..12
+int game_language();  // selected game text language, 0..17
+void set_game_version(const std::string& version);
+const std::string& game_version();
 int aspect_ratio();
 void set_aspect_ratio(int ratio);
 bool low_vram_profile();

@@ -73,12 +73,15 @@ void native_display_size(uint32_t& width, uint32_t& height) {
 
 void set_game_language(int language) {
     if (language < 0) language = 0;
-    if (language > 11) language = 11;
+    if (language > 17) language = 17;
     g_game_language.store(language, std::memory_order_relaxed);
 }
 
 uint64_t game_language_code() {
-    static constexpr const char* codes[] = {"en-US", "it", "de", "fr", "pt-BR", "es", "ko", "ja", "nl", "ru", "zh-Hans", "zh-Hant"};
+    static constexpr const char* codes[] = {
+        "en-US", "it", "de", "fr", "pt-BR", "es", "ko", "ja", "nl", "ru", "zh-Hans", "zh-Hant",
+        "pt", "es-419", "fr-CA", "en-GB", "th", "pl",
+    };
     const int language = g_game_language.load(std::memory_order_relaxed);
     const char* selected = codes[language >= 0 && language < int(std::size(codes)) ? language : 0];
     uint64_t code = 0;

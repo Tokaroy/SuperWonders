@@ -540,7 +540,7 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) state.language = std::clamp(value, 0, 12);
         else if (std::sscanf(line.c_str(), "theme=%d", &value) == 1) state.theme = std::clamp(value, 0, 4);
         else if (std::sscanf(line.c_str(), "game_language=%d", &value) == 1)
-            state.game_language = std::clamp(value, 0, 11);
+            state.game_language = std::clamp(value, 0, 17);
         else if (std::sscanf(line.c_str(), "game_language_version=%d", &value) == 1)
             game_language_version = value;
         else if (std::sscanf(line.c_str(), "memory_limit_gb=%d", &value) == 1) state.memory_limit_gb = std::clamp(value, 2, 32);
@@ -883,7 +883,7 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings.stereo_separation = std::clamp(g_pc_settings.stereo_separation, 0, 100);
     g_pc_settings.internal_resolution = std::clamp(g_pc_settings.internal_resolution, 0, 9);
     g_pc_settings.language = std::clamp(g_pc_settings.language, 0, 12);
-    g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 11);
+    g_pc_settings.game_language = std::clamp(g_pc_settings.game_language, 0, 17);
     g_pc_settings.memory_limit_gb = std::clamp(g_pc_settings.memory_limit_gb, 2, 32);
     g_pc_settings.controller_preset = std::clamp(g_pc_settings.controller_preset, 0, 1);
     g_pc_settings.button_icons = std::clamp(g_pc_settings.button_icons, 0, 3);

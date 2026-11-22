@@ -372,7 +372,15 @@ bool enabled() {
     return on;
 }
 
+std::string g_game_version;
+
 int menu_language() { return std::clamp(g_settings.language, 0, 12); }
+
+int game_language() { return std::clamp(g_settings.game_language, 0, 17); }
+
+void set_game_version(const std::string& version) { g_game_version = version; }
+
+const std::string& game_version() { return g_game_version; }
 
 void init(const Host& host, const Settings& s) {
     std::lock_guard lk(g_lock);
