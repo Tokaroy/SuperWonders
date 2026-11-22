@@ -483,6 +483,14 @@ else()
     endif()
     if(WIN32)
         target_link_libraries(${NX_GAME} PRIVATE SDL3::SDL3-static)
+        # Switch 2 controllers over Bluetooth LE (runtime/src/switch2/): WinRT through its C ABI, whose headers come
+        # with llvm-mingw; other Windows toolchains get a stub (no such controllers, everything else as before).
+        if(MINGW)
+            target_sources(${NX_GAME} PRIVATE runtime/src/switch2/switch2.c runtime/src/switch2/switch2_win.c)
+            target_link_libraries(${NX_GAME} PRIVATE runtimeobject)
+        else()
+            target_sources(${NX_GAME} PRIVATE runtime/src/switch2/switch2_stub.c)
+        endif()
         if(NX_GAME_LIBRARY AND NX_GAME STREQUAL "wonder")
             add_custom_command(TARGET ${NX_GAME} POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different

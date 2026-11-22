@@ -259,7 +259,7 @@ def recomplauncher_json(version):
                          {"label": "Adaptive", "set": {"vsync": "2"}}, {"label": "Off", "set": {"vsync": "3"}}],
              "defaults": {"vsync": "1"}},
             {"id": "frame_cap", "label": "Frame rate cap", "help": "Higher caps require a display and PC that can sustain them.",
-             "choices": [{"label": f"{fps} FPS", "set": {"frame_cap": str(fps)}} for fps in (30, 60, 90, 120, 144)],
+             "choices": [{"label": f"{fps} FPS", "set": {"frame_cap": str(fps)}} for fps in (30, 60, 90, 120, 144, 240)],
              "defaults": {"frame_cap": "60"}},
             {"id": "upscaler", "label": "Upscaling", "choices": [
                 {"label": "Bilinear", "set": {"upscaler": "0"}}, {"label": "FSR 1", "set": {"upscaler": "1"}}],

@@ -198,6 +198,7 @@ void rumble_player(unsigned player, float low, float high) {
     g_pending_rumble[size_t(slot)].store((1ull << 32) | (uint64_t(low_u16) << 16) | uint64_t(high_u16),
                                          std::memory_order_release);
 }
+void rumble_player_hd(unsigned, const float*, const float*) {}  // no Switch 2 Bluetooth driver here
 void rumble(float low, float high) { rumble_player(0, low, high); }
 
 void read_pad(PadState& p) {

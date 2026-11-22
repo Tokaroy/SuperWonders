@@ -234,6 +234,7 @@ bool rumble_on() {
 
 std::mutex g_vibration_lock;
 float g_band[4][2][2] = {};  // [side][low, high] amplitude
+float g_freq[4][2][2] = {};  // [side][low, high] frequency (Hz)
 float g_last_rumble[4][2] = {};
 uint64_t g_vibration_sends = 0, g_vibration_nonzero = 0;
 
@@ -268,13 +269,20 @@ void vibrate(uint32_t h, uint64_t value) {
     if (player != 0) return;
 #endif
     int side = (h >> 16 & 0xFF) ? 1 : 0;
+    // VibrationValue: {f32 amplitude low, f32 frequency low, f32 amplitude high, f32 frequency high}
     float amp_low = ld<float>(value), amp_high = ld<float>(value + 8);
     float low = 0, high = 0;
     bool skip = false;
+    [[maybe_unused]] float hd[2][4] = {};  // per side {amp low, freq low, amp high, freq high}
     {
         std::lock_guard lk(g_vibration_lock);
         g_band[player][side][0] = std::clamp(amp_low, 0.0f, 1.0f);
         g_band[player][side][1] = std::clamp(amp_high, 0.0f, 1.0f);
+        g_freq[player][side][0] = ld<float>(value + 4);
+        g_freq[player][side][1] = ld<float>(value + 12);
+        for (int k = 0; k < 2; k++)
+            hd[k][0] = g_band[player][k][0], hd[k][1] = g_freq[player][k][0], hd[k][2] = g_band[player][k][1],
+            hd[k][3] = g_freq[player][k][1];
         low = std::max(g_band[player][0][0], g_band[player][1][0]);
         high = std::max(g_band[player][0][1], g_band[player][1][1]);
         g_vibration_sends++;
@@ -289,6 +297,7 @@ void vibrate(uint32_t h, uint64_t value) {
     if (skip) return;
 #if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
     plat::rumble_player(player, low, high);
+    plat::rumble_player_hd(player, hd[0], hd[1]);  // Switch 2 controllers: the values as they are (HD rumble)
 #else
     plat::rumble(low, high);
 #endif

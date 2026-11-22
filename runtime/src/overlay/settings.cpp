@@ -85,7 +85,7 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "rumble=%d", &v) == 1) s.rumble = std::clamp(v, 0, 100);
         else if (std::sscanf(l, "vsync=%d", &v) == 1) s.vsync = std::clamp(v, 0, 3);
         else if (std::sscanf(l, "frame_cap=%d", &v) == 1)
-            s.frame_cap = v == 30 || v == 60 || v == 90 || v == 120 || v == 144 ? v : 60;
+            s.frame_cap = v == 30 || v == 60 || v == 90 || v == 120 || v == 144 || v == 240 ? v : 60;
         else if (std::sscanf(l, "controller_custom_mask=%u", &u) == 1) s.controller_custom_mask = u;
         else {
             int index = -1, binding = -1, slot = -1;

@@ -52,7 +52,7 @@ constexpr const wchar_t* kGameLanguageNames[] = {
     L"English", L"Italiano", L"Deutsch", L"Français", L"Português (Brasil)", L"Español", L"한국어", L"日本語",
     L"Nederlands", L"Русский", L"Simplified Chinese", L"Traditional Chinese"};
 constexpr int kGameLanguageItemHeight = 20;
-constexpr int kFrameCaps[] = {30, 60, 90, 120, 144};
+constexpr int kFrameCaps[] = {30, 60, 90, 120, 144, 240};
 
 struct Labels {
     const wchar_t* title;

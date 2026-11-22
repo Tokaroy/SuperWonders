@@ -290,7 +290,7 @@ uint32_t governor_max(uint64_t now) {
 // this frame's calc and draw recording): 2 when it reaches 15.83 ms, locked after 3 slow frames, back to 1 after 15
 // fast ones (docs/nvn/DEBUG.md #43). From that call site (lr main+e16ac, x19 = the framework): a histogram of that
 // time every 600 frames, and NX_MAX_INTERVAL=1 clamps the game's own maximum to 1 (fields 0x24c/0x264/0x268).
-std::atomic<int> g_frame_cap{60};  // set_frame_cap: 60, or 30
+std::atomic<int> g_frame_cap{60};  // set_frame_cap: 30, 60, 90, 120, 144 or 240
 std::atomic<int> g_cap_hold{0};    // hold_frame_cap: a lower cap for a moment the game needs at its own rate, 0: none
 std::atomic<int> g_scene_cap_hold{0}; // independent of the Wonder Seed's temporary hold
 int frame_cap_setting() {
@@ -298,7 +298,7 @@ int frame_cap_setting() {
         const char* e = std::getenv("NX_FPS_CAP");
         if (!e) return 0;
         const int cap = std::atoi(e);
-        return cap == 30 || cap == 60 || cap == 90 || cap == 120 || cap == 144 ? cap : 60;
+        return cap == 30 || cap == 60 || cap == 90 || cap == 120 || cap == 144 || cap == 240 ? cap : 60;
     }();
     // NX_FPS_CAP_UNTIL=<frame> (tests): 30 until that frame, then the setting, as a player switching back in the menu.
     static const uint64_t until = [] {
@@ -401,7 +401,7 @@ uint64_t pace_present(int interval) {
         const char* value = std::getenv("NX_FPS_LIMIT");
         if (!value || !*value) return 0;
         const int fps = std::atoi(value);
-        return fps == 90 || fps == 120 || fps == 144 ? fps : 0;
+        return fps == 90 || fps == 120 || fps == 144 || fps == 240 ? fps : 0;
     }();
     static uint64_t custom_next = 0;
     static int prev_fps = 0;
@@ -537,7 +537,7 @@ int held_frame_cap() {
 }
 
 void set_frame_cap(int fps) {
-    const int cap = fps == 30 || fps == 60 || fps == 90 || fps == 120 || fps == 144 ? fps : 60;
+    const int cap = fps == 30 || fps == 60 || fps == 90 || fps == 120 || fps == 144 || fps == 240 ? fps : 60;
     g_frame_cap.store(cap, std::memory_order_relaxed);
 }
 

@@ -190,7 +190,7 @@ constexpr const char* internal = "The resolution the game renders at. Original l
 constexpr const char* vsync = "How frames reach the screen. On: waits for the display (no tearing; smooth with "
                               "FreeSync/G-Sync). Fast: the newest frame at each refresh (the default). Adaptive: "
                               "waits unless a frame is late. Off: at once (can tear).";
-constexpr const char* frame_cap = "Maximum frame rate. 30, 60, 90, 120 and 144 FPS are available. Higher caps need a "
+constexpr const char* frame_cap = "Maximum frame rate. 30, 60, 90, 120, 144 and 240 FPS are available. Higher caps need a "
                                   "display and PC that can sustain them; the game simulation remains at normal speed.";
 constexpr const char* fullscreen = "Fill the whole screen. F11 also switches it.";
 constexpr const char* topmost = "Keep the game window above other windows. Not available on Wayland.";
@@ -744,12 +744,12 @@ void video(MenuContext& c, const Labels& l) {
     rows::section(kCommon[lang][2]);
     const char* vsync_names[] = {"On", "Fast", "Adaptive", "Off"};
     if (rows::choice(kCommon[lang][7], &s.vsync, vsync_names, 4, kDefaults.vsync, translated_desc(desc::vsync, lang))) settings_changed(true);
-    const char* caps[] = {"30 fps", "60 fps", "90 fps", "120 fps", "144 fps"};
-    constexpr int cap_values[] = {30, 60, 90, 120, 144};
+    const char* caps[] = {"30 fps", "60 fps", "90 fps", "120 fps", "144 fps", "240 fps"};
+    constexpr int cap_values[] = {30, 60, 90, 120, 144, 240};
     int cap = 1;
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 6; ++i)
         if (cap_values[i] == s.frame_cap) cap = i;
-    if (rows::choice(l.frame_cap_label, &cap, caps, 5, 1, translated_desc(desc::frame_cap, lang)))
+    if (rows::choice(l.frame_cap_label, &cap, caps, 6, 1, translated_desc(desc::frame_cap, lang)))
         s.frame_cap = cap_values[cap], settings_changed(true);
     rows::section(kExtraUiText[lang].reset_sec);
     {

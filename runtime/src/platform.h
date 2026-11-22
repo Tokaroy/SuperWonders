@@ -92,6 +92,9 @@ std::array<std::string, 4> controller_names();
 bool player_connected(unsigned player);
 void read_pad_player(unsigned player, PadState& p);
 void rumble_player(unsigned player, float low, float high);
+// The game's HD rumble for that player: {amplitude low, frequency low, amplitude high, frequency high} (0..1, Hz) of
+// its left and right actuator. Windows plays it on Switch 2 controllers (switch2/); elsewhere nothing (rumble_player).
+void rumble_player_hd(unsigned player, const float left[4], const float right[4]);
 struct ButtonPromptConfig {
     int style = 1;                  // 1 Nintendo, 2 Xbox, 3 PlayStation
     std::array<int, 16> bindings{}; // overlay::Control -> overlay::Physical

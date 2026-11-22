@@ -6,6 +6,8 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -46,6 +48,7 @@
 #include "overlay/overlay.h"
 #include "pc_menu_win.h"
 #include "svc_am.h"
+#include "switch2/switch2.h"
 #include "platform.h"
 
 namespace nx {
@@ -581,7 +584,8 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         else if (std::sscanf(line.c_str(), "rumble=%d", &value) == 1) state.rumble = std::clamp(value, 0, 100);
         else if (std::sscanf(line.c_str(), "vsync=%d", &value) == 1) state.vsync = std::clamp(value, 0, 3);
         else if (std::sscanf(line.c_str(), "frame_cap=%d", &value) == 1)
-            state.frame_cap = value == 30 || value == 60 || value == 90 || value == 120 || value == 144
+            state.frame_cap = value == 30 || value == 60 || value == 90 || value == 120 || value == 144 ||
+                                      value == 240
                                   ? value
                                   : 60;
         else {
@@ -1202,9 +1206,19 @@ bool headless() {  // NX_HEADLESS (platform.h)
     return on;
 }
 
-// SDL owns each physical gamepad once, including Xbox/XInput and HIDAPI controllers.
+// SDL owns each physical gamepad once, including Xbox/XInput and HIDAPI controllers. Joy-Cons come one by one
+// (SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS=0), upright (SDL_HINT_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS=1), Switch 1
+// ones from SDL's HIDAPI driver and Switch 2 ones from it over USB or from switch2/ over Bluetooth LE in the same
+// layout; the Joy-Con manager below makes controllers of them as a Switch does:
+// - a left and a right Joy-Con, both upright, play together as one controller (paired in the order they came);
+// - SL and SR of a Joy-Con held together for a second: it leaves its pair and plays alone, held sideways (its own
+//   player); the same again turns it upright again;
+// - L of a sideways left Joy-Con and R of a sideways right one held together for a second: the two pair again.
+// Up to kMaxDevices devices make up to 4 controllers (the "slots" the player assignment and bindings use).
+constexpr size_t kMaxDevices = 8;
+constexpr uint64_t kJoyConGestureMs = 1000;
 static std::mutex g_gamepad_lock;
-static std::array<SDL_Gamepad*, 4> g_gamepads{};
+static std::array<SDL_Gamepad*, kMaxDevices> g_gamepads{};
 static uint64_t g_last_scan_ms = 0;
 static std::array<std::atomic<uint64_t>, 4> g_pending_rumble{};
 struct PlayerInputs {
@@ -1214,6 +1228,35 @@ struct PlayerInputs {
     std::array<int, 4> styles{};  // 0 unknown, 1 Nintendo, 2 Xbox, 3 PlayStation
     std::array<std::string, 4> names{};
 };
+
+enum class JoyCon { None, Left, Right };
+struct DeviceState {
+    SDL_JoystickID id = 0;    // the device this state is for (another id in the slot: a fresh state)
+    JoyCon side = JoyCon::None;
+    bool sideways = false;    // played alone, held sideways
+    int partner = -1;         // the device slot of the other Joy-Con of its pair
+    uint64_t rails_since = 0; // SL + SR held since (ms), 0 not held
+    bool rails_done = false;  // that hold has acted: nothing more until they are let go
+    uint64_t join_since = 0;  // its join button (L of a left Joy-Con, R of a right one) held since, while sideways
+    int player_shown = -2;    // the player index last given to SDL (player lights)
+};
+static std::array<DeviceState, kMaxDevices> g_devices{};
+// What each controller slot is made of, for rumble: up to two devices, and which side of the game's two actuators
+// each plays (0 left, 1 right, 2 the stronger of both: a Joy-Con alone, 3 both: a full controller)
+struct SlotMembers {
+    std::array<int, 2> device{{-1, -1}};
+    std::array<int, 2> role{{3, 3}};
+    std::array<SDL_JoystickID, 2> id{};
+};
+static std::array<SlotMembers, 4> g_slot_members{};  // under g_gamepad_lock
+
+static JoyCon joycon_side(SDL_Gamepad* pad) {
+    switch (pad ? SDL_GetGamepadType(pad) : SDL_GAMEPAD_TYPE_UNKNOWN) {
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT: return JoyCon::Left;
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT: return JoyCon::Right;
+        default: return JoyCon::None;
+    }
+}
 
 static int detect_gamepad_style(SDL_Gamepad* pad) {
     if (!pad) return 0;
@@ -1288,59 +1331,243 @@ static void scan_gamepads_locked() {
     SDL_free(ids);
 }
 
+// One device's buttons and axes as SDL reports them
+struct RawPad {
+    std::array<bool, SDL_GAMEPAD_BUTTON_COUNT> b{};
+    std::array<int, SDL_GAMEPAD_AXIS_COUNT> a{};
+};
+static RawPad read_raw(SDL_Gamepad* pad) {
+    RawPad r;
+    for (int i = 0; i < SDL_GAMEPAD_BUTTON_COUNT; ++i) r.b[size_t(i)] = SDL_GetGamepadButton(pad, SDL_GamepadButton(i));
+    for (int i = 0; i < SDL_GAMEPAD_AXIS_COUNT; ++i) r.a[size_t(i)] = SDL_GetGamepadAxis(pad, SDL_GamepadAxis(i));
+    return r;
+}
+static int stick_value(int value) {  // the dead zone, then -kStickMax..kStickMax (no inversion)
+    if (value > -7849 && value < 7849) return 0;
+    return std::clamp(value, -kStickMax, kStickMax);
+}
+static bool trigger_down(int value) { return value > 12000; }
+// SL and SR (SDL's paddles for a Joy-Con: left SL / SR = left paddle 1 / 2, right SR / SL = right paddle 1 / 2)
+static bool rails_held(const RawPad& r, JoyCon side) {
+    return side == JoyCon::Left ? r.b[SDL_GAMEPAD_BUTTON_LEFT_PADDLE1] && r.b[SDL_GAMEPAD_BUTTON_LEFT_PADDLE2]
+                                : r.b[SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1] && r.b[SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2];
+}
+static bool join_held(const RawPad& r, JoyCon side) {
+    return side == JoyCon::Left ? r.b[SDL_GAMEPAD_BUTTON_LEFT_SHOULDER] && !r.b[SDL_GAMEPAD_BUTTON_LEFT_PADDLE1] &&
+                                      !r.b[SDL_GAMEPAD_BUTTON_LEFT_PADDLE2]
+                                : r.b[SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER] && !r.b[SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1] &&
+                                      !r.b[SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2];
+}
+
+// A controller made of one or two devices: PcPhysicalButton presses and sticks (y up)
+struct ControllerInput {
+    bool down[kPcControlCount]{};
+    int lx = 0, ly = 0, rx = 0, ry = 0;
+};
+static void add_full(ControllerInput& c, const RawPad& r) {
+    c.down[PcSouth] = r.b[SDL_GAMEPAD_BUTTON_SOUTH], c.down[PcEast] = r.b[SDL_GAMEPAD_BUTTON_EAST];
+    c.down[PcWest] = r.b[SDL_GAMEPAD_BUTTON_WEST], c.down[PcNorth] = r.b[SDL_GAMEPAD_BUTTON_NORTH];
+    c.down[PcShoulderL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_SHOULDER], c.down[PcShoulderR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER];
+    c.down[PcTriggerL] = trigger_down(r.a[SDL_GAMEPAD_AXIS_LEFT_TRIGGER]);
+    c.down[PcTriggerR] = trigger_down(r.a[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER]);
+    c.down[PcStart] = r.b[SDL_GAMEPAD_BUTTON_START], c.down[PcBack] = r.b[SDL_GAMEPAD_BUTTON_BACK];
+    c.down[PcStickL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_STICK], c.down[PcStickR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
+    c.down[PcLeft] = r.b[SDL_GAMEPAD_BUTTON_DPAD_LEFT], c.down[PcUp] = r.b[SDL_GAMEPAD_BUTTON_DPAD_UP];
+    c.down[PcRight] = r.b[SDL_GAMEPAD_BUTTON_DPAD_RIGHT], c.down[PcDown] = r.b[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
+    c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX]), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY]);
+    c.rx = stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX]), c.ry = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY]);
+}
+// An upright Joy-Con: its half of a full controller
+static void add_upright(ControllerInput& c, const RawPad& r, JoyCon side) {
+    if (side == JoyCon::Left) {
+        c.down[PcShoulderL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_SHOULDER];
+        c.down[PcTriggerL] = trigger_down(r.a[SDL_GAMEPAD_AXIS_LEFT_TRIGGER]);
+        c.down[PcBack] = r.b[SDL_GAMEPAD_BUTTON_BACK], c.down[PcStickL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_STICK];
+        c.down[PcLeft] = r.b[SDL_GAMEPAD_BUTTON_DPAD_LEFT], c.down[PcUp] = r.b[SDL_GAMEPAD_BUTTON_DPAD_UP];
+        c.down[PcRight] = r.b[SDL_GAMEPAD_BUTTON_DPAD_RIGHT], c.down[PcDown] = r.b[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
+        c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX]), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY]);
+    } else {
+        c.down[PcSouth] = r.b[SDL_GAMEPAD_BUTTON_SOUTH], c.down[PcEast] = r.b[SDL_GAMEPAD_BUTTON_EAST];
+        c.down[PcWest] = r.b[SDL_GAMEPAD_BUTTON_WEST], c.down[PcNorth] = r.b[SDL_GAMEPAD_BUTTON_NORTH];
+        c.down[PcShoulderR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER];
+        c.down[PcTriggerR] = trigger_down(r.a[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER]);
+        c.down[PcStart] = r.b[SDL_GAMEPAD_BUTTON_START], c.down[PcStickR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
+        c.rx = stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX]), c.ry = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY]);
+    }
+}
+// A Joy-Con held sideways (rail up, SL on the left): a small full controller, as a Switch plays it. The left one is
+// turned a quarter turn counter-clockwise from upright, the right one clockwise; its buttons are named by where they
+// are now (the bottom one is south), SL / SR are L / R, its stick is the left stick, Minus / Plus is Plus.
+static void add_sideways(ControllerInput& c, const RawPad& r, JoyCon side) {
+    if (side == JoyCon::Left) {
+        c.down[PcSouth] = r.b[SDL_GAMEPAD_BUTTON_DPAD_LEFT], c.down[PcEast] = r.b[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
+        c.down[PcWest] = r.b[SDL_GAMEPAD_BUTTON_DPAD_UP], c.down[PcNorth] = r.b[SDL_GAMEPAD_BUTTON_DPAD_RIGHT];
+        c.down[PcShoulderL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_PADDLE1];   // SL
+        c.down[PcShoulderR] = r.b[SDL_GAMEPAD_BUTTON_LEFT_PADDLE2];   // SR
+        c.down[PcStart] = r.b[SDL_GAMEPAD_BUTTON_BACK], c.down[PcStickL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_STICK];
+        // upright x right / y up (SDL y down) turned: right is upright down, up is upright right
+        c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY]), c.ly = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX]);
+    } else {
+        c.down[PcSouth] = r.b[SDL_GAMEPAD_BUTTON_EAST], c.down[PcEast] = r.b[SDL_GAMEPAD_BUTTON_NORTH];
+        c.down[PcWest] = r.b[SDL_GAMEPAD_BUTTON_SOUTH], c.down[PcNorth] = r.b[SDL_GAMEPAD_BUTTON_WEST];
+        c.down[PcShoulderL] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2];  // SL
+        c.down[PcShoulderR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1];  // SR
+        c.down[PcStart] = r.b[SDL_GAMEPAD_BUTTON_START], c.down[PcStickL] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
+        // right is upright up, up is upright left
+        c.lx = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY]), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX]);
+    }
+}
+
+static std::string device_name(SDL_Gamepad* pad) {
+    const char* name = pad ? SDL_GetGamepadName(pad) : nullptr;
+    return name && *name ? name : "Controller";
+}
+static void joycon_feedback(size_t slot) {  // a short buzz on the device that changed
+    if (g_gamepads[slot]) SDL_RumbleGamepad(g_gamepads[slot], 0x5000, 0x7000, 150);
+}
+
+// SL + SR held (sideways / upright) and L + R on two sideways Joy-Cons (a pair again); pairs of upright Joy-Cons
+static void update_joycons_locked(const std::array<RawPad, kMaxDevices>& raw, uint64_t now) {
+    for (size_t i = 0; i < kMaxDevices; ++i) {
+        DeviceState& d = g_devices[i];
+        SDL_Gamepad* pad = g_gamepads[i];
+        const SDL_JoystickID id = pad ? SDL_GetGamepadID(pad) : 0;
+        if (d.id != id) {
+            if (d.partner >= 0 && size_t(d.partner) < kMaxDevices && g_devices[size_t(d.partner)].partner == int(i))
+                g_devices[size_t(d.partner)].partner = -1;
+            d = DeviceState{};
+            d.id = id;
+            d.side = joycon_side(pad);
+        }
+    }
+    for (size_t i = 0; i < kMaxDevices; ++i) {
+        DeviceState& d = g_devices[i];
+        if (d.side == JoyCon::None) continue;
+        if (rails_held(raw[i], d.side)) {
+            if (!d.rails_since) d.rails_since = now;
+            if (!d.rails_done && now - d.rails_since >= kJoyConGestureMs) {
+                d.rails_done = true;
+                d.sideways = !d.sideways;
+                if (d.partner >= 0) g_devices[size_t(d.partner)].partner = -1, d.partner = -1;
+                const std::string name = device_name(g_gamepads[i]);
+                log("hid: %s (slot %zu) %s", name.c_str(), i, d.sideways ? "held sideways, plays alone" : "upright again");
+                overlay::notify((name + (d.sideways ? ": sideways, plays alone" : ": upright")).c_str());
+                joycon_feedback(i);
+            }
+        } else {
+            d.rails_since = 0, d.rails_done = false;
+        }
+        d.join_since = d.sideways && join_held(raw[i], d.side) ? (d.join_since ? d.join_since : now) : 0;
+    }
+    // L + R held on a sideways left and a sideways right Joy-Con for a second: they pair again
+    for (size_t l = 0; l < kMaxDevices; ++l) {
+        DeviceState& a = g_devices[l];
+        if (a.side != JoyCon::Left || !a.join_since || now - a.join_since < kJoyConGestureMs) continue;
+        for (size_t r = 0; r < kMaxDevices; ++r) {
+            DeviceState& b = g_devices[r];
+            if (b.side != JoyCon::Right || !b.join_since || now - b.join_since < kJoyConGestureMs) continue;
+            a.sideways = b.sideways = false;
+            a.partner = int(r), b.partner = int(l);
+            a.join_since = b.join_since = 0;
+            log("hid: Joy-Cons in slots %zu and %zu paired again", l, r);
+            overlay::notify("Joy-Cons paired: one controller");
+            joycon_feedback(l), joycon_feedback(r);
+            break;
+        }
+    }
+    // Upright Joy-Cons without a partner: a left and a right make a pair, in the order they came
+    for (size_t l = 0; l < kMaxDevices; ++l) {
+        DeviceState& a = g_devices[l];
+        if (a.side != JoyCon::Left || a.sideways || a.partner >= 0) continue;
+        for (size_t r = 0; r < kMaxDevices; ++r) {
+            DeviceState& b = g_devices[r];
+            if (b.side != JoyCon::Right || b.sideways || b.partner >= 0) continue;
+            a.partner = int(r), b.partner = int(l);
+            log("hid: Joy-Cons in slots %zu and %zu paired", l, r);
+            break;
+        }
+    }
+}
+
 static PlayerInputs sample_players_uncached() {
     PlayerInputs result;
     std::array<PadState, 4> physical{};
     std::array<bool, 4> present{};
+    std::array<SlotMembers, 4> members{};
     {
         std::lock_guard lk(g_gamepad_lock);
         scan_gamepads_locked();
-        for (size_t slot = 0; slot < g_gamepads.size(); ++slot) {
+        // The game's rumble for each controller slot, to the devices it was made of
+        for (size_t slot = 0; slot < 4; ++slot) {
             const uint64_t req = g_pending_rumble[slot].exchange(0, std::memory_order_acq_rel);
-            if ((req >> 32) && g_gamepads[slot]) {
-                SDL_RumbleGamepad(g_gamepads[slot], Uint16((req >> 16) & 0xFFFFu), Uint16(req & 0xFFFFu), 250);
-            }
+            if (!(req >> 32)) continue;
+            for (int dev : g_slot_members[slot].device)
+                if (dev >= 0 && g_gamepads[size_t(dev)])
+                    SDL_RumbleGamepad(g_gamepads[size_t(dev)], Uint16((req >> 16) & 0xFFFFu), Uint16(req & 0xFFFFu), 250);
         }
-        constexpr SDL_GamepadButton buttons[] = {
-            SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_NORTH,
-            SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_GAMEPAD_BUTTON_INVALID,
-            SDL_GAMEPAD_BUTTON_INVALID, SDL_GAMEPAD_BUTTON_START, SDL_GAMEPAD_BUTTON_BACK,
-            SDL_GAMEPAD_BUTTON_LEFT_STICK, SDL_GAMEPAD_BUTTON_RIGHT_STICK, SDL_GAMEPAD_BUTTON_DPAD_LEFT,
-            SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_DOWN,
-        };
-        for (size_t slot = 0; slot < g_gamepads.size(); ++slot) {
-            SDL_Gamepad* pad = g_gamepads[slot];
+        std::array<RawPad, kMaxDevices> raw{};
+        for (size_t i = 0; i < kMaxDevices; ++i)
+            if (g_gamepads[i]) raw[i] = read_raw(g_gamepads[i]);
+        update_joycons_locked(raw, SDL_GetTicks());
+        // Controller slots, in device order: a device, or a Joy-Con pair at its first device's place
+        size_t slot = 0;
+        for (size_t i = 0; i < kMaxDevices && slot < 4; ++i) {
+            SDL_Gamepad* pad = g_gamepads[i];
             if (!pad) continue;
+            const DeviceState& d = g_devices[i];
+            if (d.side != JoyCon::None && d.partner >= 0 && size_t(d.partner) < i && g_gamepads[size_t(d.partner)])
+                continue;  // in its partner's slot
+            ControllerInput in;
+            SlotMembers& m = members[slot];
+            m.device[0] = int(i), m.id[0] = SDL_GetGamepadID(pad);
+            if (d.side == JoyCon::None) {
+                add_full(in, raw[i]);
+                result.names[slot] = device_name(pad);
+                result.styles[slot] = detect_gamepad_style(pad);
+                m.role[0] = 3;
+            } else if (d.sideways) {
+                add_sideways(in, raw[i], d.side);
+                result.names[slot] = device_name(pad) + " (sideways)";
+                result.styles[slot] = 1;
+                m.role[0] = 2;
+            } else {
+                add_upright(in, raw[i], d.side);
+                result.names[slot] = device_name(pad);
+                result.styles[slot] = 1;
+                m.role[0] = d.side == JoyCon::Left ? 0 : 1;
+                if (d.partner >= 0 && g_gamepads[size_t(d.partner)]) {
+                    const size_t p = size_t(d.partner);
+                    ControllerInput other;
+                    add_upright(other, raw[p], g_devices[p].side);
+                    for (size_t k = 0; k < kPcControlCount; ++k) in.down[k] = in.down[k] || other.down[k];
+                    if (other.lx || other.ly) in.lx = other.lx, in.ly = other.ly;
+                    if (other.rx || other.ry) in.rx = other.rx, in.ry = other.ry;
+                    m.device[1] = int(p), m.id[1] = SDL_GetGamepadID(g_gamepads[p]);
+                    m.role[1] = g_devices[p].side == JoyCon::Left ? 0 : 1;
+                    const std::string a = device_name(pad), b = device_name(g_gamepads[p]);
+                    result.names[slot] = a.find("Joy-Con 2") != std::string::npos && b.find("Joy-Con 2") != std::string::npos
+                                             ? "Joy-Con 2 (L/R)"
+                                             : "Joy-Con (L/R)";
+                } else {
+                    m.role[0] = 2;  // alone, upright: both actuators' values on it
+                }
+            }
             present[slot] = true;
-            const char* name = SDL_GetGamepadName(pad);
-            result.names[slot] = name ? name : "Controller";
-            result.styles[slot] = detect_gamepad_style(pad);
-            bool down[kPcControlCount]{};
-            for (size_t i = 0; i < kPcControlCount; ++i)
-                down[i] = buttons[i] != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(pad, buttons[i]);
-            down[PcTriggerL] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000;
-            down[PcTriggerR] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000;
             if (slot == 0) {
-                for (size_t i = 0; i < kPcControlCount; ++i) {
-                    if (pc_menu_open() && down[i] && !g_previous_controller_state[i]) pc_menu_capture_controller_button(int(i));
-                    g_previous_controller_state[i] = down[i];
+                for (size_t k = 0; k < kPcControlCount; ++k) {
+                    if (pc_menu_open() && in.down[k] && !g_previous_controller_state[k]) pc_menu_capture_controller_button(int(k));
+                    g_previous_controller_state[k] = in.down[k];
                 }
             }
             for (size_t action = 0; action < kPcControlCount; ++action) {
                 const int bind = g_device_bindings[slot][action].load();
-                if (bind >= 0 && bind < int(kPcControlCount) && down[bind]) physical[slot].buttons |= kPadActionBits[action];
+                if (bind >= 0 && bind < int(kPcControlCount) && in.down[bind]) physical[slot].buttons |= kPadActionBits[action];
             }
-            auto axis = [&](SDL_GamepadAxis which, bool invert) {
-                int value = SDL_GetGamepadAxis(pad, which);
-                if (value > -7849 && value < 7849) return 0;
-                value = std::clamp(value, -kStickMax, kStickMax);
-                return invert ? -value : value;
-            };
-            physical[slot].lx = axis(SDL_GAMEPAD_AXIS_LEFTX, false);
-            physical[slot].ly = axis(SDL_GAMEPAD_AXIS_LEFTY, true);
-            physical[slot].rx = axis(SDL_GAMEPAD_AXIS_RIGHTX, false);
-            physical[slot].ry = axis(SDL_GAMEPAD_AXIS_RIGHTY, true);
+            physical[slot].lx = in.lx, physical[slot].ly = in.ly;
+            physical[slot].rx = in.rx, physical[slot].ry = in.ry;
+            ++slot;
         }
+        g_slot_members = members;
     }
     PadState keyboard{};
     const bool focused = g_window && GetForegroundWindow() == g_window;
@@ -1398,6 +1625,23 @@ static PlayerInputs sample_players_uncached() {
             }
         }
     }
+    // Player lights: each device shows the player its controller plays as (Joy-Cons, Pro Controllers)
+    {
+        std::array<int, kMaxDevices> want;
+        want.fill(-1);
+        for (size_t player = 0; player < 4; ++player) {
+            const int slot = result.slots[player];
+            if (slot < 0 || slot >= 4) continue;
+            for (int dev : members[size_t(slot)].device)
+                if (dev >= 0) want[size_t(dev)] = int(player);
+        }
+        std::lock_guard lk(g_gamepad_lock);
+        for (size_t i = 0; i < kMaxDevices; ++i)
+            if (g_gamepads[i] && g_devices[i].player_shown != want[i]) {
+                g_devices[i].player_shown = want[i];
+                SDL_SetGamepadPlayerIndex(g_gamepads[i], want[i]);
+            }
+    }
     return result;
 }
 
@@ -1416,8 +1660,13 @@ static void ensure_input_poller() {
             set_thread_name("win-input");
             CoInitializeEx(nullptr, COINIT_MULTITHREADED);
             SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+            // Joy-Cons one by one and upright: the Joy-Con manager pairs them or turns them sideways (above)
+            SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, "0");
+            SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS, "1");
             if (!SDL_Init(SDL_INIT_GAMEPAD))
                 log("hid: SDL gamepad input unavailable: %s", SDL_GetError());
+            else
+                switch2_start();  // Switch 2 controllers over Bluetooth LE (NX_SWITCH2=0: off)
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {}
             PlayerInputs first = sample_players_uncached();
@@ -1471,6 +1720,39 @@ void rumble_player(unsigned player, float low, float high) {
     const uint32_t high_u16 = Uint16(std::clamp(high * strength, 0.0f, 1.0f) * 65535.0f);
     g_pending_rumble[size_t(slot)].store((1ull << 32) | (uint64_t(low_u16) << 16) | uint64_t(high_u16),
                                          std::memory_order_release);
+}
+// HD rumble (the game's amplitude and frequency per band, left and right actuator) for the Switch 2 controllers of
+// that player's controller, which play it as it is (switch2/switch2.h); every other device keeps rumble_player's.
+void rumble_player_hd(unsigned player, const float left[4], const float right[4]) {
+    if (player >= 4) return;
+    const int slot = sample_players().slots[player];
+    if (slot < 0 || slot >= 4) return;
+    SlotMembers m;
+    {
+        std::lock_guard lk(g_gamepad_lock);
+        m = g_slot_members[size_t(slot)];
+    }
+    const float strength = float(std::clamp(g_pc_settings.rumble, 0, 100)) / 100.0f;
+    float l[4], r[4], strong[4];
+    for (int k = 0; k < 4; ++k) {
+        const bool amp = k == 0 || k == 2;
+        l[k] = amp ? std::clamp(left[k] * strength, 0.0f, 1.0f) : left[k];
+        r[k] = amp ? std::clamp(right[k] * strength, 0.0f, 1.0f) : right[k];
+    }
+    for (int band = 0; band < 4; band += 2) {  // the stronger side in each band, with its frequency
+        const bool use_left = l[band] >= r[band];
+        strong[band] = use_left ? l[band] : r[band];
+        strong[band + 1] = use_left ? l[band + 1] : r[band + 1];
+    }
+    for (size_t k = 0; k < 2; ++k) {
+        if (m.device[k] < 0 || switch2_kind(uint32_t(m.id[k])) == SWITCH2_NONE) continue;
+        switch (m.role[k]) {
+            case 0: switch2_hd_rumble(uint32_t(m.id[k]), l, l); break;
+            case 1: switch2_hd_rumble(uint32_t(m.id[k]), r, r); break;
+            case 2: switch2_hd_rumble(uint32_t(m.id[k]), strong, strong); break;
+            default: switch2_hd_rumble(uint32_t(m.id[k]), l, r); break;
+        }
+    }
 }
 void rumble(float low, float high) { rumble_player(0, low, high); }
 void read_pad_player(unsigned player, PadState& p) {
@@ -1875,3 +2157,13 @@ bool upgrade_button_font(const std::string& out_path) {
 }
 
 }  // namespace nx::plat
+
+// switch2/'s log lines (switch2.h), into the runtime's log
+extern "C" void rt_log(const char* fmt, ...) {
+    char line[512];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    nx::log("%s", line);
+}
