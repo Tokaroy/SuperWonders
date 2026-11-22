@@ -87,6 +87,10 @@ static void watchdog(void*) {
             std::remove(req.c_str());
             log("hang: thread dump requested");
             report_threads();
+            extern void dump_active_fibers(std::string (*describe)(uint64_t));
+            extern void dump_net_state();
+            dump_active_fibers(describe);
+            dump_net_state();
         }
         // A file named profile (optionally holding a number of seconds): sample every guest thread's host pc into
         // profile.txt next to it.

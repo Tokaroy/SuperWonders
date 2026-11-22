@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,6 +21,11 @@
 #include <security.h>
 #include <schannel.h>
 #include <wincrypt.h>
+#else
+#include <dlfcn.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
 #endif
 
 namespace nx {
@@ -44,6 +51,68 @@ std::vector<uint8_t> build_alpn_buffer(const std::string& proto) {
     buf[6] = uint8_t(proto.size());
     std::memcpy(buf.data() + 7, proto.data(), proto.size());
     return buf;
+}
+#else
+struct SSL_CTX;
+struct SSL;
+struct SSL_METHOD;
+
+struct OpenSslApi {
+    void* handle = nullptr;
+    const SSL_METHOD* (*TLS_client_method)() = nullptr;
+    SSL_CTX* (*SSL_CTX_new)(const SSL_METHOD*) = nullptr;
+    void (*SSL_CTX_free)(SSL_CTX*) = nullptr;
+    int (*SSL_CTX_set_default_verify_paths)(SSL_CTX*) = nullptr;
+    void (*SSL_CTX_set_verify)(SSL_CTX*, int, void*) = nullptr;
+    int (*SSL_CTX_set_alpn_protos)(SSL_CTX*, const unsigned char*, unsigned int) = nullptr;
+    SSL* (*SSL_new)(SSL_CTX*) = nullptr;
+    void (*SSL_free)(SSL*) = nullptr;
+    int (*SSL_set_fd)(SSL*, int) = nullptr;
+    long (*SSL_ctrl)(SSL*, int, long, void*) = nullptr;
+    int (*SSL_connect)(SSL*) = nullptr;
+    int (*SSL_read)(SSL*, void*, int) = nullptr;
+    int (*SSL_peek)(SSL*, void*, int) = nullptr;
+    int (*SSL_write)(SSL*, const void*, int) = nullptr;
+    int (*SSL_pending)(const SSL*) = nullptr;
+    int (*SSL_get_error)(const SSL*, int) = nullptr;
+    void (*SSL_get0_alpn_selected)(const SSL*, const unsigned char**, unsigned int*) = nullptr;
+    bool ok = false;
+};
+
+const OpenSslApi& openssl() {
+    static const OpenSslApi api = []() {
+        OpenSslApi a;
+        a.handle = dlopen("libssl.so.3", RTLD_NOW | RTLD_LOCAL);
+        if (!a.handle) a.handle = dlopen("libssl.so", RTLD_NOW | RTLD_LOCAL);
+        if (!a.handle) {
+            log("ssl: dlopen(libssl) failed: %s", dlerror());
+            return a;
+        }
+        auto load = [&](auto& fn, const char* name) {
+            fn = reinterpret_cast<std::decay_t<decltype(fn)>>(dlsym(a.handle, name));
+            return fn != nullptr;
+        };
+        a.ok = load(a.TLS_client_method, "TLS_client_method") &&
+               load(a.SSL_CTX_new, "SSL_CTX_new") &&
+               load(a.SSL_CTX_free, "SSL_CTX_free") &&
+               load(a.SSL_CTX_set_default_verify_paths, "SSL_CTX_set_default_verify_paths") &&
+               load(a.SSL_CTX_set_verify, "SSL_CTX_set_verify") &&
+               load(a.SSL_CTX_set_alpn_protos, "SSL_CTX_set_alpn_protos") &&
+               load(a.SSL_new, "SSL_new") &&
+               load(a.SSL_free, "SSL_free") &&
+               load(a.SSL_set_fd, "SSL_set_fd") &&
+               load(a.SSL_ctrl, "SSL_ctrl") &&
+               load(a.SSL_connect, "SSL_connect") &&
+               load(a.SSL_read, "SSL_read") &&
+               load(a.SSL_peek, "SSL_peek") &&
+               load(a.SSL_write, "SSL_write") &&
+               load(a.SSL_pending, "SSL_pending") &&
+               load(a.SSL_get_error, "SSL_get_error") &&
+               load(a.SSL_get0_alpn_selected, "SSL_get0_alpn_selected");
+        if (!a.ok) log("ssl: missing required OpenSSL symbols in libssl");
+        return a;
+    }();
+    return api;
 }
 #endif
 
@@ -361,6 +430,167 @@ struct SslConnectionState {
         }
         return int32_t(total);
     }
+
+    int32_t pending_bytes() const { return int32_t(dec_in.size()); }
+
+    uint32_t poll_tls(uint32_t want, uint32_t timeout_ms) const {
+        uint32_t out_ev = 0;
+        if ((want & 1u) && !dec_in.empty()) out_ev |= 1u;
+        SOCKET sock = native_sock();
+        if (sock != INVALID_SOCKET && out_ev == 0) {
+            pollfd pfd{sock, short(((want & 1u) ? POLLIN : 0) | ((want & 2u) ? POLLOUT : 0)), 0};
+            if (WSAPoll(&pfd, 1, int(timeout_ms)) > 0) {
+                if (pfd.revents & POLLIN) out_ev |= 1u;
+                if (pfd.revents & POLLOUT) out_ev |= 2u;
+                if (pfd.revents & (POLLERR | POLLHUP)) out_ev |= 4u;
+            }
+        }
+        return out_ev;
+    }
+#else
+    SSL_CTX* ctx = nullptr;
+    SSL* ssl = nullptr;
+
+    ~SslConnectionState() { cleanup(); }
+
+    void cleanup() {
+        const auto& ossl = openssl();
+        if (ssl && ossl.SSL_free) {
+            ossl.SSL_free(ssl);
+            ssl = nullptr;
+        }
+        if (ctx && ossl.SSL_CTX_free) {
+            ossl.SSL_CTX_free(ctx);
+            ctx = nullptr;
+        }
+    }
+
+    int native_sock() const {
+        const intptr_t s = net::get_host_socket(fd);
+        return s < 0 ? -1 : int(s);
+    }
+
+    std::string effective_sni() const {
+        if (!host.empty()) return host;
+        const int s = native_sock();
+        if (s < 0) return {};
+        sockaddr_in peer{};
+        socklen_t len = sizeof(peer);
+        if (getpeername(s, reinterpret_cast<sockaddr*>(&peer), &len) == 0 && peer.sin_family == AF_INET)
+            return net::lookup_sni_host(peer.sin_addr.s_addr);
+        return {};
+    }
+
+    std::string target_alpn(const std::string& sni) const {
+        if (sni.find("npln") != std::string::npos || sni.find("gs.nintendo.net") != std::string::npos)
+            return "h2";
+        return alpn_proto.empty() ? "http/1.1" : alpn_proto;
+    }
+
+    uint32_t do_handshake() {
+        const auto& ossl = openssl();
+        if (!ossl.ok) return kSslIoError;
+        const int s = native_sock();
+        if (s < 0) return kSslInvalidState;
+        if (handshake_done) return 0;
+
+        const std::string sni = effective_sni();
+        const std::string want_alpn = target_alpn(sni);
+        if (!ssl) {
+            ctx = ossl.SSL_CTX_new(ossl.TLS_client_method());
+            if (!ctx) return kSslIoError;
+            // Match Windows SCH_CRED_MANUAL_CRED_VALIDATION: DNS redirect maps *.nintendo.net -> nex.nextendo.network.
+            ossl.SSL_CTX_set_verify(ctx, 0 /* SSL_VERIFY_NONE */, nullptr);
+            if (!want_alpn.empty() && want_alpn.size() < 255) {
+                std::vector<unsigned char> wire;
+                wire.push_back(static_cast<unsigned char>(want_alpn.size()));
+                wire.insert(wire.end(), want_alpn.begin(), want_alpn.end());
+                ossl.SSL_CTX_set_alpn_protos(ctx, wire.data(), static_cast<unsigned int>(wire.size()));
+            }
+            ssl = ossl.SSL_new(ctx);
+            if (!ssl) return kSslIoError;
+            ossl.SSL_set_fd(ssl, s);
+            if (!sni.empty()) {
+                ossl.SSL_ctrl(ssl, 55 /* SSL_CTRL_SET_TLSEXT_HOSTNAME */, 0 /* TLSEXT_NAMETYPE_host_name */,
+                              const_cast<char*>(sni.c_str()));
+            }
+        }
+
+        const int rc = ossl.SSL_connect(ssl);
+        if (rc == 1) {
+            handshake_done = true;
+            const unsigned char* sel = nullptr;
+            unsigned int sel_len = 0;
+            ossl.SSL_get0_alpn_selected(ssl, &sel, &sel_len);
+            if (sel && sel_len > 0) negotiated_alpn.assign(reinterpret_cast<const char*>(sel), sel_len);
+            else negotiated_alpn = want_alpn;
+            log("ssl: TLS handshake OK sni=%s alpn=%s", sni.c_str(), negotiated_alpn.c_str());
+            return 0;
+        }
+        const int err = ossl.SSL_get_error(ssl, rc);
+        if (err == 2 /* SSL_ERROR_WANT_READ */ || err == 3 /* SSL_ERROR_WANT_WRITE */) {
+            return kSslWouldBlock;
+        }
+        log("ssl: SSL_connect failed sni=%s rc=%d err=%d", sni.c_str(), rc, err);
+        return kSslIoError;
+    }
+
+    int32_t read_tls(uint8_t* out, uint32_t cap, bool peek, uint32_t& out_res) {
+        out_res = 0;
+        const auto& ossl = openssl();
+        if (!ossl.ok || !handshake_done || !ssl) {
+            out_res = kSslInvalidState;
+            return -1;
+        }
+        const int n = peek ? ossl.SSL_peek(ssl, out, int(cap)) : ossl.SSL_read(ssl, out, int(cap));
+        if (n > 0) return n;
+        const int err = ossl.SSL_get_error(ssl, n);
+        if (err == 6 /* SSL_ERROR_ZERO_RETURN */) return 0;
+        if (err == 2 /* SSL_ERROR_WANT_READ */ || err == 3 /* SSL_ERROR_WANT_WRITE */) {
+            out_res = kSslWouldBlock;
+            return -1;
+        }
+        out_res = kSslIoError;
+        return -1;
+    }
+
+    int32_t write_tls(const uint8_t* data, uint32_t len, uint32_t& out_res) {
+        out_res = 0;
+        const auto& ossl = openssl();
+        if (!ossl.ok || !handshake_done || !ssl) {
+            out_res = kSslInvalidState;
+            return -1;
+        }
+        const int n = ossl.SSL_write(ssl, data, int(len));
+        if (n > 0) return n;
+        const int err = ossl.SSL_get_error(ssl, n);
+        if (err == 2 /* SSL_ERROR_WANT_READ */ || err == 3 /* SSL_ERROR_WANT_WRITE */) {
+            out_res = kSslWouldBlock;
+            return -1;
+        }
+        out_res = kSslIoError;
+        return -1;
+    }
+
+    int32_t pending_bytes() const {
+        const auto& ossl = openssl();
+        return (ossl.ok && ssl) ? ossl.SSL_pending(ssl) : 0;
+    }
+
+    uint32_t poll_tls(uint32_t want, uint32_t timeout_ms) const {
+        uint32_t out_ev = 0;
+        if ((want & 1u) && pending_bytes() > 0) out_ev |= 1u;
+        const int sock = native_sock();
+        if (sock >= 0 && out_ev == 0) {
+            pollfd pfd{sock, short(((want & 1u) ? POLLIN : 0) | ((want & 2u) ? POLLOUT : 0)), 0};
+            if (::poll(&pfd, 1, int(timeout_ms)) > 0) {
+                if (pfd.revents & POLLIN) out_ev |= 1u;
+                if (pfd.revents & POLLOUT) out_ev |= 2u;
+                if (pfd.revents & (POLLERR | POLLHUP)) out_ev |= 4u;
+            }
+        }
+        return out_ev;
+    }
 #endif
 };
 
@@ -395,86 +625,44 @@ std::shared_ptr<Service> make_ssl_connection() {
     s->cmds[7] = [conn](IpcCtx& c) { c.push<uint32_t>(conn->io_mode); return 0u; };
     s->cmds[8] = [conn](IpcCtx&) {  // DoHandshake
         if (!net::online_enabled()) return kSslIoError;
-#if defined(_WIN32)
         return conn->do_handshake();
-#else
-        return kSslIoError;
-#endif
     };
     s->cmds[9] = [conn](IpcCtx& c) {  // DoHandshakeGetServerCert -> (u32 size, u32 count)
         if (!net::online_enabled()) return kSslIoError;
-#if defined(_WIN32)
         const uint32_t res = conn->do_handshake();
         c.push<uint32_t>(0);
         c.push<uint32_t>(0);
         return res;
-#else
-        c.push<uint32_t>(0);
-        c.push<uint32_t>(0);
-        return kSslIoError;
-#endif
     };
     s->cmds[10] = [conn](IpcCtx& c) {  // Read(out buffer) -> s32 bytes
         Buffer out = c.out_buf(0);
-#if defined(_WIN32)
         uint32_t res = 0;
         const int32_t n = conn->read_tls(reinterpret_cast<uint8_t*>(out.addr), uint32_t(out.size), false, res);
         c.push<int32_t>(n);
         return res;
-#else
-        c.push<int32_t>(-1);
-        return kSslIoError;
-#endif
     };
     s->cmds[11] = [conn](IpcCtx& c) {  // Write(in buffer) -> s32 bytes
         Buffer in = c.in_buf(0);
-#if defined(_WIN32)
         uint32_t res = 0;
         const int32_t n = conn->write_tls(reinterpret_cast<const uint8_t*>(in.addr), uint32_t(in.size), res);
         c.push<int32_t>(n);
         return res;
-#else
-        c.push<int32_t>(-1);
-        return kSslIoError;
-#endif
     };
     s->cmds[12] = [conn](IpcCtx& c) {  // Pending -> s32
-#if defined(_WIN32)
-        c.push<int32_t>(int32_t(conn->dec_in.size()));
-#else
-        c.push<int32_t>(0);
-#endif
+        c.push<int32_t>(conn->pending_bytes());
         return 0u;
     };
     s->cmds[13] = [conn](IpcCtx& c) {  // Peek(out buffer) -> s32
         Buffer out = c.out_buf(0);
-#if defined(_WIN32)
         uint32_t res = 0;
         const int32_t n = conn->read_tls(reinterpret_cast<uint8_t*>(out.addr), uint32_t(out.size), true, res);
         c.push<int32_t>(n);
         return res;
-#else
-        c.push<int32_t>(-1);
-        return kSslIoError;
-#endif
     };
     s->cmds[14] = [conn](IpcCtx& c) {  // Poll(u32 events, u32 timeout_ms) -> u32 out_events
         const uint32_t want = c.arg<uint32_t>(0);
         const uint32_t timeout_ms = c.arg<uint32_t>(4);
-        uint32_t out_ev = 0;
-#if defined(_WIN32)
-        if ((want & 1u) && !conn->dec_in.empty()) out_ev |= 1u;
-        SOCKET sock = conn->native_sock();
-        if (sock != INVALID_SOCKET && out_ev == 0) {
-            pollfd pfd{sock, short(((want & 1u) ? POLLIN : 0) | ((want & 2u) ? POLLOUT : 0)), 0};
-            if (WSAPoll(&pfd, 1, int(timeout_ms)) > 0) {
-                if (pfd.revents & POLLIN) out_ev |= 1u;
-                if (pfd.revents & POLLOUT) out_ev |= 2u;
-                if (pfd.revents & (POLLERR | POLLHUP)) out_ev |= 4u;
-            }
-        }
-#endif
-        c.push<uint32_t>(out_ev);
+        c.push<uint32_t>(conn->poll_tls(want, timeout_ms));
         return 0u;
     };
     s->cmds[15] = [conn](IpcCtx& c) { conn->session_cache_mode = c.arg<uint32_t>(0); return 0u; };
@@ -530,6 +718,76 @@ const std::vector<std::vector<uint8_t>>& builtin_root_certs() {
             }
             if (ctx) CertFreeCertificateContext(ctx);
             CertCloseStore(store, 0);
+        }
+#else
+        auto b64_decode = [](const std::string& b64) -> std::vector<uint8_t> {
+            static const int8_t dec[256] = {
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
+                52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
+                -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
+                15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
+                -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
+                41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+                -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+            };
+            std::vector<uint8_t> der;
+            uint32_t val = 0;
+            int bits = -8;
+            for (unsigned char c : b64) {
+                int8_t d = dec[c];
+                if (d == -1) continue;
+                val = (val << 6) | uint32_t(d);
+                bits += 6;
+                if (bits >= 0) {
+                    der.push_back(uint8_t((val >> bits) & 0xffu));
+                    bits -= 8;
+                }
+            }
+            return der;
+        };
+        const char* env_cert = std::getenv("SSL_CERT_FILE");
+        const char* candidates[] = {
+            env_cert,
+            "/etc/ssl/certs/ca-certificates.crt",
+            "/etc/pki/tls/certs/ca-bundle.crt",
+            "/etc/ssl/ca-bundle.pem",
+            "/etc/ssl/cert.pem",
+        };
+        size_t total_bytes = 0x18;
+        for (const char* path : candidates) {
+            if (!path || !*path) continue;
+            std::ifstream f(path);
+            if (!f.is_open()) continue;
+            std::string line, b64;
+            bool in_cert = false;
+            while (std::getline(f, line)) {
+                if (line.find("-----BEGIN CERTIFICATE-----") != std::string::npos) {
+                    in_cert = true;
+                    b64.clear();
+                } else if (line.find("-----END CERTIFICATE-----") != std::string::npos) {
+                    if (in_cert) {
+                        auto der = b64_decode(b64);
+                        if (!der.empty() && der.size() <= 4096 && total_bytes + 0x18 + der.size() <= 48000) {
+                            total_bytes += 0x18 + der.size();
+                            out.push_back(std::move(der));
+                            if (out.size() >= 32) break;
+                        }
+                    }
+                    in_cert = false;
+                } else if (in_cert) {
+                    b64 += line;
+                }
+            }
+            if (!out.empty()) break;
         }
 #endif
         return out;

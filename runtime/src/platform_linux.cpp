@@ -14,6 +14,7 @@
 // Settings: <data root>/pc-settings.ini through the overlay menu (F1, or Minus + Plus on a controller: overlay/), and
 // NX_<KEY> environment variables, as on Windows and macOS. Input and settings: platform_linux_input.cpp.
 #include <dlfcn.h>
+#include <execinfo.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -554,7 +555,17 @@ void crash_handler(int sig, siginfo_t* info, void* uc) {
     nx::log("CRASH: signal %d at %s+%llx, data address %llx", sig, d.dli_fname ? d.dli_fname : "?",
             (unsigned long long)(pc - uint64_t(d.dli_fbase)), (unsigned long long)uint64_t(info->si_addr));
     nx::CPU& c = nx::current_cpu();
-    nx::log("  guest lr %s  sp %llx", nx::describe(c.x[30]).c_str(), (unsigned long long)c.x[31]);
+    nx::log("  guest lr %s  sp %llx  x17 %s", nx::describe(c.x[30]).c_str(), (unsigned long long)c.x[31],
+            nx::describe(c.x[17]).c_str());
+    void* host_frames[32]{};
+    const int n_host = ::backtrace(host_frames, 32);
+    for (int i = 0; i < n_host; ++i) {
+        Dl_info hd{};
+        dladdr(host_frames[i], &hd);
+        nx::log("  host #%d %p (%s + %llx)", i, host_frames[i],
+                hd.dli_sname ? hd.dli_sname : (hd.dli_fname ? hd.dli_fname : "?"),
+                (unsigned long long)(uint64_t(host_frames[i]) - uint64_t(hd.dli_saddr ? hd.dli_saddr : hd.dli_fbase)));
+    }
     for (int k = 0; k < 32; k += 4)
         nx::log("  x%-2d %016llx %016llx %016llx %016llx", k, (unsigned long long)c.x[k], (unsigned long long)c.x[k + 1],
                 (unsigned long long)c.x[k + 2], (unsigned long long)c.x[k + 3]);
