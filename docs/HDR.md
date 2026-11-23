@@ -79,11 +79,16 @@ skip the float ones in HDR mode.
 
 ## Regenerating the replacement
 
-After the game's shaders are rebuilt (a new `spirv/` from the setup), or after changing the encoding:
+The setup does this itself: its `hdr` step (`tools/setup_game.py`, after `shaders`) runs the generator whenever the
+shaders, the generator or the tools change. Releases bring the tools in `game-build/shadertools/`
+(`tools/pack_release.py --shader-tools <the Vulkan SDK's Bin>`: `spirv-cross` and `glslc`, Apache-2.0). Without them,
+or if the game's shader is not the one the generator knows, the step notes it, removes any old replacement and lets the
+setup finish: HDR output then keeps the game's own tone curve. By hand, from a checkout:
 
     python tools/renodx_wonder.py --data C:/Games/superwonders/data
 
-It needs `spirv-cross` and `glslc` from the Vulkan SDK (`VULKAN_SDK` set, or on `PATH`). It decompiles
+The tools are looked for in `game-build/shadertools/`, `NX_SHADER_TOOLS`, the Vulkan SDK (`VULKAN_SDK`), then `PATH`.
+The output is the same on every run (glslc's debug info names a fixed relative source). It decompiles
 `spirv/352e8b76df96cb1d.spv`, wraps the three output stores in `hdr_extend`, and compiles
 `spirv-renodx/352e8b76df96cb1d.spv`; `--keep-glsl <file>` also writes the patched GLSL for reading. It stops with an
 error if the shader's output stores no longer look as expected. `--scale` must match `kEncodeScale` in `nvn_hdr.cpp`.

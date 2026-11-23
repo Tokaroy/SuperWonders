@@ -159,7 +159,7 @@ def pack_kit(kit, a):
     copy(os.path.join(REPO, "tools", "nso2bin.py"), os.path.join(kit, "tools", "nso2bin.py"))
     copy(os.path.join(REPO, "tools", "fonts", "make_button_font.py"), os.path.join(kit, "tools", "fonts", "make_button_font.py"))
     copy(os.path.join(REPO, "tools", "wonder_menu_mod.py"), os.path.join(kit, "tools", "wonder_menu_mod.py"))
-    for f in ("wonder_uw_map_hud.py", "wonder_uw_screen_backgrounds.py", "wonder_uw_prepare.py"):
+    for f in ("wonder_uw_map_hud.py", "wonder_uw_screen_backgrounds.py", "wonder_uw_prepare.py", "renodx_wonder.py"):
         copy(os.path.join(REPO, "tools", f), os.path.join(kit, "tools", f))
     open(os.path.join(kit, "tools", "__init__.py"), "w").close()
     for f in glob.glob(os.path.join(REPO, "tools", "maxwell", "*.py")):
@@ -193,6 +193,19 @@ def pack_kit(kit, a):
                     os.chmod(p, 0o755)
     else:
         print("note: no --translator: this release can't translate shaders (setup stops at that step)")
+    if a.shader_tools:  # spirv-cross and glslc for the HDR step (tools/renodx_wonder.py looks in shadertools/ first)
+        found = 0
+        for name in ("spirv-cross", "glslc"):
+            for f in glob.glob(os.path.join(a.shader_tools, name + "*")):
+                if os.path.isfile(f):
+                    copy(f, os.path.join(kit, "shadertools", os.path.basename(f)))
+                    if not WIN:
+                        os.chmod(os.path.join(kit, "shadertools", os.path.basename(f)), 0o755)
+                    found += 1
+        if found < 2:
+            raise SystemExit(f"--shader-tools: spirv-cross and glslc expected in {a.shader_tools}")
+    else:
+        print("note: no --shader-tools: the setup can't prepare the HDR shader (HDR keeps the game's tone curve)")
     if WIN:
         if not a.toolchain or not a.python:
             raise SystemExit("Windows: --toolchain (llvm-mingw) and --python (a CPython install) are needed")
@@ -452,6 +465,7 @@ def main():
     ap.add_argument("--python", help="a CPython install (Windows)")
     ap.add_argument("--site-packages", help=f"where {', '.join(PY_MODULES)} are (default: this Python's)")
     ap.add_argument("--translator", help="a published spirv_harness (dotnet publish --self-contained)")
+    ap.add_argument("--shader-tools", help="a folder with spirv-cross and glslc (the Vulkan SDK's Bin) for the HDR step")
     ap.add_argument("--linux-toolchain", help="Linux: clang, lld and a sysroot for game-build/toolchain")
     ap.add_argument("--linux-python", help="Linux: a relocatable Python with the modules, for game-build/python")
     ap.add_argument("--no-archive", action="store_true")

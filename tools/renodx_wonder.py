@@ -35,13 +35,30 @@ import tempfile
 SHADER = "352e8b76df96cb1d"
 
 
-def tool(name):
+def tool_dirs():
+    """Where spirv-cross and glslc are looked for: a release's game-build/shadertools/ (tools/pack_release.py
+    --shader-tools), NX_SHADER_TOOLS, the Vulkan SDK, then PATH (None)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    dirs = [os.path.join(here, os.pardir, "shadertools"), os.environ.get("NX_SHADER_TOOLS")]
     sdk = os.environ.get("VULKAN_SDK")
-    for d in ([os.path.join(sdk, "Bin"), os.path.join(sdk, "bin")] if sdk else []) + [None]:
+    if sdk:
+        dirs += [os.path.join(sdk, "Bin"), os.path.join(sdk, "bin")]
+    return [d for d in dirs if d and os.path.isdir(d)] + [None]
+
+
+def find_tool(name):
+    for d in tool_dirs():
         p = shutil.which(name, path=d) if d else shutil.which(name)
         if p:
             return p
-    sys.exit(f"{name} not found: install the Vulkan SDK (or set VULKAN_SDK)")
+    return None
+
+
+def tool(name):
+    p = find_tool(name)
+    if not p:
+        sys.exit(f"{name} not found: install the Vulkan SDK (or set VULKAN_SDK / NX_SHADER_TOOLS)")
+    return p
 
 
 EXTEND = """
@@ -198,8 +215,9 @@ def main():
         fp = os.path.join(tmp, SHADER + ".frag")
         with open(fp, "w") as f:
             f.write(glsl)
-        subprocess.run([tool("glslc"), "-fshader-stage=frag", "--target-env=vulkan1.0", "-O", "-g", fp, "-o", out],
-                       check=True)
+        # A relative source name from the temporary folder: -g records it, so the output is the same on every run.
+        subprocess.run([tool("glslc"), "-fshader-stage=frag", "--target-env=vulkan1.0", "-O", "-g", SHADER + ".frag",
+                        "-o", os.path.abspath(out)], check=True, cwd=tmp)
     print(f"wrote {out} (scale {a.scale}, xmax {a.xmax})")
 
 
