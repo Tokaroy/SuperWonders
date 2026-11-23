@@ -1748,8 +1748,8 @@ void rumble_player_hd(unsigned player, const float left[4], const float right[4]
         for (size_t k = 0; k < 2; ++k) {
             SDL_Gamepad* pad = m.device[k] >= 0 ? g_gamepads[size_t(m.device[k])] : nullptr;
             if (!pad || SDL_GetGamepadType(pad) != SDL_GAMEPAD_TYPE_PS5) continue;
-            const bool wireless = SDL_GetGamepadConnectionState(pad) == SDL_JOYSTICK_CONNECTION_WIRELESS;
-            dualsense::play(uint32_t(m.id[k]), SDL_GetGamepadPath(pad), wireless, left, right, g_pc_settings.rumble);
+            if (SDL_GetGamepadConnectionState(pad) == SDL_JOYSTICK_CONNECTION_WIRELESS) continue;  // Bluetooth: the plain rumble
+            dualsense::play(uint32_t(m.id[k]), left, right, g_pc_settings.rumble);
         }
     }
     const float strength = float(std::clamp(g_pc_settings.rumble, 0, 100)) / 100.0f;

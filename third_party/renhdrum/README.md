@@ -1,7 +1,7 @@
 # RenHDrum
 
 [RenHDrum](https://github.com/trzz1214/RenHDrum) by Three-Dola turns the game's HD rumble values into the audio a DualSense's
-voice coils play (over its cable) and the report they travel in (over Bluetooth). SuperWonders loads `renhdrum.dll` from beside
+voice coils play over its cable. SuperWonders loads `renhdrum.dll` from beside
 the program at run time (`runtime/src/dualsense_haptics.cpp`) and uses its DualSense functions only; its ABI is 0.5.x.
 
 - `renhdrum.dll`: the project's own **v0.5.0** release asset, unmodified.

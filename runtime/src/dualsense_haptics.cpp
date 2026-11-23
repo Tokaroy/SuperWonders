@@ -1,7 +1,6 @@
 // A DualSense's voice coils for the game's HD rumble, through RenHDrum (renhdrum.dll beside the game, loaded at run
-// time). See dualsense_haptics.h. The DLL's own DSP turns the game's amplitude and frequency per band into samples;
-// over a cable they go to the controller's four-channel sound card (channels 3 and 4 are the voice coils), over
-// Bluetooth the DSP builds HID report 0x32 itself, which is sent every 10.7 ms through a second handle on the device.
+// time). See dualsense_haptics.h. The DLL's own DSP turns the game's amplitude and frequency per band into samples,
+// which go to the controller's four-channel sound card over its cable (channels 3 and 4 are the voice coils).
 #include "dualsense_haptics.h"
 
 #include <SDL3/SDL.h>
@@ -27,9 +26,6 @@ struct Dsp;  // RenHdcDualSenseDsp, opaque
 
 // RenHDrum's C ABI (include/renhdrum.h): any 0.5.x keeps it
 constexpr uint32_t kAbi = 0x000500;
-constexpr size_t kBtReport = 142;
-constexpr int64_t kBtPeriodNs = 10666666;
-constexpr uint8_t kBtBufferDefault = 0xFF;
 constexpr float kFreqLow = 160.0f, kFreqHigh = 320.0f;  // the game's own when it sends none
 constexpr int64_t kStaleMs = 250;                       // a side the game stopped sending to goes silent
 constexpr int64_t kIdleCloseMs = 30000;                 // the controller is let go of after this long quiet
@@ -41,7 +37,6 @@ struct Api {
     void (*destroy)(Dsp*);
     int32_t (*set_half)(Dsp*, bool right, float al, float fl, float ah, float fh);
     int32_t (*fill)(Dsp*, float* out, size_t frames);
-    int32_t (*bt_report)(Dsp*, uint8_t buffer_length, uint8_t* out);
 };
 Api g_api{};
 bool g_loaded = false;
@@ -82,8 +77,7 @@ bool load_library() {
     g_api.destroy = reinterpret_cast<decltype(Api::destroy)>(get("renhdrum_dualsense_dsp_destroy"));
     g_api.set_half = reinterpret_cast<decltype(Api::set_half)>(get("renhdrum_dualsense_dsp_set_half_target"));
     g_api.fill = reinterpret_cast<decltype(Api::fill)>(get("renhdrum_dualsense_dsp_fill_f32"));
-    g_api.bt_report = reinterpret_cast<decltype(Api::bt_report)>(get("renhdrum_dualsense_dsp_build_bt_report"));
-    if (!g_api.version || !g_api.create || !g_api.destroy || !g_api.set_half || !g_api.fill || !g_api.bt_report) {
+    if (!g_api.version || !g_api.create || !g_api.destroy || !g_api.set_half || !g_api.fill) {
         rt_log("vibration: renhdrum.dll lacks the DualSense functions: the plain rumble");
         FreeLibrary(m);
         return false;
@@ -103,10 +97,7 @@ bool load_library() {
 // ---- what the game sends (g_lk), and what plays it ------------------------------------------------------------------
 std::mutex g_lk;
 Dsp* g_dsp = nullptr;                        // (g_lk) the open controller's DSP
-int g_dsp_volume = 100;                      // (g_lk) the volume g_dsp was made with
 uint32_t g_want_id = 0;                      // (g_lk) the controller the game's values are for
-std::string g_want_path;                     // (g_lk)
-bool g_want_wireless = false;                // (g_lk)
 bool g_want_open = false;                    // (g_lk) a value above zero was sent
 int g_strength = 100;                        // (g_lk) the player's rumble setting, percent
 int64_t g_last_loud = 0;                     // (g_lk) when a value above zero was last sent
@@ -196,71 +187,15 @@ void usb_close() {
     if (stream) SDL_DestroyAudioStream(stream);  // (waits for the callback, which takes g_lk: not held here)
 }
 
-// ---- over Bluetooth: report 0x32 every 10.7 ms ----------------------------------------------------------------------
-SDL_hid_device* g_hid = nullptr;
-int g_bt_fails = 0;
-int64_t g_bt_loud_at = 0;
-int64_t g_bt_next_ns = 0;
-bool g_bt_failed = false;
-
-bool bt_open(const std::string& path) {
-    if (path.empty()) {
-        rt_log("vibration: the DualSense has no HID path for its Bluetooth haptics: the plain rumble");
-        return false;
-    }
-    SDL_hid_init();
-    g_hid = SDL_hid_open_path(path.c_str());
-    if (!g_hid) {
-        rt_log("vibration: the DualSense's HID device would not open for its Bluetooth haptics: the plain rumble");
-        return false;
-    }
-    g_bt_fails = 0, g_bt_loud_at = 0, g_bt_next_ns = 0, g_bt_failed = false;
-    rt_log("vibration: the DualSense's voice coils over Bluetooth (report 0x32)");
-    return true;
-}
-
-void bt_close() {
-    if (g_hid) SDL_hid_close(g_hid);
-    g_hid = nullptr;
-}
-
-int64_t now_ns() {
-    using namespace std::chrono;
-    return duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
-}
-
-void bt_send() {  // the worker's thread, once per period
-    uint8_t report[kBtReport];
-    int r = -1;
-    {
-        std::lock_guard lk(g_lk);
-        if (g_dsp) r = g_api.bt_report(g_dsp, kBtBufferDefault, report);
-    }
-    const int64_t now = now_ns();
-    if (r == 1) g_bt_loud_at = now;
-    // sent while something plays and two seconds after: the radio stays free for the pad's input otherwise
-    if (!(r >= 0 && g_bt_loud_at && now - g_bt_loud_at < 2000000000LL)) return;
-    if (SDL_hid_write(g_hid, report, kBtReport) < 0) {
-        if (++g_bt_fails >= 50) {
-            rt_log("vibration: the DualSense's Bluetooth reports keep failing: the plain rumble instead");
-            g_bt_failed = true;
-        }
-    } else {
-        g_bt_fails = 0;
-    }
-}
-
 // ---- the worker -------------------------------------------------------------------------------------------------------
 struct Open {
     uint32_t id = 0;
-    bool wireless = false;
-    bool usb_or_bt = false;  // something is open
+    bool is_open = false;
 } g_open;
 
 void close_all() {
     g_owned_id.store(0);
     usb_close();
-    bt_close();
     Dsp* dsp;
     {
         std::lock_guard lk(g_lk);
@@ -273,33 +208,30 @@ void close_all() {
 
 void worker() {
     SetThreadDescription(GetCurrentThread(), L"dualsense-haptics");
-    HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     int64_t retry_at = 0;
     for (;;) {
         const int64_t ms = now_ms();
         uint32_t id;
-        std::string path;
-        bool wireless, want_open;
+        bool want_open;
         int strength;
         {
             std::lock_guard lk(g_lk);
             // a side the game stopped sending to: the DSP would hold its last value
             for (int s = 0; s < 2; ++s)
                 if (g_at[s] && !g_quiet[s] && ms - g_at[s] > kStaleMs) feed(s, 0.0f, kFreqLow, 0.0f, kFreqHigh), g_quiet[s] = true;
-            id = g_want_id, path = g_want_path, wireless = g_want_wireless, want_open = g_want_open, strength = g_strength;
-            if (g_open.usb_or_bt && g_last_loud && ms - g_last_loud > kIdleCloseMs) g_want_open = want_open = false;
+            id = g_want_id, want_open = g_want_open, strength = g_strength;
+            if (g_open.is_open && g_last_loud && ms - g_last_loud > kIdleCloseMs) g_want_open = want_open = false;
         }
-        if (g_open.usb_or_bt && (!want_open || g_open.id != id || g_open.wireless != wireless || g_bt_failed)) close_all();
-        if (want_open && !g_open.usb_or_bt && ms >= retry_at && id) {
-            Dsp* dsp = g_api.create(wireless ? std::clamp(strength, 10, 100) : 100, false);
+        if (g_open.is_open && (!want_open || g_open.id != id)) close_all();
+        if (want_open && !g_open.is_open && ms >= retry_at && id) {
+            Dsp* dsp = g_api.create(100, false);  // (its full gain: the strength is ours, after the DSP)
             if (dsp) {
                 {
                     std::lock_guard lk(g_lk);
-                    g_dsp = dsp, g_dsp_volume = wireless ? std::clamp(strength, 10, 100) : 100;
+                    g_dsp = dsp;
                 }
-                const bool ok = wireless ? bt_open(path) : usb_open();
-                if (ok) {
-                    g_open = {id, wireless, true};
+                if (usb_open()) {
+                    g_open = {id, true};
                     g_owned_id.store(id);
                 } else {
                     close_all();
@@ -309,40 +241,14 @@ void worker() {
                 retry_at = ms + kRetryMs;
             }
         }
-        if (g_open.usb_or_bt) {
-            g_gain_percent.store(std::clamp(strength, 0, 100));
-            if (wireless) {
-                // Bluetooth's samples are made inside the report: the strength is the DSP's own volume (10 to 100 %),
-                // which RenHDrum sets only when one is made
-                const int volume = std::clamp(strength, 10, 100);
-                if (volume != g_dsp_volume) {
-                    Dsp* fresh = g_api.create(volume, false);
-                    Dsp* old = nullptr;
-                    if (fresh) {
-                        std::lock_guard lk(g_lk);
-                        old = g_dsp, g_dsp = fresh, g_dsp_volume = volume;
-                    }
-                    if (old) g_api.destroy(old);
-                }
-                bt_send();
-            }
-        }
-        // the period: Bluetooth's report rate; 10 ms is plenty for a cable's housekeeping
-        const int64_t period_ns = (g_open.usb_or_bt && wireless) ? kBtPeriodNs : 10000000;
-        if (timer) {
-            LARGE_INTEGER due;
-            due.QuadPart = -(period_ns / 100);
-            SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
-            WaitForSingleObject(timer, 100);
-        } else {
-            Sleep(DWORD(period_ns / 1000000));
-        }
+        if (g_open.is_open) g_gain_percent.store(std::clamp(strength, 0, 100));
+        Sleep(10);
     }
 }
 
 }  // namespace
 
-void play(uint32_t sdl_id, const char* hid_path, bool wireless, const float left[4], const float right[4], int strength) {
+void play(uint32_t sdl_id, const float left[4], const float right[4], int strength) {
     if (!enabled() || !sdl_id) return;
     std::lock_guard lk(g_lk);
     if (!g_thread_started) {
@@ -351,14 +257,7 @@ void play(uint32_t sdl_id, const char* hid_path, bool wireless, const float left
         if (g_loaded) std::thread(worker).detach();
     }
     if (!g_loaded) return;
-    if (g_want_id != sdl_id) {
-        g_want_id = sdl_id;
-        g_want_path = hid_path ? hid_path : "";
-        g_want_wireless = wireless;
-    } else if (g_want_wireless != wireless) {
-        g_want_wireless = wireless;
-        g_want_path = hid_path ? hid_path : "";
-    }
+    g_want_id = sdl_id;
     g_strength = strength;
     const int64_t ms = now_ms();
     const float* sides[2] = {left, right};

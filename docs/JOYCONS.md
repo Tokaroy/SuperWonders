@@ -14,7 +14,7 @@ Joy-Con 2, left and right.
 
 ## DualSense (Windows)
 
-A DualSense plays the game's HD rumble through its voice coils, over its USB cable (the controller's own four-channel sound card) or Bluetooth, with
+A DualSense plays the game's HD rumble through its voice coils, over its USB cable (the controller's own four-channel sound card; over Bluetooth it keeps the plain rumble), with
 [RenHDrum](https://github.com/trzz1214/RenHDrum) (`renhdrum.dll` beside the program, loaded at run time; `NX_DUALSENSE_HAPTICS=0` turns it off). Without
 the DLL it plays the plain SDL rumble as before. The rumble strength setting still applies.
 - **Player lights** show the player each controller plays as.
