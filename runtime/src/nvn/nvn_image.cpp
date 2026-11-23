@@ -174,6 +174,13 @@ GpuImage* image_of(uint64_t guest) {
     img->uw = t->uw;
     img->format = bc_host_decode(t->format) ? bc_decoded_format(t->format) : vk_format(t->format);  // nvn_bc.cpp
     img->nvn_format = t->format;
+    // HDR output (nvn_hdr.cpp): the window's textures hold linear light above 1.0. The game's sRGB views of them are
+    // refused by view_format (RGBA16F is 8 bytes, a view is 4), so draws land in the float image without an encode.
+    if (t->window && hdr_output() && (img->format == VK_FORMAT_R8G8B8A8_SRGB || img->format == VK_FORMAT_R8G8B8A8_UNORM ||
+                                      img->format == VK_FORMAT_B8G8R8A8_SRGB || img->format == VK_FORMAT_B8G8R8A8_UNORM)) {
+        log("nvn/hdr: window texture %ux%u: format %#x made RGBA16F", t->width, t->height, t->format);
+        img->format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    }
     img->pool = t->pool, img->pool_offset = t->offset, img->pool_size = t->storage_size;
     if (t->format == 0x1 && t->pool_swizzle == 0x02010101u) {
         img->format = VK_FORMAT_R8G8B8A8_UNORM;

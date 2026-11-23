@@ -70,7 +70,7 @@ else()
     set(NX_GLSL_TOOL "${NX_GLSLANG}")
     set(NX_GLSL_ARGS -V --target-env vulkan1.0 -x -o)
 endif()
-foreach(shader astc_decode.comp)
+foreach(shader astc_decode.comp hdr_present.vert hdr_present.frag)
     set(out "${NX_SHADER_OUT}/${shader}.inc")
     add_custom_command(OUTPUT "${out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${NX_SHADER_OUT}"
@@ -310,6 +310,7 @@ set(NX_RUNTIME_SOURCES
     runtime/src/nvn/nvn_spirv_clip.cpp
     runtime/src/nvn/nvn_ultrawide.cpp
     runtime/src/nvn/nvn_present.cpp
+    runtime/src/nvn/nvn_hdr.cpp
     runtime/src/nvn/nvn_pipeline_cache.cpp
     runtime/src/nvn/nvn_bc.cpp
     runtime/src/nvn/nvn_draw.cpp

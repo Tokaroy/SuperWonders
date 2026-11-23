@@ -77,6 +77,31 @@ void set_anisotropy(int level);
 void set_vsync(int mode);
 // The player's frame rate cap, 60 or 30 (nvn_queue.cpp, pace_present). NX_FPS_CAP=30|60 overrides it.
 void set_frame_cap(int fps);
+// HDR output (nvn_hdr.cpp, docs/HDR.md): an scRGB swapchain and a final pass with paper white, the highlights and a
+// rolloff to the display's peak. `on` is read once, when the Vulkan instance is made (a change applies after a
+// restart); the others apply from the next frame. NX_HDR=0|1 (and NX_HDR_PEAK, ...) override the settings.
+void set_hdr(bool on, int peak_nits, int paper_white_nits, int highlights_percent, int highlight_start_percent);
+// The SDR look: the game's sRGB encode followed by the display's own gamma (0: none, the linear picture as it is;
+// 1: gamma 2.2, 2: 2.4). Live. NX_HDR_SDR_EOTF=0|1|2 overrides it.
+void set_hdr_sdr_eotf(int mode);
+// Scene grading, all percent with 100 neutral (nvn_hdr.cpp): applied by the composite replacement to the 3D scene only,
+// through the support buffer. hdr_grading() fills the 8 words (false: neutral, the buffer stays as without HDR).
+void set_hdr_grading(int exposure_percent, int contrast_percent, int shadows_percent, int saturation_percent,
+                     int highlight_saturation_percent);
+bool hdr_grading(float out[8]);
+bool hdr_wanted();
+// The HDR replacement of a shader (<data root>/spirv-renodx/<hash>.spv, made by tools/renodx_wonder.py) when HDR output is
+// on and the file is there, else "": the same program with the game's tone curve opened up past SDR white.
+std::string hdr_spirv_override(const std::string& hash);
+bool hdr_output();  // the surface took an scRGB swapchain: window textures are RGBA16F, the HDR pass runs
+bool hdr_active();  // the pass and its source image are made
+bool hdr_targets(VkFormat format, const std::vector<VkImage>& images, VkExtent2D extent);  // with the swapchain
+GpuImage* hdr_source();  // where the blit writes in HDR mode (the swapchain's size), null when the pass is not made
+void hdr_clear_source(VkCommandBuffer cb, float r, float g, float b);  // nothing to blit: a plain colour
+// The overlay onto hdr_source(), then hdr_source() -> swapchain image `index`, left PRESENT_SRC. False: nothing was
+// recorded on the swapchain image.
+bool hdr_record(VkCommandBuffer cb, uint32_t index);
+void hdr_release();  // before the swapchain is destroyed
 void hold_frame_cap(int fps);  // a lower cap for a moment (0: release); the setting is untouched
 int held_frame_cap();          // the hold in force, 0: none
 bool vk_depth_clip_control();

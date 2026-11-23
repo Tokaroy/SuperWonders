@@ -19,6 +19,10 @@
 #include "nextendo_client.h"
 #include "svc_am.h"
 
+namespace nx::nvn {
+bool hdr_output();  // nvn_vk.cpp: the swapchain is scRGB (HDR output is active)
+}
+
 namespace nx::overlay {
 
 namespace {
@@ -655,6 +659,477 @@ constexpr ExtraUiText kExtraUiText[13] = {
 };
 static_assert(std::size(kExtraUiText) == std::size(kLabels));
 
+#if !defined(__ANDROID__) && !defined(__APPLE__)
+// HDR output (docs/HDR.md): section, toggle label, its description, restart note, "not active" note, then label and
+// description of Peak brightness, Paper white, Highlights and Highlight start.
+constexpr const char* kHdrText[13][13] = {
+    {"HDR", "HDR output",
+     "Sends the picture in HDR, so the highlights the game clips to white (sun, glows, sparkles) shine brighter while "
+     "the rest looks as in SDR. Needs Windows HDR turned on for this display. Applies after restarting the game.",
+     "Restart the game to switch HDR output.",
+     "HDR is not active now: Windows HDR is off for this display (or not supported), so the game shows SDR.",
+     "Peak brightness",
+     "The brightest your display can show, in nits (LG OLEDs: about 1000; the Windows HDR Calibration app measures "
+     "it). Highlights roll off smoothly into it.",
+     "Paper white",
+     "How bright the SDR part of the picture, menus and text are, in nits. 203 is the HDR reference; raise it in a "
+     "bright room.",
+     "Highlights",
+     "How far past white the highlights go. 0% clips them as in SDR; higher makes them brighter. Midtones and the UI "
+     "never change.",
+     "Highlight start",
+     "Where the highlights begin, in percent of the scene brightness the game shows as white. 100%: they grow smoothly "
+     "out of white. Lower: they rise faster; higher: more of them stays plain white, as in SDR."},
+    {"HDR", "Uscita HDR",
+     "Invia l’immagine in HDR: le luci che il gioco taglia al bianco (sole, bagliori, scintille) risaltano di più, il "
+     "resto resta come in SDR. Richiede l’HDR di Windows attivo per questo schermo. Si applica al riavvio.",
+     "Riavvia il gioco per cambiare l’uscita HDR.",
+     "L’HDR non è attivo: l’HDR di Windows è disattivato per questo schermo (o non supportato), il gioco è in SDR.",
+     "Luminosità di picco",
+     "La luminosità massima dello schermo, in nit (OLED LG: circa 1000; l’app Calibrazione HDR di Windows la misura). "
+     "Le luci vi si avvicinano dolcemente.",
+     "Bianco carta",
+     "Luminosità della parte SDR dell’immagine, dei menu e del testo, in nit. 203 è il riferimento HDR; aumentalo in "
+     "una stanza luminosa.",
+     "Luci",
+     "Quanto le luci vanno oltre il bianco. 0% le taglia come in SDR; valori più alti le rendono più brillanti. Toni "
+     "medi e interfaccia non cambiano mai.",
+     "Inizio luci",
+     "Dove iniziano le luci, in percentuale della luminosità che il gioco mostra come bianco. 100%: crescono dolcemente "
+     "dal bianco. Meno: salgono più in fretta; di più: una parte maggiore resta bianca come in SDR."},
+    {"HDR", "HDR-Ausgabe",
+     "Gibt das Bild in HDR aus: Lichter, die das Spiel weiß abschneidet (Sonne, Leuchten, Funkeln), strahlen heller, der "
+     "Rest bleibt wie in SDR. Windows-HDR muss für diesen Bildschirm an sein. Wird nach Neustart übernommen.",
+     "Spiel neu starten, um die HDR-Ausgabe umzuschalten.",
+     "HDR ist nicht aktiv: Windows-HDR ist für diesen Bildschirm aus (oder nicht unterstützt), das Spiel zeigt SDR.",
+     "Spitzenhelligkeit",
+     "Die höchste Helligkeit des Bildschirms in Nits (LG-OLEDs: etwa 1000; die Windows-HDR-Kalibrierung misst sie). "
+     "Lichter laufen weich darauf zu.",
+     "Papierweiß",
+     "Helligkeit des SDR-Bildanteils, der Menüs und Texte in Nits. 203 ist der HDR-Referenzwert; in hellen Räumen "
+     "erhöhen.",
+     "Lichter",
+     "Wie weit Lichter über Weiß hinausgehen. 0 % schneidet sie wie in SDR ab; höher macht sie heller. Mitteltöne und "
+     "Oberfläche ändern sich nie.",
+     "Lichter-Beginn",
+     "Wo die Lichter beginnen, in Prozent der Szenenhelligkeit, die das Spiel als Weiß zeigt. 100 %: sie wachsen weich "
+     "aus Weiß. Weniger: sie steigen schneller; mehr: ein größerer Teil bleibt weiß wie in SDR."},
+    {"HDR", "Sortie HDR",
+     "Envoie l’image en HDR : les lumières que le jeu écrête au blanc (soleil, halos, étincelles) brillent davantage, "
+     "le reste reste comme en SDR. Nécessite le HDR de Windows activé pour cet écran. S’applique après redémarrage.",
+     "Redémarrez le jeu pour changer la sortie HDR.",
+     "Le HDR n’est pas actif : le HDR de Windows est désactivé pour cet écran (ou non pris en charge), le jeu est en SDR.",
+     "Luminosité de crête",
+     "La luminosité maximale de l’écran, en nits (OLED LG : environ 1000 ; l’app Étalonnage HDR de Windows la mesure). "
+     "Les lumières s’en approchent en douceur.",
+     "Blanc papier",
+     "Luminosité de la partie SDR de l’image, des menus et du texte, en nits. 203 est la référence HDR ; augmentez-la "
+     "dans une pièce claire.",
+     "Hautes lumières",
+     "Jusqu’où les lumières dépassent le blanc. 0 % les écrête comme en SDR ; plus haut les rend plus brillantes. Les "
+     "tons moyens et l’interface ne changent jamais.",
+     "Début des lumières",
+     "Où commencent les lumières, en pourcentage de la luminosité que le jeu affiche en blanc. 100 % : elles naissent "
+     "en douceur du blanc. Moins : elles montent plus vite ; plus : une plus grande part reste blanche comme en SDR."},
+    {"HDR", "Salida HDR",
+     "Envía la imagen en HDR: las luces que el juego recorta a blanco (sol, brillos, destellos) brillan más y el resto "
+     "se ve como en SDR. Requiere el HDR de Windows activado para esta pantalla. Se aplica al reiniciar.",
+     "Reinicia el juego para cambiar la salida HDR.",
+     "El HDR no está activo: el HDR de Windows está desactivado en esta pantalla (o no es compatible) y el juego va en SDR.",
+     "Brillo máximo",
+     "El brillo máximo de la pantalla, en nits (OLED de LG: unos 1000; la app Calibración HDR de Windows lo mide). Las "
+     "luces se acercan a él con suavidad.",
+     "Blanco papel",
+     "Brillo de la parte SDR de la imagen, los menús y el texto, en nits. 203 es la referencia HDR; súbelo en una sala "
+     "luminosa.",
+     "Luces",
+     "Cuánto pasan las luces del blanco. 0 % las recorta como en SDR; más alto las hace más brillantes. Los tonos "
+     "medios y la interfaz nunca cambian.",
+     "Inicio de luces",
+     "Dónde empiezan las luces, en porcentaje del brillo que el juego muestra como blanco. 100 %: crecen suavemente "
+     "desde el blanco. Menos: suben más rápido; más: una parte mayor queda blanca como en SDR."},
+    {"HDR", "HDR 출력",
+     "화면을 HDR로 출력합니다. 게임이 흰색으로 잘라내던 하이라이트(태양, 빛, 반짝임)가 더 밝게 빛나고 나머지는 SDR과 "
+     "같습니다. 이 디스플레이에서 Windows HDR이 켜져 있어야 합니다. 재시작 후 적용됩니다.",
+     "HDR 출력을 바꾸려면 게임을 다시 시작하세요.",
+     "HDR이 활성화되지 않았습니다. 이 디스플레이의 Windows HDR이 꺼져 있거나 지원되지 않아 SDR로 표시됩니다.",
+     "최대 밝기",
+     "디스플레이가 낼 수 있는 최대 밝기(니트)입니다 (LG OLED: 약 1000, Windows HDR 보정 앱으로 측정). 하이라이트가 "
+     "부드럽게 이 값에 수렴합니다.",
+     "종이 흰색",
+     "SDR 화면, 메뉴, 텍스트의 밝기(니트)입니다. 203이 HDR 기준값이며 밝은 방에서는 높이세요.",
+     "하이라이트",
+     "하이라이트가 흰색을 얼마나 넘는지입니다. 0%는 SDR처럼 잘라내고, 높을수록 밝아집니다. 중간 톤과 UI는 바뀌지 않습니다.",
+     "하이라이트 시작",
+     "하이라이트가 시작되는 지점으로, 게임이 흰색으로 보여 주는 장면 밝기의 백분율입니다. 100%: 흰색에서 부드럽게 "
+     "올라갑니다. 낮게: 더 빨리 밝아지고, 높게: SDR처럼 흰색으로 남는 부분이 늘어납니다."},
+    {"HDR", "HDR 出力",
+     "映像を HDR で出力します。ゲームが白に切り詰めていたハイライト（太陽、光、きらめき）がより明るく輝き、それ以外は "
+     "SDR と同じです。このディスプレイで Windows の HDR をオンにする必要があります。再起動後に適用されます。",
+     "HDR 出力を切り替えるにはゲームを再起動してください。",
+     "HDR は有効になっていません。このディスプレイの Windows HDR がオフ（または非対応）のため、SDR で表示しています。",
+     "ピーク輝度",
+     "ディスプレイの最大輝度（ニト）です（LG の有機 EL: 約 1000。Windows HDR 調整アプリで測定できます）。ハイライトは"
+     "なめらかにここへ収まります。",
+     "ペーパーホワイト",
+     "SDR 部分の映像、メニュー、文字の明るさ（ニト）です。203 が HDR の基準値です。明るい部屋では上げてください。",
+     "ハイライト",
+     "ハイライトが白をどこまで超えるかです。0% は SDR と同じく切り詰め、高いほど明るくなります。中間調と UI は変わりません。",
+     "ハイライト開始",
+     "ハイライトが始まる位置で、ゲームが白として表示するシーンの明るさに対する割合です。100%: 白からなめらかに伸びます。"
+     "低い: より早く明るくなり、高い: SDR のように白のまま残る部分が増えます。"},
+    {"HDR", "إخراج HDR",
+     "يرسل الصورة بتقنية HDR، فتسطع الإضاءات التي تقصها اللعبة إلى الأبيض (الشمس، التوهج، البريق) أكثر ويبقى الباقي كما في "
+     "SDR. يتطلب تشغيل HDR في Windows لهذه الشاشة. يسري بعد إعادة التشغيل.",
+     "أعد تشغيل اللعبة لتبديل إخراج HDR.",
+     "HDR غير نشط: HDR في Windows متوقف لهذه الشاشة (أو غير مدعوم)، لذا تعرض اللعبة SDR.",
+     "أقصى سطوع",
+     "أعلى سطوع يمكن لشاشتك عرضه بوحدة النيت (شاشات LG OLED: نحو 1000؛ يقيسه تطبيق معايرة HDR في Windows). تقترب "
+     "الإضاءات منه بسلاسة.",
+     "أبيض الورق",
+     "سطوع الجزء SDR من الصورة والقوائم والنصوص بوحدة النيت. القيمة 203 هي مرجع HDR؛ ارفعها في غرفة مضيئة.",
+     "الإضاءات",
+     "إلى أي حد تتجاوز الإضاءات الأبيض. 0% يقصها كما في SDR؛ والقيم الأعلى تجعلها أسطع. لا تتغير الدرجات المتوسطة "
+     "والواجهة أبداً.",
+     "بداية الإضاءات",
+     "حيث تبدأ الإضاءات، كنسبة مئوية من سطوع المشهد الذي تعرضه اللعبة أبيض. 100%: تنمو بسلاسة من الأبيض. أقل: ترتفع "
+     "أسرع؛ أكثر: يبقى جزء أكبر أبيض كما في SDR."},
+    {"HDR", "Вывод HDR",
+     "Выводит изображение в HDR: блики, которые игра обрезает до белого (солнце, свечение, искры), становятся ярче, "
+     "остальное выглядит как в SDR. Нужен включённый HDR Windows для этого экрана. Применится после перезапуска.",
+     "Перезапустите игру, чтобы переключить вывод HDR.",
+     "HDR не активен: HDR Windows выключен для этого экрана (или не поддерживается), игра показывает SDR.",
+     "Пиковая яркость",
+     "Максимальная яркость экрана в нитах (LG OLED: около 1000; её измеряет приложение «Калибровка HDR» Windows). Блики "
+     "плавно подходят к ней.",
+     "Белый лист",
+     "Яркость SDR-части изображения, меню и текста в нитах. 203 — эталон HDR; в светлой комнате увеличьте.",
+     "Блики",
+     "Насколько блики выходят за белый. 0% обрезает их как в SDR; больше — ярче. Средние тона и интерфейс не меняются.",
+     "Начало бликов",
+     "Где начинаются блики, в процентах от яркости сцены, которую игра показывает белой. 100%: плавно растут из белого. "
+     "Меньше: растут быстрее; больше: большая часть остаётся белой, как в SDR."},
+    {"HDR", "HDR çıkışı",
+     "Görüntüyü HDR olarak gönderir: oyunun beyaza kırptığı parlak noktalar (güneş, ışımalar, pırıltılar) daha parlak "
+     "olur, gerisi SDR gibi kalır. Bu ekran için Windows HDR açık olmalıdır. Yeniden başlatınca uygulanır.",
+     "HDR çıkışını değiştirmek için oyunu yeniden başlatın.",
+     "HDR etkin değil: bu ekran için Windows HDR kapalı (veya desteklenmiyor), oyun SDR gösteriyor.",
+     "En yüksek parlaklık",
+     "Ekranınızın gösterebildiği en yüksek parlaklık, nit cinsinden (LG OLED: yaklaşık 1000; Windows HDR Kalibrasyonu "
+     "uygulaması ölçer). Parlak noktalar ona yumuşakça yaklaşır.",
+     "Kâğıt beyazı",
+     "Görüntünün SDR kısmının, menülerin ve yazıların parlaklığı, nit cinsinden. 203 HDR referansıdır; aydınlık odada "
+     "artırın.",
+     "Parlak noktalar",
+     "Parlak noktaların beyazın ne kadar ötesine geçtiği. %0 onları SDR gibi kırpar; daha yüksek daha parlak yapar. Ara "
+     "tonlar ve arayüz asla değişmez.",
+     "Parlaklık başlangıcı",
+     "Parlak noktaların başladığı yer, oyunun beyaz gösterdiği sahne parlaklığının yüzdesi olarak. %100: beyazdan "
+     "yumuşakça büyürler. Daha az: daha hızlı yükselir; daha çok: SDR gibi beyaz kalan kısım artar."},
+    {"HDR", "HDR-uitvoer",
+     "Stuurt het beeld in HDR: lichten die het spel tot wit afkapt (zon, gloed, glinsteringen) stralen feller, de rest "
+     "blijft als in SDR. Windows-HDR moet aan staan voor dit scherm. Wordt toegepast na opnieuw starten.",
+     "Start het spel opnieuw om HDR-uitvoer te wisselen.",
+     "HDR is niet actief: Windows-HDR staat uit voor dit scherm (of wordt niet ondersteund), het spel toont SDR.",
+     "Piekhelderheid",
+     "De hoogste helderheid van je scherm in nits (LG-OLED's: ongeveer 1000; de app Windows HDR-kalibratie meet het). "
+     "Lichten lopen er zacht naartoe.",
+     "Papierwit",
+     "Helderheid van het SDR-deel van het beeld, menu's en tekst in nits. 203 is de HDR-referentie; verhoog het in een "
+     "lichte kamer.",
+     "Lichten",
+     "Hoe ver lichten voorbij wit gaan. 0% kapt ze af als in SDR; hoger maakt ze feller. Middentonen en de interface "
+     "veranderen nooit.",
+     "Begin lichten",
+     "Waar de lichten beginnen, in procent van de scènehelderheid die het spel als wit toont. 100%: ze groeien zacht "
+     "uit wit. Lager: ze stijgen sneller; hoger: een groter deel blijft wit, als in SDR."},
+    {"HDR", "HDR 输出",
+     "以 HDR 输出画面：游戏截断为白色的高光（太阳、光晕、闪光）会更亮，其余部分与 SDR 相同。需要为此显示器开启 Windows "
+     "HDR。重启后生效。",
+     "重新启动游戏以切换 HDR 输出。",
+     "HDR 未启用：此显示器的 Windows HDR 已关闭（或不支持），游戏显示 SDR。",
+     "峰值亮度",
+     "显示器能显示的最高亮度（尼特）（LG OLED 约 1000；可用 Windows HDR 校准应用测量）。高光会平滑地趋近此值。",
+     "纸白",
+     "SDR 画面、菜单和文字的亮度（尼特）。203 是 HDR 参考值；明亮房间中可调高。",
+     "高光",
+     "高光超出白色的程度。0% 与 SDR 一样截断；数值越高越亮。中间调和界面始终不变。",
+     "高光起点",
+     "高光开始的位置，以游戏显示为白色的场景亮度的百分比表示。100%：从白色平滑增长。更低：上升更快；更高：更多部分像 SDR "
+     "一样保持白色。"},
+    {"HDR", "HDR 輸出",
+     "以 HDR 輸出畫面：遊戲截斷為白色的高光（太陽、光暈、閃光）會更亮，其餘部分與 SDR 相同。需要為此顯示器開啟 Windows "
+     "HDR。重新啟動後生效。",
+     "重新啟動遊戲以切換 HDR 輸出。",
+     "HDR 未啟用：此顯示器的 Windows HDR 已關閉（或不支援），遊戲顯示 SDR。",
+     "峰值亮度",
+     "顯示器能顯示的最高亮度（尼特）（LG OLED 約 1000；可用 Windows HDR 校正應用程式測量）。高光會平滑地趨近此值。",
+     "紙白",
+     "SDR 畫面、選單和文字的亮度（尼特）。203 是 HDR 參考值；明亮房間中可調高。",
+     "高光",
+     "高光超出白色的程度。0% 與 SDR 一樣截斷；數值越高越亮。中間調和介面始終不變。",
+     "高光起點",
+     "高光開始的位置，以遊戲顯示為白色的場景亮度的百分比表示。100%：從白色平滑增長。更低：上升更快；更高：更多部分像 SDR "
+     "一樣保持白色。"},
+};
+static_assert(std::size(kHdrText) == std::size(kLabels));
+// SDR look (label, description, the three choices) and the scene grading rows (label, description: Exposure,
+// Contrast, Shadows, Saturation, Highlight saturation), same language order as kHdrText.
+constexpr const char* kHdrGradeText[13][15] = {
+    {"SDR look",
+     "Imitates how an SDR display shows the game: deeper shadows and richer colour than the plain linear picture. Gamma 2.2 is typical for TVs and OLEDs, 2.4 is darker (dim rooms), sRGB turns the effect off.",
+     "sRGB (off)",
+     "Gamma 2.2",
+     "Gamma 2.4",
+     "Exposure",
+     "Brightens or darkens the 3D scene (not the HUD). 100% is the game's own look.",
+     "Contrast",
+     "Steepens or flattens the scene's brightness curve around middle grey. 100% is the game's own look.",
+     "Shadows",
+     "Lifts (above 100%) or deepens (below) the darkest parts of the scene. Brighter parts do not move.",
+     "Saturation",
+     "Colour strength of the 3D scene, judged in a perceptual colour space so brightness holds. 0% is black and white.",
+     "Highlight saturation",
+     "Colour strength of the brightest parts of the scene only: below 100% they wash toward white, above they keep more colour."},
+    {"Aspetto SDR",
+     "Imita come uno schermo SDR mostra il gioco: ombre più profonde e colori più ricchi dell’immagine lineare. Gamma 2.2 è tipico di TV e OLED, 2.4 è più scuro (stanze buie), sRGB disattiva l’effetto.",
+     "sRGB (no)",
+     "Gamma 2.2",
+     "Gamma 2.4",
+     "Esposizione",
+     "Schiarisce o scurisce la scena 3D (non l’interfaccia). 100% è l’aspetto originale.",
+     "Contrasto",
+     "Rende più ripida o più piatta la curva di luminosità attorno al grigio medio. 100% è l’aspetto originale.",
+     "Ombre",
+     "Schiarisce (sopra 100%) o scurisce (sotto) le parti più scure della scena. Le parti chiare non cambiano.",
+     "Saturazione",
+     "Intensità dei colori della scena 3D, misurata in uno spazio percettivo così la luminosità resta uguale. 0% è bianco e nero.",
+     "Saturazione luci",
+     "Intensità dei colori solo nelle parti più luminose: sotto 100% tendono al bianco, sopra mantengono più colore."},
+    {"SDR-Look",
+     "Ahmt nach, wie ein SDR-Bildschirm das Spiel zeigt: tiefere Schatten und kräftigere Farben als das rein lineare Bild. Gamma 2.2 ist typisch für Fernseher und OLEDs, 2.4 ist dunkler (dunkle Räume), sRGB schaltet den Effekt ab.",
+     "sRGB (aus)",
+     "Gamma 2.2",
+     "Gamma 2.4",
+     "Belichtung",
+     "Hellt die 3D-Szene auf oder dunkelt sie ab (nicht die Anzeige). 100% ist der Originallook.",
+     "Kontrast",
+     "Macht die Helligkeitskurve um das mittlere Grau steiler oder flacher. 100% ist der Originallook.",
+     "Schatten",
+     "Hebt (über 100%) oder vertieft (darunter) die dunkelsten Bereiche der Szene. Hellere Bereiche bleiben gleich.",
+     "Sättigung",
+     "Farbstärke der 3D-Szene, in einem wahrnehmungsgerechten Farbraum, damit die Helligkeit bleibt. 0% ist Schwarzweiß.",
+     "Lichtersättigung",
+     "Farbstärke nur der hellsten Bereiche: unter 100% werden sie weißer, darüber behalten sie mehr Farbe."},
+    {"Rendu SDR",
+     "Imite l’affichage du jeu sur un écran SDR : ombres plus profondes et couleurs plus riches que l’image linéaire. Gamma 2.2 est typique des TV et OLED, 2.4 est plus sombre (pièces sombres), sRGB désactive l’effet.",
+     "sRGB (non)",
+     "Gamma 2.2",
+     "Gamma 2.4",
+     "Exposition",
+     "Éclaircit ou assombrit la scène 3D (pas l’interface). 100% correspond au rendu d’origine.",
+     "Contraste",
+     "Rend la courbe de luminosité plus raide ou plus douce autour du gris moyen. 100% correspond au rendu d’origine.",
+     "Ombres",
+     "Éclaircit (au-dessus de 100%) ou assombrit (en dessous) les zones les plus sombres. Les zones claires ne bougent pas.",
+     "Saturation",
+     "Intensité des couleurs de la scène 3D, mesurée dans un espace perceptuel pour garder la luminosité. 0% donne du noir et blanc.",
+     "Saturation des hautes lumières",
+     "Intensité des couleurs des zones les plus lumineuses seulement : sous 100% elles tirent vers le blanc, au-dessus elles gardent plus de couleur."},
+    {"Aspecto SDR",
+     "Imita cómo muestra el juego una pantalla SDR: sombras más profundas y colores más ricos que la imagen lineal. Gamma 2.2 es lo típico en TV y OLED, 2.4 es más oscuro (habitaciones oscuras), sRGB desactiva el efecto.",
+     "sRGB (no)",
+     "Gamma 2.2",
+     "Gamma 2.4",
+     "Exposición",
+     "Aclara u oscurece la escena 3D (no la interfaz). 100% es el aspecto original.",
+     "Contraste",
+     "Hace más pronunciada o más suave la curva de brillo alrededor del gris medio. 100% es el aspecto original.",
+     "Sombras",
+     "Aclara (por encima de 100%) u oscurece (por debajo) las zonas más oscuras de la escena. Las zonas claras no cambian.",
+     "Saturación",
+     "Intensidad del color de la escena 3D, medida en un espacio perceptual para mantener el brillo. 0% es blanco y negro.",
+     "Saturación de luces",
+     "Intensidad del color solo en las zonas más brillantes: por debajo de 100% tienden al blanco, por encima conservan más color."},
+    {"SDR 느낌",
+     "SDR 화면이 게임을 보여 주는 방식을 흉내 냅니다. 선형 이미지보다 그림자가 깊고 색이 풍부합니다. 감마 2.2는 TV와 OLED에서 일반적이고, 2.4는 더 어둡습니다(어두운 방). sRGB는 효과를 끕니다.",
+     "sRGB (끔)",
+     "감마 2.2",
+     "감마 2.4",
+     "노출",
+     "3D 장면을 밝게 또는 어둡게 합니다(HUD 제외). 100%가 원래 모습입니다.",
+     "대비",
+     "중간 회색을 기준으로 밝기 곡선을 가파르게 또는 완만하게 합니다. 100%가 원래 모습입니다.",
+     "그림자",
+     "장면의 가장 어두운 부분을 밝게(100% 초과) 또는 더 어둡게(미만) 합니다. 밝은 부분은 그대로입니다.",
+     "채도",
+     "3D 장면의 색 강도입니다. 지각 색 공간에서 조절해 밝기는 유지됩니다. 0%는 흑백입니다.",
+     "하이라이트 채도",
+     "가장 밝은 부분의 색 강도만 조절합니다. 100% 미만은 흰색에 가까워지고, 초과는 색을 더 유지합니다."},
+    {"SDR風の見え方",
+     "SDR画面での見え方を再現します。線形の映像より影が深く、色が豊かになります。ガンマ2.2はテレビやOLEDで一般的、2.4はより暗め(暗い部屋向け)、sRGBで効果をオフにします。",
+     "sRGB(オフ)",
+     "ガンマ2.2",
+     "ガンマ2.4",
+     "露出",
+     "3Dシーンを明るく、または暗くします(HUDは除く)。100%がゲーム本来の見た目です。",
+     "コントラスト",
+     "中間グレーを基準に明るさのカーブを急に、またはなだらかにします。100%がゲーム本来の見た目です。",
+     "シャドウ",
+     "シーンの最も暗い部分を持ち上げ(100%超)、または沈めます(未満)。明るい部分は変わりません。",
+     "彩度",
+     "3Dシーンの色の強さです。知覚的な色空間で調整するので明るさは保たれます。0%で白黒になります。",
+     "ハイライトの彩度",
+     "最も明るい部分だけの色の強さです。100%未満で白に近づき、超えると色が残ります。"},
+    {"مظهر SDR",
+     "يحاكي طريقة عرض شاشة SDR للعبة: ظلال أعمق وألوان أغنى من الصورة الخطية. جاما 2.2 شائعة في أجهزة التلفاز وشاشات OLED، و2.4 أغمق (للغرف المعتمة)، وsRGB يوقف التأثير.",
+     "sRGB (إيقاف)",
+     "جاما 2.2",
+     "جاما 2.4",
+     "التعريض",
+     "يفتّح المشهد ثلاثي الأبعاد أو يعتّمه (ليس الواجهة). 100% هو مظهر اللعبة الأصلي.",
+     "التباين",
+     "يجعل منحنى السطوع حول الرمادي المتوسط أشد أو ألطف. 100% هو مظهر اللعبة الأصلي.",
+     "الظلال",
+     "يرفع (فوق 100%) أو يعمّق (تحت) أغمق أجزاء المشهد. الأجزاء الأفتح لا تتغير.",
+     "التشبع",
+     "قوة ألوان المشهد ثلاثي الأبعاد، مقيسة في فضاء لوني إدراكي ليبقى السطوع كما هو. 0% أبيض وأسود.",
+     "تشبع الإضاءات",
+     "قوة الألوان في أسطع الأجزاء فقط: تحت 100% تميل إلى الأبيض، وفوقها تحتفظ بلون أكثر."},
+    {"Вид SDR",
+     "Имитирует то, как игру показывает SDR-экран: более глубокие тени и насыщенные цвета, чем у линейного изображения. Гамма 2.2 типична для телевизоров и OLED, 2.4 темнее (тёмные комнаты), sRGB отключает эффект.",
+     "sRGB (выкл.)",
+     "Гамма 2.2",
+     "Гамма 2.4",
+     "Экспозиция",
+     "Делает 3D-сцену светлее или темнее (не интерфейс). 100% — исходный вид игры.",
+     "Контраст",
+     "Делает кривую яркости вокруг среднего серого круче или положе. 100% — исходный вид игры.",
+     "Тени",
+     "Высветляет (выше 100%) или углубляет (ниже) самые тёмные части сцены. Светлые части не меняются.",
+     "Насыщенность",
+     "Сила цвета 3D-сцены в перцептивном цветовом пространстве, поэтому яркость сохраняется. 0% — чёрно-белое изображение.",
+     "Насыщенность светов",
+     "Сила цвета только самых ярких частей: ниже 100% они уходят в белый, выше сохраняют больше цвета."},
+    {"SDR görünümü",
+     "Oyunun bir SDR ekranda nasıl göründüğünü taklit eder: doğrusal görüntüden daha derin gölgeler ve daha zengin renkler. Gamma 2.2 TV ve OLED’lerde tipiktir, 2.4 daha koyudur (karanlık odalar), sRGB efekti kapatır.",
+     "sRGB (kapalı)",
+     "Gamma 2.2",
+     "Gamma 2.4",
+     "Pozlama",
+     "3B sahneyi aydınlatır veya karartır (arayüz hariç). %100 oyunun kendi görünümüdür.",
+     "Kontrast",
+     "Orta gri etrafındaki parlaklık eğrisini dikleştirir veya yumuşatır. %100 oyunun kendi görünümüdür.",
+     "Gölgeler",
+     "Sahnenin en karanlık kısımlarını aydınlatır (%100 üstü) veya koyulaştırır (altı). Parlak kısımlar değişmez.",
+     "Doygunluk",
+     "3B sahnenin renk gücü; parlaklık korunsun diye algısal bir renk uzayında ölçülür. %0 siyah beyazdır.",
+     "Parlak alan doygunluğu",
+     "Yalnızca en parlak kısımların renk gücü: %100 altında beyaza kayar, üstünde daha çok renk korur."},
+    {"SDR-weergave",
+     "Bootst na hoe een SDR-scherm het spel toont: diepere schaduwen en rijkere kleuren dan het lineaire beeld. Gamma 2.2 is gebruikelijk voor tv’s en OLED’s, 2.4 is donkerder (donkere kamers), sRGB zet het effect uit.",
+     "sRGB (uit)",
+     "Gamma 2.2",
+     "Gamma 2.4",
+     "Belichting",
+     "Maakt de 3D-scène lichter of donkerder (niet de HUD). 100% is de eigen look van het spel.",
+     "Contrast",
+     "Maakt de helderheidscurve rond middengrijs steiler of vlakker. 100% is de eigen look van het spel.",
+     "Schaduwen",
+     "Licht de donkerste delen van de scène op (boven 100%) of maakt ze dieper (eronder). Lichtere delen blijven gelijk.",
+     "Verzadiging",
+     "Kleurkracht van de 3D-scène, gemeten in een perceptuele kleurruimte zodat de helderheid blijft. 0% is zwart-wit.",
+     "Verzadiging hooglichten",
+     "Kleurkracht van alleen de helderste delen: onder 100% worden ze witter, erboven houden ze meer kleur."},
+    {"SDR 观感",
+     "模拟 SDR 显示器呈现游戏的方式：比线性画面阴影更深、色彩更丰富。伽马 2.2 是电视和 OLED 的常见值，2.4 更暗（适合暗室），sRGB 关闭此效果。",
+     "sRGB（关）",
+     "伽马 2.2",
+     "伽马 2.4",
+     "曝光",
+     "调亮或调暗 3D 场景（不含 HUD）。100% 为游戏原始效果。",
+     "对比度",
+     "以中灰为中心，让亮度曲线更陡或更平缓。100% 为游戏原始效果。",
+     "阴影",
+     "提亮（高于 100%）或压暗（低于 100%）场景最暗的部分。较亮部分不变。",
+     "饱和度",
+     "3D 场景的色彩强度，在感知色彩空间中调整，亮度保持不变。0% 为黑白。",
+     "高光饱和度",
+     "仅调整最亮部分的色彩强度：低于 100% 趋向白色，高于 100% 保留更多色彩。"},
+    {"SDR 觀感",
+     "模擬 SDR 顯示器呈現遊戲的方式：比線性畫面陰影更深、色彩更豐富。伽馬 2.2 是電視和 OLED 的常見值，2.4 更暗（適合暗室），sRGB 關閉此效果。",
+     "sRGB（關）",
+     "伽馬 2.2",
+     "伽馬 2.4",
+     "曝光",
+     "調亮或調暗 3D 場景（不含 HUD）。100% 為遊戲原始效果。",
+     "對比度",
+     "以中灰為中心，讓亮度曲線更陡或更平緩。100% 為遊戲原始效果。",
+     "陰影",
+     "提亮（高於 100%）或壓暗（低於 100%）場景最暗的部分。較亮部分不變。",
+     "飽和度",
+     "3D 場景的色彩強度，在感知色彩空間中調整，亮度保持不變。0% 為黑白。",
+     "高光飽和度",
+     "僅調整最亮部分的色彩強度：低於 100% 趨向白色，高於 100% 保留更多色彩。"},
+};
+static_assert(std::size(kHdrGradeText) == std::size(kLabels));
+
+
+// HDR rows of the Video tab. The toggle applies after a restart (nvn_hdr.cpp reads it once); the other four apply live.
+void hdr_rows(Settings& s, int lang) {
+    const char* const* t = kHdrText[lang];
+    rows::section(t[0]);
+    bool on = s.hdr != 0;
+    const char* toggle_desc = t[2];
+    char not_active[1024];
+    if (on && !nvn::hdr_output()) {  // asked for, but the swapchain is SDR (Windows HDR off, or a restart pending)
+        std::snprintf(not_active, sizeof not_active, "%s\n\n%s", t[2], t[4]);
+        toggle_desc = not_active;
+    }
+    if (rows::toggle(t[1], &on, kDefaults.hdr != 0, toggle_desc)) s.hdr = on ? 1 : 0, settings_changed(true), ui::notify(t[3]);
+    if (!on) return;  // the HDR settings only show while HDR output is on, so the menu stays short without it
+    rows::indent(1);
+    if (!on) rows::disable_next();
+    if (rows::integer(t[5], &s.hdr_peak, 400, 4000, 50, kDefaults.hdr_peak, "%d nits", t[6])) settings_changed(true);
+    if (!on) rows::disable_next();
+    if (rows::integer(t[7], &s.hdr_paper_white, 80, 500, 1, kDefaults.hdr_paper_white, "%d nits", t[8]))
+        settings_changed(true);
+    if (!on) rows::disable_next();
+    {
+        // The net look of an SDR display (kHdrGradeText 0..4).
+        const char* const* gt = kHdrGradeText[lang];
+        const char* const eotf_names[] = {gt[2], gt[3], gt[4]};
+        if (rows::choice(gt[0], &s.hdr_sdr_eotf, eotf_names, 3, kDefaults.hdr_sdr_eotf, gt[1]))
+            settings_changed(true);
+    }
+    if (!on) rows::disable_next();
+    if (rows::integer(t[9], &s.hdr_highlights, 0, 300, 5, kDefaults.hdr_highlights, "%d%%", t[10])) settings_changed(true);
+    if (!on || s.hdr_highlights == 0) rows::disable_next();
+    if (rows::integer(t[11], &s.hdr_highlight_start, 50, 300, 5, kDefaults.hdr_highlight_start, "%d%%", t[12]))
+        settings_changed(true);
+    // Scene grading (kHdrGradeText 5..14). It changes the 3D picture only: the HUD, menus and title screen are not
+    // graded. 100% is neutral for all of them (the game's own look).
+    struct GradeRow {
+        int Settings::*value;
+        int lo, hi, def;
+    };
+    const GradeRow grade_rows[] = {
+        {&Settings::hdr_exposure, 25, 300, kDefaults.hdr_exposure},
+        {&Settings::hdr_contrast, 25, 200, kDefaults.hdr_contrast},
+        {&Settings::hdr_shadows, 25, 175, kDefaults.hdr_shadows},
+        {&Settings::hdr_saturation, 0, 300, kDefaults.hdr_saturation},
+        {&Settings::hdr_highlight_saturation, 0, 300, kDefaults.hdr_highlight_saturation},
+    };
+    const char* const* gr = kHdrGradeText[lang];
+    for (size_t k = 0; k < std::size(grade_rows); k++) {
+        const GradeRow& r = grade_rows[k];
+        if (rows::integer(gr[5 + 2 * k], &(s.*r.value), r.lo, r.hi, 5, r.def, "%d%%", gr[6 + 2 * k]))
+            settings_changed(true);
+    }
+    rows::indent(-1);
+}
+#endif
+
 void video(MenuContext& c, const Labels& l) {
     Settings& s = c.settings;
     const int lang = std::clamp(s.language, 0, 12);
@@ -745,6 +1220,9 @@ void video(MenuContext& c, const Labels& l) {
         if (af_levels[i] == s.anisotropy) af = i;
     if (rows::choice(kCommon[lang][6], &af, af_names, 5, 0, translated_desc(desc::anisotropy, lang)))
         s.anisotropy = af_levels[af], settings_changed(true), ui::notify(l.restart_note);
+#if !defined(__ANDROID__) && !defined(__APPLE__)
+    hdr_rows(s, lang);
+#endif
     rows::section(kCommon[lang][2]);
     const char* vsync_names[] = {"On", "Fast", "Adaptive", "Off"};
     if (rows::choice(kCommon[lang][7], &s.vsync, vsync_names, 4, kDefaults.vsync, translated_desc(desc::vsync, lang))) settings_changed(true);
@@ -765,6 +1243,12 @@ void video(MenuContext& c, const Labels& l) {
             s.always_on_top = kDefaults.always_on_top, s.upscaler = kDefaults.upscaler;
             s.fsr_sharpness = kDefaults.fsr_sharpness, s.antialiasing = kDefaults.antialiasing;
             s.anisotropy = kDefaults.anisotropy, s.vsync = kDefaults.vsync, s.frame_cap = kDefaults.frame_cap;
+            s.hdr = kDefaults.hdr, s.hdr_peak = kDefaults.hdr_peak, s.hdr_paper_white = kDefaults.hdr_paper_white;
+            s.hdr_highlights = kDefaults.hdr_highlights, s.hdr_highlight_start = kDefaults.hdr_highlight_start;
+            s.hdr_sdr_eotf = kDefaults.hdr_sdr_eotf;
+            s.hdr_exposure = kDefaults.hdr_exposure, s.hdr_contrast = kDefaults.hdr_contrast;
+            s.hdr_shadows = kDefaults.hdr_shadows, s.hdr_saturation = kDefaults.hdr_saturation;
+            s.hdr_highlight_saturation = kDefaults.hdr_highlight_saturation;
             settings_changed(true);
             ui::notify(kExtraUiText[lang].reset_tab_note);
         }

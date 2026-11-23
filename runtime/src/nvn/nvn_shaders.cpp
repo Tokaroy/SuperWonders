@@ -19,6 +19,7 @@
 
 #include <nx/runtime.h>
 
+#include "nvn_vk.h"  // hdr_spirv_override
 #include "platform.h"
 #include "vk_bridge.h"
 #endif
@@ -269,7 +270,8 @@ const ShaderInfo* shader_for(uint64_t code_host, uint64_t control) {
     }
     std::unique_ptr<ShaderInfo>& slot = k.by_hash[hash];
     std::string bytes;
-    if (!read_whole(dir + hash + ".spv", bytes) || bytes.size() % 4 || bytes.empty()) {
+    const std::string hdr_path = hdr_spirv_override(hash);  // nvn_hdr.cpp
+    if (!read_whole(hdr_path.empty() ? dir + hash + ".spv" : hdr_path, bytes) || bytes.size() % 4 || bytes.empty()) {
         log("nvn: shader %s (code %#x bytes, control %llx): no %s%s.spv", hash.c_str(), c.code_size,
             (unsigned long long)control, dir.c_str(), hash.c_str());
         if (std::getenv("NX_DUMP_SHADER_MISSES")) {  // for translating shaders the offline inventory missed

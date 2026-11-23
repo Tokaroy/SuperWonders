@@ -10,6 +10,9 @@ Steps, each skipped when its inputs and tools haven't changed since it last fini
     2. romfs      the RomFS, copied (or linked: --romfs-mode link)            -> extract/romfs/
     3. shaders    the game's shaders found and translated to SPIR-V           -> spirv/, shader_programs.bin
                   (tools/maxwell/: extract_romfs_shaders.py, exefs_shaders.py, then the translator, spirv_harness)
+       hdr        the HDR replacement of the composite shader (tools/renodx_wonder.py, docs/HDR.md), when spirv-cross
+                  and glslc are there (game-build/shadertools/, the Vulkan SDK); without them HDR output keeps the
+                  game's own tone curve                                       -> spirv-renodx/
     4. font       the controller-button font, drawn over a system font        -> fonts/shared_5.ttf
     5. menu       "Quit Game" in the pause menu and on the title screen, as a RomFS mod (tools/wonder_menu_mod.py)
                                                                               -> mods/recomp-menu/romfs/
@@ -40,7 +43,8 @@ TOOLS = os.path.join(ROOT, "tools") if os.path.isdir(os.path.join(ROOT, "tools")
 WIN = os.name == "nt"
 EXIT_NEEDS_SETUP = 10
 # (step, share of the progress bar)
-STEPS = (("analysis", 0.02), ("romfs", 0.13), ("shaders", 0.30), ("font", 0.01), ("menu", 0.01), ("code", 0.53))
+STEPS = (("analysis", 0.02), ("romfs", 0.13), ("shaders", 0.30), ("hdr", 0.01), ("font", 0.01), ("menu", 0.01),
+         ("code", 0.52))
 MENU_MOD = "recomp-menu"  # <data root>/mods/<this>: the name games/wonder/menu.cpp's docs (docs/MENU.md) use
 
 
@@ -99,6 +103,19 @@ def system_font():
         if os.path.isfile(p):
             return p
     return None
+
+
+def hdr_tools():
+    """spirv-cross and glslc for the HDR step, as tools/renodx_wonder.py finds them, or None."""
+    try:
+        sys.path.insert(0, TOOLS)
+        import renodx_wonder
+    except ImportError:
+        return None
+    finally:
+        sys.path.pop(0)
+    found = [renodx_wonder.find_tool(n) for n in ("spirv-cross", "glslc")]
+    return found if all(found) else None
 
 
 def harness_command():
@@ -174,10 +191,14 @@ class Setup:
             maxwell = sorted(glob.glob(os.path.join(glob.escape(TOOLS), "maxwell", "*.py")))
             harness = harness_command()
             font = system_font() or ""
+            shaders_id = h_files(maxwell, (exe_id + rom_id + " ".join(harness or [])).encode())
             self._ids = {
                 "analysis": h_files([os.path.join(TOOLS, "nso2bin.py")], exe_id.encode()),
                 "romfs": rom_id,
-                "shaders": h_files(maxwell, (exe_id + rom_id + " ".join(harness or [])).encode()),
+                "shaders": shaders_id,
+                # Again when the shaders or the generator change, or when the tools appear (or go).
+                "hdr": h_files([os.path.join(TOOLS, "renodx_wonder.py")],
+                               (shaders_id + " " + " ".join(hdr_tools() or ["no-tools"])).encode()),
                 "font": h_files([os.path.join(TOOLS, "fonts", "make_button_font.py")], font.encode()),
                 "menu": h_files([os.path.join(TOOLS, "wonder_menu_mod.py")], rom_id.encode()),
             }
@@ -207,6 +228,7 @@ class Setup:
         """[(step, why)] still to do."""
         s, ids, out = self.state(), self.ids(), []
         names = {"analysis": "the game's executable", "romfs": "the game's files", "shaders": "the shaders",
+                 "hdr": "the HDR shader",
                  "font": "the button font", "menu": "Quit Game in the game's menus"}
         for step, _ in STEPS:
             if step == "code":
@@ -291,6 +313,25 @@ class Setup:
                  at + share * 0.3, share * 0.68, "Translating the shaders", pattern=r"^\s*(\d+)/(\d+)\s")
         shutil.copyfile(os.path.join(work, "shader_programs.bin"), os.path.join(self.data, "shader_programs.bin"))
         shutil.rmtree(work, ignore_errors=True)  # (the game's shader code)
+
+    def step_hdr(self, at, share):
+        """The HDR composite (docs/HDR.md). Never fails the setup: without the tools, or if the game's shader is not the
+        one the generator knows, HDR output still works with the game's own tone curve."""
+        out = os.path.join(self.data, "spirv-renodx")
+        tools = hdr_tools()
+        if not tools:
+            print("note: no spirv-cross/glslc (game-build/shadertools or the Vulkan SDK): HDR output will keep the game's "
+                  "own tone curve", flush=True)
+            shutil.rmtree(out, ignore_errors=True)  # (a replacement from older shaders must not stay)
+            return True
+        say(at, "Preparing the HDR shader")
+        try:
+            self.run([self.py, os.path.join(TOOLS, "renodx_wonder.py"), "--data", self.data], at, share,
+                     "Preparing the HDR shader")
+        except SystemExit as e:
+            print(f"warning: {e}; HDR output will keep the game's own tone curve", flush=True)
+            shutil.rmtree(out, ignore_errors=True)
+        return True
 
     def step_font(self, at, share):
         base = system_font()
