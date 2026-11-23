@@ -18,6 +18,7 @@
 #include "nvn_pipeline_async.h"
 #include "nvn_shader_prepare.h"
 #include "nvn_ultrawide.h"
+#include "nvn_vk.h"  // hdr_spirv_override
 #include "platform.h"
 
 namespace nx::nvn {
@@ -110,7 +111,8 @@ bool read_catalog(std::vector<StageRec>& stages, std::vector<ProgramRec>& progra
 }
 
 std::unique_ptr<ShaderInfo> load_catalog_shader(const StageRec& rec) {
-    const std::string path = plat::data_root() + "/spirv/" + rec.hash + ".spv";
+    const std::string hdr_path = hdr_spirv_override(rec.hash);  // nvn_hdr.cpp
+    const std::string path = hdr_path.empty() ? plat::data_root() + "/spirv/" + rec.hash + ".spv" : hdr_path;
     FILE* f = plat::fopen_utf8(path, "rb");
     if (!f) return nullptr;
     plat::fseek64(f, 0, SEEK_END);

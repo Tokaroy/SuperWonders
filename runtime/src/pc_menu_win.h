@@ -71,6 +71,10 @@ struct PcMenuState {
     int antialiasing = 0;      // overlay menu: 0 off, 1 FXAA
     int vsync = 1;             // overlay menu: 0 On, 1 Fast, 2 Adaptive, 3 Off
     int frame_cap = 60;        // 30, 60, 90, 120, 144, or 240 FPS
+    int hdr = 0, hdr_peak = 1000, hdr_paper_white = 203;  // HDR output (hdr applies after a restart; docs/HDR.md)
+    int hdr_highlights = 100, hdr_highlight_start = 100;  // percent
+    int hdr_sdr_eotf = 1;                                 // 0 sRGB, 1 gamma 2.2, 2 gamma 2.4
+    int hdr_exposure = 100, hdr_contrast = 100, hdr_shadows = 100, hdr_saturation = 100, hdr_highlight_saturation = 100;
     int anisotropy = 0;        // overlay menu: 0 the game's, else 2..16
     int rumble = 100;          // overlay menu: rumble strength, percent
     std::array<int, kPcControlCount> keyboard_bindings = {

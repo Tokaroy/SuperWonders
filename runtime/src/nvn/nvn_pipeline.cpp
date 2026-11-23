@@ -127,7 +127,10 @@ ShaderInfo* load_pipeline_shader(const char hash[16], uint32_t shared, const uin
     identity.append(reinterpret_cast<const char*>(&shared), sizeof shared);
     identity.append(reinterpret_cast<const char*>(local), sizeof(uint32_t) * 3);
     if (auto it = g_pipeline_warm_shaders.find(identity); it != g_pipeline_warm_shaders.end()) return it->second.get();
-    const std::string path = plat::data_root() + "/spirv/" + h + ".spv";
+    // The HDR replacement when the game's own loaders take it (nvn_hdr.cpp): the GPL libraries are keyed by the hash,
+    // so a prewarmed library of the original program would otherwise stand in for the replacement.
+    const std::string hdr_path = hdr_spirv_override(h);
+    const std::string path = hdr_path.empty() ? plat::data_root() + "/spirv/" + h + ".spv" : hdr_path;
     FILE* f = plat::fopen_utf8(path, "rb");
     if (!f) return nullptr;
     plat::fseek64(f, 0, SEEK_END);

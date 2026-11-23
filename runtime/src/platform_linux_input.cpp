@@ -104,6 +104,9 @@ void apply_settings(const overlay::Settings& s, bool persist) {
     nvn::set_anisotropy(s.anisotropy);
     nvn::set_vsync(s.vsync);
     nvn::set_frame_cap(s.frame_cap);
+    nvn::set_hdr(s.hdr != 0, s.hdr_peak, s.hdr_paper_white, s.hdr_highlights, s.hdr_highlight_start);
+    nvn::set_hdr_sdr_eotf(s.hdr_sdr_eotf);
+    nvn::set_hdr_grading(s.hdr_exposure, s.hdr_contrast, s.hdr_shadows, s.hdr_saturation, s.hdr_highlight_saturation);
     g_rumble_strength = std::clamp(s.rumble, 0, 100);
     g_keyboard_separate = s.keyboard_separate;
     g_button_icons = std::clamp(s.button_icons, 0, 3);

@@ -198,7 +198,10 @@ void WindowInitialize(CPU& c) {  // NVNboolean (NVNwindow*, const NVNwindowBuild
     uint64_t guest = c.x[0], builder = c.x[1];
     auto& w = make<Window>(guest);
     int n = int(driver(c, "nvnWindowBuilderGetNumTextures", {builder}));
-    for (int k = 0; k < n; k++) w.textures.push_back(driver(c, "nvnWindowBuilderGetTexture", {builder, uint64_t(k)}));
+    for (int k = 0; k < n; k++) {
+        w.textures.push_back(driver(c, "nvnWindowBuilderGetTexture", {builder, uint64_t(k)}));
+        if (auto* t = get<Texture>(w.textures.back())) t->window = true;  // before its image is made (HDR: RGBA16F)
+    }
     w.active = int(driver(c, "nvnWindowBuilderGetNumActiveTextures", {builder}));
     if (w.active <= 0 || w.active > n) w.active = n;
     w.interval = int(driver(c, "nvnWindowBuilderGetPresentInterval", {builder}));

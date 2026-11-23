@@ -55,6 +55,9 @@ VkExtent2D g_sc_extent{};
 VkExtent2D g_sc_current{};  // the surface's currentExtent when the swapchain was made (SUBOPTIMAL: did it change?)
 VkSurfaceTransformFlagBitsKHR g_sc_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 VkFormat g_sc_format = VK_FORMAT_B8G8R8A8_UNORM;
+std::atomic<bool> g_sc_hdr{false};  // the swapchain is RGBA16F scRGB (hdr_wanted and the surface offers it): nvn_hdr.cpp
+VkFormat g_sc_sdr_format = VK_FORMAT_B8G8R8A8_UNORM;  // the format without HDR (the fallback when the HDR pass fails)
+bool g_colorspace_ext = false;  // VK_EXT_swapchain_colorspace is enabled (asked for only with hdr_wanted)
 VkImageUsageFlags g_sc_usage = 0;  // the swapchain images' usage (make_swapchain)
 bool dump_presented() {
     static const bool on = std::getenv("NX_DUMP_PRESENTED") != nullptr;
@@ -130,6 +133,9 @@ bool init() {
         exts.push_back("VK_KHR_portability_enumeration");
         ici.flags |= 0x00000001;  // VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
     }
+    // HDR output (nvn_hdr.cpp) asks the surface for scRGB: the colour spaces beyond sRGB come with this extension.
+    if (hdr_wanted() && has_extension(iext, "VK_EXT_swapchain_colorspace"))
+        exts.push_back("VK_EXT_swapchain_colorspace"), g_colorspace_ext = true;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = nx::game::kInfo.title;
     app.apiVersion = VK_API_VERSION_1_3;
@@ -340,6 +346,10 @@ int vsync_mode() {
     }();
     return forced >= 0 ? forced : g_vsync_wanted.load(std::memory_order_relaxed);
 }
+bool make_surface();
+}  // namespace
+bool hdr_output() { return g_sc_hdr.load(); }  // HDR output is on: window textures are RGBA16F, the swapchain scRGB
+namespace {
 bool make_surface() {
     if (g_surface) p_vkDestroySurfaceKHR(g_instance, g_surface, nullptr);
     if (g_window) plat::release_window(g_window);
@@ -362,7 +372,24 @@ bool make_surface() {
                   : offered(VK_FORMAT_R8G8B8A8_UNORM) ? VK_FORMAT_R8G8B8A8_UNORM
                   : n                                  ? formats[0].format
                                                        : VK_FORMAT_B8G8R8A8_UNORM;
-    log("nvn/vk: surface: %u formats offered, swapchain format %d", n, int(g_sc_format));
+    g_sc_sdr_format = g_sc_format;
+    g_sc_hdr = false;
+    if (hdr_wanted()) {
+        if (!g_colorspace_ext)
+            log("nvn/hdr: no VK_EXT_swapchain_colorspace: HDR output is off");
+        else if (present_pass_wanted())  // its pre-rotated draw goes straight to the swapchain (NX_PRESENT_PASS=1)
+            log("nvn/hdr: not with the present pass (NX_PRESENT_PASS): HDR output is off");
+        else
+            for (const VkSurfaceFormatKHR& x : formats)
+                if (x.format == VK_FORMAT_R16G16B16A16_SFLOAT && x.colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) {
+                    g_sc_format = x.format, g_sc_hdr = true;
+                    break;
+                }
+        if (!g_sc_hdr && g_colorspace_ext && !present_pass_wanted())
+            log("nvn/hdr: the surface offers no scRGB (RGBA16F, EXTENDED_SRGB_LINEAR) format: is Windows' HDR on for this "
+                "display? HDR output is off");
+    }
+    log("nvn/vk: surface: %u formats offered, swapchain format %d%s", n, int(g_sc_format), g_sc_hdr ? " (scRGB HDR)" : "");
     return true;
 }
 
@@ -372,6 +399,7 @@ bool make_swapchain() {
         p_vkDeviceWaitIdle(g_device);
         present_pass_release();
         overlay::release();
+        hdr_release();
         fsr_release();
         fxaa_release();
         p_vkDestroySwapchainKHR(g_device, g_swapchain, nullptr);
@@ -391,7 +419,7 @@ bool make_swapchain() {
     ci.minImageCount = std::max(caps.minImageCount, 3u);
     if (caps.maxImageCount) ci.minImageCount = std::min(ci.minImageCount, caps.maxImageCount);
     ci.imageFormat = g_sc_format;
-    ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    ci.imageColorSpace = g_sc_hdr ? VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     ci.imageExtent = extent;
     ci.imageArrayLayers = 1;
     ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -470,6 +498,13 @@ bool make_swapchain() {
     }
     log("nvn/vk: swapchain %ux%u, %u images, transform %u, %s", extent.width, extent.height, n,
         unsigned(ci.preTransform), drawn ? "drawn by the present pass" : "blitted");
+    if (g_sc_hdr && !hdr_targets(g_sc_format, g_sc_images, extent)) {
+        // Without the pass the scRGB swapchain would show the encoded picture as linear light (far too dark): an SDR
+        // swapchain again. The window textures stay RGBA16F; the blit to UNORM clamps them to the SDR picture.
+        log("nvn/hdr: no HDR pass: HDR output is off, swapchain made again in SDR");
+        g_sc_hdr = false, g_sc_format = g_sc_sdr_format;
+        return make_swapchain();
+    }
     return true;
 }
 
@@ -777,12 +812,20 @@ static void present_overlay_frame() {
     dst.image = g_sc_images[index];
     dst.format = g_sc_format;
     dst.width = g_sc_extent.width, dst.height = g_sc_extent.height;
-    transition(g_cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    VkClearColorValue v{{0.035f, 0.024f, 0.07f, 1.0f}};
-    VkImageSubresourceRange rr{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    p_vkCmdClearColorImage(g_cb, dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &v, 1, &rr);
-    transition(g_cb, dst, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    overlay::record(g_cb, index, g_sc_images, g_sc_format, g_sc_extent);
+    // HDR: the same colour and overlay through the HDR pass (nvn_hdr.cpp), at paper white like the game's frames.
+    bool hdr = g_sc_hdr && hdr_source();
+    if (hdr) {
+        hdr_clear_source(g_cb, 0.035f, 0.024f, 0.07f);
+        hdr = hdr_record(g_cb, index);
+    }
+    if (!hdr) {
+        transition(g_cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkClearColorValue v{{0.035f, 0.024f, 0.07f, 1.0f}};
+        VkImageSubresourceRange rr{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        p_vkCmdClearColorImage(g_cb, dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &v, 1, &rr);
+        transition(g_cb, dst, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        overlay::record(g_cb, index, g_sc_images, g_sc_format, g_sc_extent);
+    }
     // NX_DUMP_PRESENTED with NX_DUMP_PREP=<n>: every nth compile-screen frame to frames/9NNNNN.ppm (tests)
     static const uint64_t dump_every = [] {
         const char* e = std::getenv("NX_DUMP_PREP");
@@ -875,6 +918,7 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
         p_vkDeviceWaitIdle(g_device);
         present_pass_release();
         overlay::release();
+        hdr_release();
         fsr_release();
         fxaa_release();
         if (g_swapchain) p_vkDestroySwapchainKHR(g_device, g_swapchain, nullptr);
@@ -887,6 +931,7 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
         p_vkDeviceWaitIdle(g_device);
         present_pass_release();
         overlay::release();
+        hdr_release();
         fsr_release();
         fxaa_release();
         p_vkDestroySwapchainKHR(g_device, g_swapchain, nullptr);
@@ -903,9 +948,14 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
     }
     if (!check(r, "vkAcquireNextImageKHR") || !begin()) return;
     GpuImage* src = image_of(texture);
-    GpuImage dst;
-    dst.image = g_sc_images[index];
-    dst.format = g_sc_format;
+    GpuImage swap_dst;
+    swap_dst.image = g_sc_images[index];
+    swap_dst.format = g_sc_format;
+    // HDR: the blit writes into an RGBA16F image of the swapchain's size; the HDR pass (nvn_hdr.cpp) draws the overlay
+    // on it and then puts it on the swapchain image with paper white and the highlights. FXAA and FSR 1 take only
+    // 8-bit images (fxaa_record, fsr_record's source_view): with the RGBA16F window textures they step aside for the blit.
+    GpuImage* hdr_dst = g_sc_hdr ? hdr_source() : nullptr;
+    GpuImage& dst = hdr_dst ? *hdr_dst : swap_dst;
     if (src) {
         if (src->layout == VK_IMAGE_LAYOUT_UNDEFINED) {  // never rendered: dark grey, to tell it from a failure
             transition(g_cb, *src, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -944,8 +994,13 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
         p_vkCmdBlitImage(g_cb, in->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.image,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
     }
-    if (!drawn) transition(g_cb, dst, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    overlay::record(g_cb, index, g_sc_images, g_sc_format, g_sc_extent);  // the F1 menu and metrics (overlay/)
+    if (hdr_dst) {
+        if (!in) hdr_clear_source(g_cb, 0.0f, 0.0f, 0.0f);  // nothing presented yet: black, not the last frame
+        if (!hdr_record(g_cb, index)) transition(g_cb, swap_dst, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);  // with the overlay
+    } else {
+        if (!drawn) transition(g_cb, dst, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        overlay::record(g_cb, index, g_sc_images, g_sc_format, g_sc_extent);  // the F1 menu and metrics (overlay/)
+    }
     static uint64_t presents = 0;
     presents++;
     if (std::getenv("NX_DRAW_STATS") && presents % (presents < 300 ? 60 : 300) == 0) draw_log_stats();
@@ -957,7 +1012,7 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
     if (std::getenv("NX_DUMP_FSR")) shown = upscaled && fsr_output() ? fsr_output() : in;
     // NX_DUMP_PRESENTED: the swapchain image as it goes to the display (after the overlay), back to PRESENT_SRC after
     // the copy. Needs the TRANSFER_SRC usage make_swapchain asked for.
-    GpuImage presented = dst;
+    GpuImage presented = swap_dst;
     if (dump_presented() && (g_sc_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
         presented.width = g_sc_extent.width, presented.height = g_sc_extent.height;
         presented.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;

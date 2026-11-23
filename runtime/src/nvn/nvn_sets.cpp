@@ -11,6 +11,7 @@
 
 #include "nvn_draw_state.h"
 #include "nvn_ultrawide.h"
+#include "nvn_vk.h"  // hdr_grading
 #include "platform.h"
 
 namespace nx::nvn::replay {
@@ -436,6 +437,10 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
         // Horizontal render scale for gl_FragCoord.x (read by patch_fragcoord_x_scale on ultrawide targets):
         // widened targets stretch X by uw_factor(), non-widened targets keep target_scale so FragCoord.x is unchanged.
         out.viewport_size[2] = g_uw_wide ? (target_scale * uw_factor()) : target_scale;
+        // HDR scene grading for the composite replacement (nvn_hdr.cpp): two transform-feedback slots nothing else reads.
+        // Neutral: false, nothing written, the block is what it was without HDR.
+        if (float grade[8]; hdr_grading(grade))
+            std::memcpy(out.tfe_offset, grade, 16), std::memcpy(out.tfe_vertex_count, grade + 4, 16);
         uint32_t fragment_count = 0;
         for (const auto& [stage, binding] : g_textures.bindings)
             if (stage->stage == ShaderStage::Fragment) fragment_count = std::max(fragment_count, binding->binding % 128 + 1);

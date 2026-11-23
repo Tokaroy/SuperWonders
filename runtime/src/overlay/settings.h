@@ -59,6 +59,14 @@ struct Settings {
     int rumble = 100;          // controller rumble strength, percent (0: off)
     int vsync = 1;             // 0 On (FIFO), 1 Fast (MAILBOX, else IMMEDIATE: the default), 2 Adaptive (FIFO_RELAXED), 3 Off
     int frame_cap = 60;        // 30, 60, 90, 120, 144, or 240 FPS
+    int hdr = 0;               // 1: HDR output (scRGB swapchain, applies after a restart; docs/HDR.md)
+    int hdr_peak = 1000;       // display peak brightness in nits (live)
+    int hdr_paper_white = 203; // SDR white (UI, diffuse white) in nits (live)
+    int hdr_highlights = 100;  // strength of the highlights past SDR white, percent; 0: clipped as in SDR (live)
+    int hdr_highlight_start = 100;  // where the highlights start, percent of the scene's SDR white point (live)
+    int hdr_sdr_eotf = 1;      // SDR look: 0 sRGB curve (no emulation), 1 gamma 2.2 display, 2 gamma 2.4 (live)
+    // Scene grading, the 3D picture only (not the HUD or menus), percent with 100 neutral (live), after RenoDX:
+    int hdr_exposure = 100, hdr_contrast = 100, hdr_shadows = 100, hdr_saturation = 100, hdr_highlight_saturation = 100;
     std::array<int, kControlCount> keyboard_bindings{};
     std::array<int, kControlCount> controller_bindings{};
     uint32_t controller_custom_mask = 0;  // bit per action: controller_bindings[action] instead of the preset

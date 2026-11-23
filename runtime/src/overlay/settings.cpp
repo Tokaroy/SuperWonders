@@ -86,6 +86,17 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "vsync=%d", &v) == 1) s.vsync = std::clamp(v, 0, 3);
         else if (std::sscanf(l, "frame_cap=%d", &v) == 1)
             s.frame_cap = v == 30 || v == 60 || v == 90 || v == 120 || v == 144 || v == 240 ? v : 60;
+        else if (std::sscanf(l, "hdr=%d", &v) == 1) s.hdr = v != 0;
+        else if (std::sscanf(l, "hdr_peak=%d", &v) == 1) s.hdr_peak = std::clamp(v, 400, 10000);
+        else if (std::sscanf(l, "hdr_paper_white=%d", &v) == 1) s.hdr_paper_white = std::clamp(v, 80, 500);
+        else if (std::sscanf(l, "hdr_highlights=%d", &v) == 1) s.hdr_highlights = std::clamp(v, 0, 300);
+        else if (std::sscanf(l, "hdr_highlight_start=%d", &v) == 1) s.hdr_highlight_start = std::clamp(v, 50, 300);
+        else if (std::sscanf(l, "hdr_sdr_eotf=%d", &v) == 1) s.hdr_sdr_eotf = std::clamp(v, 0, 2);
+        else if (std::sscanf(l, "hdr_exposure=%d", &v) == 1) s.hdr_exposure = std::clamp(v, 25, 300);
+        else if (std::sscanf(l, "hdr_contrast=%d", &v) == 1) s.hdr_contrast = std::clamp(v, 25, 200);
+        else if (std::sscanf(l, "hdr_shadows=%d", &v) == 1) s.hdr_shadows = std::clamp(v, 25, 175);
+        else if (std::sscanf(l, "hdr_saturation=%d", &v) == 1) s.hdr_saturation = std::clamp(v, 0, 300);
+        else if (std::sscanf(l, "hdr_highlight_saturation=%d", &v) == 1) s.hdr_highlight_saturation = std::clamp(v, 0, 300);
         else if (std::sscanf(l, "controller_custom_mask=%u", &u) == 1) s.controller_custom_mask = u;
         else {
             int index = -1, binding = -1, slot = -1;
@@ -136,7 +147,12 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\ncontroller_custom_mask=" << s.controller_custom_mask
       << "\nupscaler=" << s.upscaler << "\nfsr_sharpness=" << s.fsr_sharpness << "\nantialiasing=" << s.antialiasing
       << "\nanisotropy=" << s.anisotropy << "\nrumble=" << s.rumble << "\nvsync=" << s.vsync
-      << "\nframe_cap=" << s.frame_cap << '\n';
+      << "\nframe_cap=" << s.frame_cap
+      << "\nhdr=" << s.hdr << "\nhdr_peak=" << s.hdr_peak << "\nhdr_paper_white=" << s.hdr_paper_white
+      << "\nhdr_highlights=" << s.hdr_highlights << "\nhdr_highlight_start=" << s.hdr_highlight_start
+      << "\nhdr_sdr_eotf=" << s.hdr_sdr_eotf << "\nhdr_exposure=" << s.hdr_exposure
+      << "\nhdr_contrast=" << s.hdr_contrast << "\nhdr_shadows=" << s.hdr_shadows
+      << "\nhdr_saturation=" << s.hdr_saturation << "\nhdr_highlight_saturation=" << s.hdr_highlight_saturation << '\n';
     for (size_t slot = 0; slot < 4; ++slot) {
         f << "player_device_" << slot << '=' << s.player_devices[slot] << '\n';
         if (slot) {

@@ -363,6 +363,10 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.speedrun_timer_color = s.speedrun_timer_color;
     o.upscaler = s.upscaler, o.fsr_sharpness = s.fsr_sharpness, o.antialiasing = s.antialiasing;
     o.anisotropy = s.anisotropy, o.rumble = s.rumble, o.vsync = s.vsync, o.frame_cap = s.frame_cap;
+    o.hdr = s.hdr, o.hdr_peak = s.hdr_peak, o.hdr_paper_white = s.hdr_paper_white;
+    o.hdr_highlights = s.hdr_highlights, o.hdr_highlight_start = s.hdr_highlight_start, o.hdr_sdr_eotf = s.hdr_sdr_eotf;
+    o.hdr_exposure = s.hdr_exposure, o.hdr_contrast = s.hdr_contrast, o.hdr_shadows = s.hdr_shadows;
+    o.hdr_saturation = s.hdr_saturation, o.hdr_highlight_saturation = s.hdr_highlight_saturation;
     for (size_t i = 0; i < kPcControlCount; ++i)
         o.keyboard_bindings[i] = s.keyboard_bindings[i], o.controller_bindings[i] = s.controller_bindings[i];
     return o;
@@ -385,6 +389,10 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.speedrun_timer_color = o.speedrun_timer_color;
     s.upscaler = o.upscaler, s.fsr_sharpness = o.fsr_sharpness, s.antialiasing = o.antialiasing;
     s.anisotropy = o.anisotropy, s.rumble = o.rumble, s.vsync = o.vsync, s.frame_cap = o.frame_cap;
+    s.hdr = o.hdr, s.hdr_peak = o.hdr_peak, s.hdr_paper_white = o.hdr_paper_white;
+    s.hdr_highlights = o.hdr_highlights, s.hdr_highlight_start = o.hdr_highlight_start, s.hdr_sdr_eotf = o.hdr_sdr_eotf;
+    s.hdr_exposure = o.hdr_exposure, s.hdr_contrast = o.hdr_contrast, s.hdr_shadows = o.hdr_shadows;
+    s.hdr_saturation = o.hdr_saturation, s.hdr_highlight_saturation = o.hdr_highlight_saturation;
     for (size_t i = 0; i < kPcControlCount; ++i)
         s.keyboard_bindings[i] = o.keyboard_bindings[i], s.controller_bindings[i] = o.controller_bindings[i];
     return s;
@@ -503,7 +511,15 @@ static void save_pc_settings() {
          << "\nupscaler=" << g_pc_settings.upscaler << "\nfsr_sharpness=" << g_pc_settings.fsr_sharpness
          << "\nantialiasing=" << g_pc_settings.antialiasing << "\nanisotropy=" << g_pc_settings.anisotropy
          << "\nrumble=" << g_pc_settings.rumble << "\nvsync=" << g_pc_settings.vsync
-         << "\nframe_cap=" << g_pc_settings.frame_cap << '\n';
+         << "\nframe_cap=" << g_pc_settings.frame_cap
+         << "\nhdr=" << g_pc_settings.hdr << "\nhdr_peak=" << g_pc_settings.hdr_peak
+         << "\nhdr_paper_white=" << g_pc_settings.hdr_paper_white
+         << "\nhdr_highlights=" << g_pc_settings.hdr_highlights
+         << "\nhdr_highlight_start=" << g_pc_settings.hdr_highlight_start
+         << "\nhdr_sdr_eotf=" << g_pc_settings.hdr_sdr_eotf << "\nhdr_exposure=" << g_pc_settings.hdr_exposure
+         << "\nhdr_contrast=" << g_pc_settings.hdr_contrast << "\nhdr_shadows=" << g_pc_settings.hdr_shadows
+         << "\nhdr_saturation=" << g_pc_settings.hdr_saturation
+         << "\nhdr_highlight_saturation=" << g_pc_settings.hdr_highlight_saturation << '\n';
     file << "keyboard_separate=" << g_pc_settings.keyboard_separate << '\n';
     for (size_t slot = 0; slot < 4; ++slot) {
         file << "player_device_" << slot << '=' << g_pc_settings.player_devices[slot] << '\n';
@@ -583,6 +599,21 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
             state.anisotropy = std::clamp(value, 0, 16);
         else if (std::sscanf(line.c_str(), "rumble=%d", &value) == 1) state.rumble = std::clamp(value, 0, 100);
         else if (std::sscanf(line.c_str(), "vsync=%d", &value) == 1) state.vsync = std::clamp(value, 0, 3);
+        else if (std::sscanf(line.c_str(), "hdr=%d", &value) == 1) state.hdr = value != 0;
+        else if (std::sscanf(line.c_str(), "hdr_peak=%d", &value) == 1) state.hdr_peak = std::clamp(value, 400, 10000);
+        else if (std::sscanf(line.c_str(), "hdr_paper_white=%d", &value) == 1)
+            state.hdr_paper_white = std::clamp(value, 80, 500);
+        else if (std::sscanf(line.c_str(), "hdr_highlights=%d", &value) == 1)
+            state.hdr_highlights = std::clamp(value, 0, 300);
+        else if (std::sscanf(line.c_str(), "hdr_highlight_start=%d", &value) == 1)
+            state.hdr_highlight_start = std::clamp(value, 50, 300);
+        else if (std::sscanf(line.c_str(), "hdr_sdr_eotf=%d", &value) == 1) state.hdr_sdr_eotf = std::clamp(value, 0, 2);
+        else if (std::sscanf(line.c_str(), "hdr_exposure=%d", &value) == 1) state.hdr_exposure = std::clamp(value, 25, 300);
+        else if (std::sscanf(line.c_str(), "hdr_contrast=%d", &value) == 1) state.hdr_contrast = std::clamp(value, 25, 200);
+        else if (std::sscanf(line.c_str(), "hdr_shadows=%d", &value) == 1) state.hdr_shadows = std::clamp(value, 25, 175);
+        else if (std::sscanf(line.c_str(), "hdr_saturation=%d", &value) == 1) state.hdr_saturation = std::clamp(value, 0, 300);
+        else if (std::sscanf(line.c_str(), "hdr_highlight_saturation=%d", &value) == 1)
+            state.hdr_highlight_saturation = std::clamp(value, 0, 300);
         else if (std::sscanf(line.c_str(), "frame_cap=%d", &value) == 1)
             state.frame_cap = value == 30 || value == 60 || value == 90 || value == 120 || value == 144 ||
                                       value == 240
@@ -658,6 +689,11 @@ static void apply_loaded_pc_settings(const PcMenuState& state) {
     nx::nvn::set_anisotropy(state.anisotropy);
     nx::nvn::set_vsync(state.vsync);
     nx::nvn::set_frame_cap(state.frame_cap);
+    nx::nvn::set_hdr(state.hdr != 0, state.hdr_peak, state.hdr_paper_white, state.hdr_highlights,
+                     state.hdr_highlight_start);
+    nx::nvn::set_hdr_sdr_eotf(state.hdr_sdr_eotf);
+    nx::nvn::set_hdr_grading(state.hdr_exposure, state.hdr_contrast, state.hdr_shadows, state.hdr_saturation,
+                             state.hdr_highlight_saturation);
     const uint32_t nw = !state.fullscreen && state.width >= 640 ? uint32_t(state.width)
                                                                : uint32_t(GetSystemMetrics(SM_CXSCREEN));
     const uint32_t nh = !state.fullscreen && state.height >= 360 ? uint32_t(state.height)
@@ -909,6 +945,11 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     nx::nvn::set_anisotropy(g_pc_settings.anisotropy);
     nx::nvn::set_vsync(g_pc_settings.vsync);
     nx::nvn::set_frame_cap(g_pc_settings.frame_cap);
+    nx::nvn::set_hdr(g_pc_settings.hdr != 0, g_pc_settings.hdr_peak, g_pc_settings.hdr_paper_white,
+                     g_pc_settings.hdr_highlights, g_pc_settings.hdr_highlight_start);
+    nx::nvn::set_hdr_sdr_eotf(g_pc_settings.hdr_sdr_eotf);
+    nx::nvn::set_hdr_grading(g_pc_settings.hdr_exposure, g_pc_settings.hdr_contrast, g_pc_settings.hdr_shadows,
+                             g_pc_settings.hdr_saturation, g_pc_settings.hdr_highlight_saturation);
     if (g_fullscreen != g_pc_settings.fullscreen) toggle_fullscreen(g_window);
     else if (size_changed && !g_fullscreen) resize_window_client(g_window, g_pc_settings.width, g_pc_settings.height);
     if (topmost_changed && g_window)
