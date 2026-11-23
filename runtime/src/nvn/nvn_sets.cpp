@@ -714,6 +714,10 @@ uint32_t gather_textures(const std::vector<const ShaderInfo*>& shaders) {
                 r.sampler = nearest;
                 r.vk_sampler = sampler_for(nearest, false);
             }
+        // A render target (depth, G-buffer, scene colour) or a single-level texture: the player's forced anisotropic
+        // filtering only smears it across edges (bright outlines around characters, vfjoo888/SuperWonders#120).
+        if (img && (img->rendered || img->levels <= 1) && anisotropy_raised(r.sampler))
+            r.vk_sampler = sampler_for(r.sampler, b->image.depth, true);
         // Sampling one of the open pass's targets (a depth buffer read back by the character lighting) needs what
         // was rendered stored first: a fresh pass. SetRenderTargets used to end every pass, which did this by chance
         // (docs/nvn/DEBUG.md #35). Only when a draw of this pass wrote it (pass_wrote, nvn_draw.cpp).
