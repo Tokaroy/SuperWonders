@@ -460,7 +460,7 @@ else()
         FetchContent_MakeAvailable(SDL3)
     endif()
     add_executable(${NX_GAME} ${NX_RUNTIME_SOURCES} runtime/src/platform_win.cpp runtime/src/pc_menu_win.cpp
-                   runtime/src/memguard_win.cpp)
+                   runtime/src/memguard_win.cpp runtime/src/dualsense_haptics.cpp)
     target_include_directories(${NX_GAME} PRIVATE runtime/include runtime/src third_party/imgui "${NX_GAME_DIR}" "${NX_VULKAN_SDK}/Include")
     if(MINGW)
         # LLVM-MinGW ships the XAudio2 2.9 import library under its SDK name. Its plain "xinput" is XInput 1.3 (the
@@ -491,6 +491,12 @@ else()
         else()
             target_sources(${NX_GAME} PRIVATE runtime/src/switch2/switch2_stub.c)
         endif()
+        # A DualSense's voice coils (runtime/src/dualsense_haptics.cpp) are played by RenHDrum, loaded at run time from
+        # beside the program (third_party/renhdrum): replacing the DLL updates it.
+        add_custom_command(TARGET ${NX_GAME} POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/third_party/renhdrum/renhdrum.dll" "$<TARGET_FILE_DIR:${NX_GAME}>"
+            VERBATIM)
         if(NX_GAME_LIBRARY AND NX_GAME STREQUAL "wonder")
             add_custom_command(TARGET ${NX_GAME} POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different
