@@ -153,7 +153,10 @@ std::vector<uint32_t> patched_spirv(const ShaderInfo* s, const uint8_t* kinds, u
 
 VkPipeline compute_pipeline(const ShaderInfo* cs, const ProgramLayout& layout);
 
-VkSampler sampler_for(const SamplerInfo& info, bool shadow);
+// `game_anisotropy`: without the player's forced anisotropic filtering (for render targets, nvn_sets.cpp).
+VkSampler sampler_for(const SamplerInfo& info, bool shadow, bool game_anisotropy = false);
+// Would the player's anisotropic filtering raise this sampler's?
+bool anisotropy_raised(const SamplerInfo& info);
 // A storage-image view of the texture (single level of the pool view), or the dummy storage image. Layout GENERAL.
 VkImageView storage_view(VkCommandBuffer cb, uint64_t texture, const ImageShape& shape, const ViewInfo* view);
 
