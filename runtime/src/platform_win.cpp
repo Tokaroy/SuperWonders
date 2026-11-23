@@ -48,6 +48,7 @@
 #include "overlay/overlay.h"
 #include "pc_menu_win.h"
 #include "svc_am.h"
+#include "dualsense_haptics.h"
 #include "switch2/switch2.h"
 #include "platform.h"
 
@@ -1514,7 +1515,7 @@ static PlayerInputs sample_players_uncached() {
             const uint64_t req = g_pending_rumble[slot].exchange(0, std::memory_order_acq_rel);
             if (!(req >> 32)) continue;
             for (int dev : g_slot_members[slot].device)
-                if (dev >= 0 && g_gamepads[size_t(dev)])
+                if (dev >= 0 && g_gamepads[size_t(dev)] && !dualsense::owns(SDL_GetGamepadID(g_gamepads[size_t(dev)])))
                     SDL_RumbleGamepad(g_gamepads[size_t(dev)], Uint16((req >> 16) & 0xFFFFu), Uint16(req & 0xFFFFu), 250);
         }
         std::array<RawPad, kMaxDevices> raw{};
@@ -1743,6 +1744,13 @@ void rumble_player_hd(unsigned player, const float left[4], const float right[4]
     {
         std::lock_guard lk(g_gamepad_lock);
         m = g_slot_members[size_t(slot)];
+        // A DualSense's voice coils (renhdrum.dll): the game's values as they are, the strength comes after its curve
+        for (size_t k = 0; k < 2; ++k) {
+            SDL_Gamepad* pad = m.device[k] >= 0 ? g_gamepads[size_t(m.device[k])] : nullptr;
+            if (!pad || SDL_GetGamepadType(pad) != SDL_GAMEPAD_TYPE_PS5) continue;
+            if (SDL_GetGamepadConnectionState(pad) == SDL_JOYSTICK_CONNECTION_WIRELESS) continue;  // Bluetooth: the plain rumble
+            dualsense::play(uint32_t(m.id[k]), left, right, g_pc_settings.rumble);
+        }
     }
     const float strength = float(std::clamp(g_pc_settings.rumble, 0, 100)) / 100.0f;
     float l[4], r[4], strong[4];

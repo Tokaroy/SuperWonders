@@ -2,7 +2,7 @@
 """Packs a SuperWonders release: the program, ready made, and game-build/, what the player's PC needs to set the game up
 from their own files (tools/setup_game.py). Nothing of the game is in it. Packing only: nothing is uploaded.
 
-    SuperWonders/wonder.exe, libc++.dll, libunwind.dll     the program (a build with NX_GAME_LIBRARY=ON); wonder on Linux
+    SuperWonders/wonder.exe, libc++.dll, libunwind.dll, renhdrum.dll  the program (a build with NX_GAME_LIBRARY=ON); wonder on Linux
     SuperWonders/VERSION                                   this release's version
     SuperWonders/update.ini                                repo=<owner/name> for SuperWonders Update ("" : off)
     SuperWonders/recomplauncher.json                       how RecompLauncher sets it up and starts it
@@ -465,7 +465,7 @@ def main():
     if os.path.exists(folder):
         shutil.rmtree(folder)
     exe = f"{GAME}.exe" if WIN else GAME
-    program = [exe] + (["libc++.dll", "libunwind.dll"] if WIN else [])
+    program = [exe] + (["libc++.dll", "libunwind.dll", "renhdrum.dll"] if WIN else [])
     for f in program:
         if not os.path.isfile(os.path.join(a.build, f)):
             raise SystemExit(f"{a.build}: no {f} (a build with NX_GAME_LIBRARY=ON)")
