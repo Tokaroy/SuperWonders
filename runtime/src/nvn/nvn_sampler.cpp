@@ -50,14 +50,21 @@ void set_anisotropy(int level) { g_anisotropy = level; }
 
 // ---- samplers -------------------------------------------------------------------------------------------------------
 
-VkSampler sampler_for(const SamplerInfo& s, bool shadow) {
-    // Asked per texture binding of every draw: the key is the state's bytes and the flag (what the std::string key
+bool anisotropy_raised(const SamplerInfo& s) {
+    uint32_t m = s.min_filter;
+    bool linear = (m == 3 || m == 5) && s.mag_filter == 1;  // mipmapped, linear min and mag
+    return linear && anisotropy_floor() > s.max_anisotropy;
+}
+
+VkSampler sampler_for(const SamplerInfo& s, bool shadow, bool game_anisotropy) {
+    // Asked per texture binding of every draw: the key is the state's bytes and the flags (what the std::string key
     // of before held, compared the same way), hashed; no allocation on a hit.
-    using Key = ByteKey<sizeof(SamplerInfo) + 1>;
+    using Key = ByteKey<sizeof(SamplerInfo) + 2>;
     static std::unordered_map<Key, VkSampler, ByteKeyHash> cache;
     Key key;
     std::memcpy(key.b, &s, sizeof s);
     key.b[sizeof s] = shadow ? '1' : '0';
+    key.b[sizeof s + 1] = game_anisotropy ? '1' : '0';
     auto& v = cache[key];
     if (v) return v;
     VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -76,9 +83,11 @@ VkSampler sampler_for(const SamplerInfo& s, bool shadow) {
     ci.minLod = m <= 1 ? 0.0f : std::max(0.0f, s.lod_min);
     ci.maxLod = m <= 1 ? 0.25f : std::max(ci.minLod, s.lod_max);  // no mipmapping: level 0 only
     // The game's anisotropy, raised to the player's level for mipmapped linear sampling (never for nearest
-    // filtering: pixel-art and lookup textures stay exact).
+    // filtering: pixel-art and lookup textures stay exact). `game_anisotropy`: the game's alone, for what the GPU
+    // rendered (anisotropic taps along a post-process pass's derivatives smeared the depth and colour targets across
+    // silhouettes: bright outlines around characters, vfjoo888/SuperWonders#120).
     float aniso = s.max_anisotropy;
-    if (ci.minFilter == VK_FILTER_LINEAR && ci.magFilter == VK_FILTER_LINEAR && m >= 2) aniso = std::max(aniso, anisotropy_floor());
+    if (!game_anisotropy && anisotropy_raised(s)) aniso = std::max(aniso, anisotropy_floor());
     if (aniso > 1.0f && !vk_features().samplerAnisotropy) aniso = 1.0f;
     ci.anisotropyEnable = aniso > 1.0f;
     ci.maxAnisotropy = std::min(aniso, 16.0f);
