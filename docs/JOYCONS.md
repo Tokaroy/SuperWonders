@@ -11,6 +11,12 @@ Joy-Con 2, left and right.
   Windows' Bluetooth settings, and it does not need to be.
 - **Rumble:** the game's own HD rumble (amplitude and frequency of both bands, left and right actuator) is played as it
   is. The rumble strength setting still applies.
+
+## DualSense (Windows)
+
+A DualSense plays the game's HD rumble through its voice coils, over its USB cable (the controller's own four-channel sound card; over Bluetooth it keeps the plain rumble), with
+[RenHDrum](https://github.com/trzz1214/RenHDrum) (`renhdrum.dll` beside the program, loaded at run time; `NX_DUALSENSE_HAPTICS=0` turns it off). Without
+the DLL it plays the plain SDL rumble as before. The rumble strength setting still applies.
 - **Player lights** show the player each controller plays as.
 - `NX_SWITCH2=0` turns the driver off; `NX_SWITCH2=2` also logs each Bluetooth LE device it sees once (for a
   controller that does not connect: send the log, `NX_LOG=nx.log`).

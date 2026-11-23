@@ -66,7 +66,7 @@ def entries(root, save):
     yield exe, "wonder.exe"
     # A build with the game code in its own library (NX_GAME_LIBRARY, the default): the library and the C++ runtime
     # it shares with the program, next to it.
-    for f in ("wonder_game.dll", "libc++.dll", "libunwind.dll"):
+    for f in ("wonder_game.dll", "libc++.dll", "libunwind.dll", "renhdrum.dll"):
         if os.path.isfile(os.path.join(root, "build", f)):
             yield os.path.join(root, "build", f), f
     yield from redist_dlls()
