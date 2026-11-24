@@ -51,6 +51,7 @@ struct PcMenuState {
     int controller_preset = 0;  // Xbox / DualSense, Nintendo
     int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation
     bool muted = false;
+    bool mute_in_background = false;
     bool fullscreen = false;
     bool always_on_top = false;
     bool metrics_enabled = false;
@@ -76,6 +77,7 @@ struct PcMenuState {
     int hdr_sdr_eotf = 1;                                 // 0 sRGB, 1 gamma 2.2, 2 gamma 2.4
     int hdr_exposure = 100, hdr_contrast = 100, hdr_shadows = 100, hdr_saturation = 100, hdr_highlight_saturation = 100;
     int anisotropy = 0;        // overlay menu: 0 the game's, else 2..16
+    int shadow_scale = 1;      // overlay menu: 1, 2, 4
     int rumble = 100;          // overlay menu: rumble strength, percent
     std::array<int, kPcControlCount> keyboard_bindings = {
         VK_SPACE, VK_SHIFT, 'J', 'K', 'Q', 'E', 'Z', 'C', VK_RETURN, VK_ESCAPE, 'M', 'N',

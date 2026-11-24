@@ -72,6 +72,8 @@ GpuImage* fxaa_record(VkCommandBuffer cb, GpuImage& src);  // the anti-aliased i
 void fxaa_release();
 // nvn_sampler.cpp: the player's anisotropic filtering (0 the game's, 2..16); read at the first sampler (a restart).
 void set_anisotropy(int level);
+// nvn_image.cpp: shadow map resolution multiplier (1, 2, 4); applies on texture creation / restart.
+void set_shadow_scale(int mult);
 // The player's VSync (0 On: FIFO, 1 Fast: MAILBOX else IMMEDIATE, 2 Adaptive: FIFO_RELAXED, 3 Off: IMMEDIATE);
 // a change re-makes the swapchain at the next present. NX_VSYNC=on|fast|adaptive|off overrides it.
 void set_vsync(int mode);
@@ -246,6 +248,9 @@ uint32_t frame_dump_every();
 bool frame_dump_due(uint64_t presents);  // NX_DUMP_FRAMES, or a dump_frames file in the data folder
 bool frame_dump_record(VkCommandBuffer cb, GpuImage& img);
 void frame_dump_write(const GpuImage& img, uint64_t frame);
+void request_screenshot();
+bool take_screenshot_request();
+void screenshot_write_png(const GpuImage& img);
 // Startup shader preparation progress (nvn_vk.cpp): to the platform and the overlay's compile screen, which is
 // presented from here (at most every 33 ms) while the game has not drawn yet. kind 0: shaders, 1: recorded pipelines.
 void prep_progress(uint64_t done, uint64_t total, bool visible, int kind);

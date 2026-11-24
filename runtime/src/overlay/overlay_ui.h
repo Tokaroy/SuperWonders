@@ -53,6 +53,7 @@ float smoothstep(float t);
 // ---- notices (any thread) ----
 // A short notice in the bottom-right corner for about three seconds (e.g. "Applies after restarting the game").
 void notify(const char* text);
+void notify_screenshot(const uint8_t* rgba, int w, int h);
 bool notices_active();
 void draw_notices(float height);
 

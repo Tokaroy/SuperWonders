@@ -42,7 +42,7 @@ struct Settings {
     bool keyboard_separate = false;  // keyboard is player 1 and controllers start at player 2
     int controller_preset = 1;  // 1 Nintendo positions (the default, as on the Switch: A on the right), 0 Xbox / DualSense
     int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation (applies after a restart)
-    bool muted = false, fullscreen = false, always_on_top = false;
+    bool muted = false, mute_in_background = false, fullscreen = false, always_on_top = false;
     bool metrics_enabled = false, low_vram_profile = false;
     bool discord_rpc = true;
     bool metric_fps = true, metric_one_percent_low = true, metric_game_speed = true, metric_frametime_graph = true;
@@ -56,6 +56,7 @@ struct Settings {
     int fsr_sharpness = 25;    // RCAS sharpness in hundredths of a stop: 0 the sharpest, 200 the softest
     int antialiasing = 0;      // 0 off, 1 FXAA (on the presented image)
     int anisotropy = 0;        // 0 the game's own, else 2, 4, 8, 16 (applies after a restart)
+    int shadow_scale = 1;      // 1, 2, 4 (shadow map resolution multiplier; applies after a restart)
     int rumble = 100;          // controller rumble strength, percent (0: off)
     int vsync = 1;             // 0 On (FIFO), 1 Fast (MAILBOX, else IMMEDIATE: the default), 2 Adaptive (FIFO_RELAXED), 3 Off
     int frame_cap = 60;        // 30, 60, 90, 120, 144, or 240 FPS

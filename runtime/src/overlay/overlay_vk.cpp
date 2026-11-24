@@ -330,4 +330,19 @@ uint64_t vk_upload_rgba_texture(const uint8_t* rgba, int w, int h) {
     return uint64_t(reinterpret_cast<uintptr_t>(tex.ds));
 }
 
+void vk_free_rgba_texture(uint64_t tex_id) {
+    if (!tex_id || !g_ready) return;
+    VkDevice dev = nvn::vk_device();
+    for (auto it = g_icon_textures.begin(); it != g_icon_textures.end(); ++it) {
+        if (uint64_t(reinterpret_cast<uintptr_t>(it->ds)) != tex_id) continue;
+        if (it->ds) ImGui_ImplVulkan_RemoveTexture(it->ds);
+        if (it->sampler) p_vkDestroySampler(dev, it->sampler, nullptr);
+        if (it->view) p_vkDestroyImageView(dev, it->view, nullptr);
+        if (it->image) p_vkDestroyImage(dev, it->image, nullptr);
+        if (it->memory) p_vkFreeMemory(dev, it->memory, nullptr);
+        g_icon_textures.erase(it);
+        return;
+    }
+}
+
 }  // namespace nx::overlay

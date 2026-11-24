@@ -1220,6 +1220,19 @@ void video(MenuContext& c, const Labels& l) {
         if (af_levels[i] == s.anisotropy) af = i;
     if (rows::choice(kCommon[lang][6], &af, af_names, 5, 0, translated_desc(desc::anisotropy, lang)))
         s.anisotropy = af_levels[af], settings_changed(true), ui::notify(l.restart_note);
+    {
+        const char* shadow_label = lang == 1 ? "Risoluzione ombre" : "Shadow resolution";
+        const char* shadow_desc = lang == 1
+            ? "Moltiplica la risoluzione delle shadow map (2x/4x elimina le seghettature delle ombre). Si applica al riavvio."
+            : "Multiplies shadow map resolution (2x/4x smooths jagged shadow edges). Applies after restarting the game.";
+        const char* shadow_names[] = {"1x", "2x", "4x"};
+        const int shadow_levels[] = {1, 2, 4};
+        int sh = 0;
+        for (int i = 0; i < 3; ++i)
+            if (shadow_levels[i] == s.shadow_scale) sh = i;
+        if (rows::choice(shadow_label, &sh, shadow_names, 3, 0, shadow_desc))
+            s.shadow_scale = shadow_levels[sh], settings_changed(true), ui::notify(l.restart_note);
+    }
 #if !defined(__ANDROID__) && !defined(__APPLE__)
     hdr_rows(s, lang);
 #endif
@@ -1242,7 +1255,7 @@ void video(MenuContext& c, const Labels& l) {
             s.internal_resolution = kDefaults.internal_resolution, s.fullscreen = kDefaults.fullscreen;
             s.always_on_top = kDefaults.always_on_top, s.upscaler = kDefaults.upscaler;
             s.fsr_sharpness = kDefaults.fsr_sharpness, s.antialiasing = kDefaults.antialiasing;
-            s.anisotropy = kDefaults.anisotropy, s.vsync = kDefaults.vsync, s.frame_cap = kDefaults.frame_cap;
+            s.anisotropy = kDefaults.anisotropy, s.shadow_scale = kDefaults.shadow_scale, s.vsync = kDefaults.vsync, s.frame_cap = kDefaults.frame_cap;
             s.hdr = kDefaults.hdr, s.hdr_peak = kDefaults.hdr_peak, s.hdr_paper_white = kDefaults.hdr_paper_white;
             s.hdr_highlights = kDefaults.hdr_highlights, s.hdr_highlight_start = kDefaults.hdr_highlight_start;
             s.hdr_sdr_eotf = kDefaults.hdr_sdr_eotf;
@@ -1264,6 +1277,14 @@ void audio(MenuContext& c, const Labels& l) {
     rows::section(l.audio);
     if (rows::integer(l.volume, &s.volume, 0, 200, 5, kDefaults.volume, "%d%%", translated_desc(desc::volume, lang))) settings_changed(true);
     if (rows::toggle(l.mute, &s.muted, kDefaults.muted, translated_desc(desc::mute, lang))) settings_changed(true);
+    {
+        const char* bg_mute_label = lang == 1 ? "Silenzia in background" : "Mute in background";
+        const char* bg_mute_desc = lang == 1
+            ? "Silenzia automaticamente l'audio quando la finestra del gioco perde il focus."
+            : "Automatically mutes game audio when the window loses focus.";
+        if (rows::toggle(bg_mute_label, &s.mute_in_background, kDefaults.mute_in_background, bg_mute_desc))
+            settings_changed(true);
+    }
     constexpr const char* kAudioOutText[13][8] = {
         {"Audio output", "Stereo, Mono (same mix on both speakers), or 5.1 PCM Surround (5.1 requires a restart).",
          "Restart the game to apply 5.1 output.", "Stereo", "Mono", "5.1 Surround (PCM)",
@@ -1331,7 +1352,7 @@ void audio(MenuContext& c, const Labels& l) {
         char rlabel[64];
         std::snprintf(rlabel, sizeof rlabel, kExtraUiText[lang].reset_tab_fmt, l.audio);
         if (rows::action(rlabel, "", kExtraUiText[lang].reset_tab_desc)) {
-            s.volume = kDefaults.volume, s.muted = kDefaults.muted;
+            s.volume = kDefaults.volume, s.muted = kDefaults.muted, s.mute_in_background = kDefaults.mute_in_background;
             s.audio_mode = kDefaults.audio_mode, s.stereo_separation = kDefaults.stereo_separation;
             s.game_language = kDefaults.game_language;
             settings_changed(true);

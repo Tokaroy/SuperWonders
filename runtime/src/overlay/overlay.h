@@ -88,6 +88,7 @@ void shader_progress(uint64_t done, uint64_t total, bool visible, int kind);
 
 // ---- notices (any thread) ----
 void notify(const char* text);  // a short notice in the bottom-right corner (overlay_ui.h)
+void notify_screenshot(const uint8_t* rgba, int w, int h);  // top-right preview toast ("Screenshot Saved")
 
 // ---- rendering (the presenting thread, GPU lock held) ----
 // Draws into swapchain image `index` (in PRESENT_SRC layout, left in it). `images` are the swapchain's images; a

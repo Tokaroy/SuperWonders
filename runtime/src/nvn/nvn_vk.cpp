@@ -1037,20 +1037,21 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
     if (draw_stats && presents % 300 == 0) zero_draws_log();
     frame_sig_flush(presents);
     const bool due = frame_dump_due(presents);
+    const bool want_shot = take_screenshot_request();
     GpuImage* shown = src;  // NX_DUMP_FSR: the image as presented (after FXAA and FSR 1)
     if (dump_fsr) shown = upscaled && fsr_output() ? fsr_output() : in;
     // NX_DUMP_PRESENTED: the swapchain image as it goes to the display (after the overlay), back to PRESENT_SRC after
     // the copy. Needs the TRANSFER_SRC usage make_swapchain asked for.
     GpuImage presented = swap_dst;
-    if (dump_presented() && (g_sc_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
+    if (!want_shot && dump_presented() && (g_sc_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
         presented.width = g_sc_extent.width, presented.height = g_sc_extent.height;
         presented.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         shown = &presented;
     }
-    bool dump = shown && due;
+    bool dump = shown && (due || want_shot);
     if (dump) transition(g_cb, *shown, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);  // the present pass left it sampled
     dump = dump && frame_dump_record(g_cb, *shown);
-    if (shown == &presented && due) transition(g_cb, presented, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    if (shown == &presented && due && !want_shot) transition(g_cb, presented, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     // One per swapchain image on both paths: a single semaphore could be signaled again while an earlier present
     // still waited on it (VUID-vkQueueSubmit-pSignalSemaphores-00067). NX_SHARED_PRESENT_SEMAPHORE=1: as before.
     static const bool shared_sem = std::getenv("NX_SHARED_PRESENT_SEMAPHORE") != nullptr;
@@ -1059,7 +1060,8 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
         frame_submit(acquired, rendered, {}, dump);
     else
         end_and_wait(acquired, rendered);
-    if (dump) frame_dump_write(*shown, presents);
+    if (dump && due) frame_dump_write(*shown, presents);
+    if (dump && want_shot) screenshot_write_png(*shown);
     if (due) debug_dump_textures(presents);
     timer.paced_ns += pace_present_now();
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
