@@ -1249,6 +1249,22 @@ void apply_texel_writes(VkCommandBuffer cb, Texture& t, GpuImage& img) {
     if (writes.empty()) return;
     img.texels = true;
     VkImageLayout back = img.layout;
+    // The upload or clear just recorded (ensure_contents) leaves the image in TRANSFER_DST, where transition() adds
+    // no barrier: the two copies were unordered, and the GPU could land the guest memory's zeros over the texels.
+    // On an RX 9070 XT it did in some sessions, at random: Wonder's 4x4 constant textures read black, the world-map
+    // grass drew dark and shadows showed acne (vfjoo888/SuperWonders#123). NX_TEXEL_WRITE_NO_BARRIER=1: as before.
+    static const bool no_barrier = std::getenv("NX_TEXEL_WRITE_NO_BARRIER") != nullptr;
+    if (img.layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && !no_barrier) {
+        VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.oldLayout = b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = img.image;
+        b.subresourceRange = {img.aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+        p_vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                               nullptr, 1, &b);
+    }
     transition(cb, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     bool is3d = img.view_type == VK_IMAGE_VIEW_TYPE_3D;
     for (const auto& w : writes) {
