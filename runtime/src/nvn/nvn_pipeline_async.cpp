@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "nvn_vk.h"
+#include "platform.h"
 
 namespace nx::nvn {
 
@@ -28,6 +29,7 @@ struct Pool {
         if (threads > 12) threads = 12;
         for (unsigned k = 0; k < threads; k++)
             std::thread([this] {
+                plat::set_thread_low_priority();
                 for (;;) {
                     std::function<void()> job;
                     {

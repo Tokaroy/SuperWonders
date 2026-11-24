@@ -33,6 +33,14 @@ const uint8_t* guest_bytes(uint64_t gpu) {
     return host ? reinterpret_cast<const uint8_t*>(host) : nullptr;
 }
 
+const uint8_t* guest_bytes_pool(uint64_t gpu, PoolSlice* slice) {
+    uint64_t off = 0;
+    MemoryPool* p = pool_at_gpu(gpu, &off);
+    if (slice) *slice = {};
+    uint64_t host = p ? pool_host(*p, off, slice) : 0;
+    return host ? reinterpret_cast<const uint8_t*>(host) : nullptr;
+}
+
 }  // namespace replay
 
 using namespace replay;
@@ -1154,6 +1162,7 @@ void draw_begin_submit() {
     sets_begin_submit();
     clears_begin_submit();
     g_submit_ns = plat::monotonic_ns();
+    static_buf_begin_submit();
     dedup_reset();
     written_reset();
     pipeline_begin_submit();

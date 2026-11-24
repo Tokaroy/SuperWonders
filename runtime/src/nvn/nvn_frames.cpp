@@ -231,14 +231,16 @@ bool begin_part(VkCommandBuffer cb) {
 
 // Ends `cb` and queues it (Metal encoding happens inside vkQueueSubmit: MoltenVK's synchronous submits). False:
 // nothing was queued, `fence` will not signal.
-bool submit_part(VkCommandBuffer cb, VkFence fence, VkSemaphore wait, VkSemaphore signal) {
+bool submit_part(VkCommandBuffer cb, VkFence fence, VkSemaphore wait, VkSemaphore signal, bool host_read = true) {
     uint64_t t0 = plat::monotonic_ns();
-    // The host reads compute results after the fence.
-    VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-    mb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-    mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-    p_vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &mb, 0, nullptr, 0,
-                           nullptr);
+    // Only flush GPU writes to host memory when the CPU will read results after the fence (compute write-backs / dumps).
+    if (host_read) {
+        VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        mb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+        mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        p_vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &mb, 0, nullptr,
+                               0, nullptr);
+    }
     p_vkEndCommandBuffer(cb);
     VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -416,8 +418,14 @@ uint64_t frame_recording_serial() { return g_submitted + 1; }
 
 void frame_init(VkCommandPool pool, uint32_t family, VkBuffer ring, uint8_t* ring_ptr, uint64_t ring_size) {
     // NX_ASYNC_GPU=1 (or 2): two frames in flight; 3 or 4: that many. A frame is a submit and a present, a slot each.
-    // NX_PIPELINED likewise (at most that many submits in flight, whatever the slots).
-    uint32_t frames = uint32_t(std::clamp(env_int(pipelined() ? "NX_PIPELINED" : "NX_ASYNC_GPU"), 2, 4));
+    // NX_PIPELINED likewise (default 3 on desktop to absorb single-frame GPU spikes for smoother 1% lows, 2 on Android).
+    const int env_frames = env_int(pipelined() ? "NX_PIPELINED" : "NX_ASYNC_GPU");
+#if defined(__ANDROID__)
+    const int def_frames = 2;
+#else
+    const int def_frames = pipelined() ? 3 : 2;
+#endif
+    uint32_t frames = uint32_t(std::clamp(env_frames > 0 ? env_frames : def_frames, 2, 4));
     g_max_replays = frames;
     g_slot_count = std::min(kMaxSlots, frames * 2);
     VkDevice d = vk_device();
@@ -545,7 +553,10 @@ void frame_submit(VkSemaphore wait, VkSemaphore signal, std::vector<WriteBack> w
         if (s.split_part >= 0) g_stats.replay_ns += plat::monotonic_ns() - s.begin_ns;
     }
     if (s.ok) gpu_busy_part_end(uint32_t(&s - g_slots), s.part, s.cbs[s.part]);
-    const bool has_last = s.ok && submit_part(s.cbs[s.part], s.fences[s.part], wait, signal);
+    const bool split_covered_wb = s.split_part >= 0 && replay::written_bind_count() == s.binds_at_split;
+    const bool need_host_read =
+        (!write_backs.empty() && !split_covered_wb) || (!s.replay && frame_dump_every() != 0);
+    const bool has_last = s.ok && submit_part(s.cbs[s.part], s.fences[s.part], wait, signal, need_host_read);
     if (has_last) s.queued |= 1u << s.part;
     if (!s.queued) return;  // nothing ran: no results to copy back, the slot stays free
     s.serial = ++g_submitted;
@@ -697,11 +708,43 @@ void free_retired_images(uint64_t completed) {
         for (auto it = done; it != g_staging.end(); ++it) staging.push_back({std::get<1>(*it), std::get<2>(*it)});
         g_staging.erase(done, g_staging.end());
     }
-    for (auto& [b, m] : staging) p_vkDestroyBuffer(vk_device(), b, nullptr), p_vkFreeMemory(vk_device(), m, nullptr);
+    struct RetiredImageHandles {
+        VkImageView view = VK_NULL_HANDLE;
+        VkImage image = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+    };
+    std::vector<RetiredImageHandles> retired_imgs;
+    retired_imgs.reserve(dead.size());
     for (auto& img : dead) {
         if (!img || !img->image) continue;
         if (img.use_count() > 1) continue;  // another live texture shares it (image_of): freed with the last one
-        destroy_gpu_image(*img);
+        forget_image_views(*img);
+        if (img->memory) gpu_image_memory_freed(img->allocation_size, img->shared_memory);
+        retired_imgs.push_back({img->view, img->image, img->memory});
+        img->image = VK_NULL_HANDLE, img->memory = VK_NULL_HANDLE, img->view = VK_NULL_HANDLE;
+        img->allocation_size = 0;
+        img->shared_memory = false;
+    }
+    if (!staging.empty() || !retired_imgs.empty()) {
+        VkDevice d = vk_device();
+        if (janitor_on()) {
+            // Offload WDDM/Vulkan memory frees off the render thread to prevent scene-transition 1% low hitches.
+            janitor_run([d, staging = std::move(staging), retired_imgs = std::move(retired_imgs)] {
+                for (const auto& [b, m] : staging) p_vkDestroyBuffer(d, b, nullptr), p_vkFreeMemory(d, m, nullptr);
+                for (const auto& h : retired_imgs) {
+                    if (h.view) p_vkDestroyImageView(d, h.view, nullptr);
+                    if (h.image) p_vkDestroyImage(d, h.image, nullptr);
+                    if (h.memory) p_vkFreeMemory(d, h.memory, nullptr);
+                }
+            });
+        } else {
+            for (const auto& [b, m] : staging) p_vkDestroyBuffer(d, b, nullptr), p_vkFreeMemory(d, m, nullptr);
+            for (const auto& h : retired_imgs) {
+                if (h.view) p_vkDestroyImageView(d, h.view, nullptr);
+                if (h.image) p_vkDestroyImage(d, h.image, nullptr);
+                if (h.memory) p_vkFreeMemory(d, h.memory, nullptr);
+            }
+        }
     }
 }
 

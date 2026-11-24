@@ -48,7 +48,7 @@ WARN = ["-Wno-unused-label", "-Wno-unused-value", "-Wno-parentheses-equality", "
         "-Wno-unused-but-set-variable", "-Wno-constant-logical-operand", "-Wno-unused-function"]
 # The same flags as CMakeLists.txt gives game_main / game_sdk and <game>_game (keep them in step).
 if WIN:
-    CXXFLAGS = ["-O3", "-DNDEBUG", "-std=gnu++20", *WARN, "-mavx2", "-DNOMINMAX", "-DWIN32_LEAN_AND_MEAN"]
+    CXXFLAGS = ["-O3", "-DNDEBUG", "-std=gnu++20", *WARN, "-march=x86-64-v3", "-DNOMINMAX", "-DWIN32_LEAN_AND_MEAN"]
     LDFLAGS = ["-O3", "-shared"]
 else:
     CXXFLAGS = ["-O2", "-DNDEBUG", "-std=gnu++20", *WARN, "-march=x86-64-v3", "-fPIC", "-fvisibility=hidden",

@@ -302,6 +302,7 @@ struct Descriptors {
     std::vector<VkDescriptorBufferInfo> buffers;
     std::vector<VkDescriptorImageInfo> images;
     std::vector<SetWrite> key;  // scratch for the set cache
+    uint8_t used_sets = 0;             // bit k: set k has at least one write
     uint64_t dynamic = 0;              // set 0 bindings given a dynamic offset (ProgramLayout::dynamic)
     uint32_t dynamic_offset[64] = {};  // their ring offsets, by binding
 };
@@ -343,6 +344,8 @@ uint64_t handle_bits(H h) {
 void resolve_sets(const ProgramLayout& layout) {
     Descriptors& d = g_sets;
     for (uint32_t k = 0; k < 4; k++) {
+        d.sets[k] = VK_NULL_HANDLE;
+        if (!(d.used_sets >> k & 1)) continue;
         d.key.clear();
         uint64_t h = handle_bits(layout.sets[k]) * 0x9E3779B97F4A7C15ull;
         for (size_t i = 0; i < d.writes.size(); i++) {
@@ -412,11 +415,13 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
         d = Descriptors{};
     else
         d.writes.clear(), d.set_index.clear(), d.buffers.clear(), d.images.clear();
+    d.used_sets = 0;
     d.dynamic = 0;
     const bool every_set = draw_slow(kSlowEmptySets), shared = !draw_slow(kSlowUploads), cached = set_cache_on();
     for (int k = 0; k < 4; k++) d.sets[k] = every_set ? descriptor_set(layout.sets[k]) : VK_NULL_HANDLE;
     auto set_of = [&](uint32_t k) {  // with the set cache, made (or found) in bind_sets
         d.set_index.push_back(uint8_t(k));
+        d.used_sets |= uint8_t(1u << k);
         if (cached) return VkDescriptorSet(VK_NULL_HANDLE);
         if (!d.sets[k]) d.sets[k] = descriptor_set(layout.sets[k]);
         return d.sets[k];
@@ -513,7 +518,16 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
             VkDescriptorBufferInfo info{};
             switch (b.nvn.source) {
                 case NvnSource::SupportBuffer: info = support(); break;
-                case NvnSource::ConstantData: info = buffer_of(cb, s->constants.data(), s->constants.size()); break;
+                case NvnSource::ConstantData: {
+                    uint64_t n = std::max<uint64_t>((s->constants.size() + 15) & ~15ull, 16);
+                    Upload u;
+                    if (!s->constants.empty() &&
+                        static_buf_upload_immutable(cb, s->constants.data(), s->constants.size(), n, 256, u))
+                        info = {u.buffer, u.offset, n};
+                    else
+                        info = buffer_of(cb, s->constants.data(), s->constants.size());
+                    break;
+                }
                 case NvnSource::UniformBlock:
                 case NvnSource::UniformAsStorage: {
                     const Range& r = b.nvn.index >= 0 && b.nvn.index < 18 ? g_state.uniforms[st][b.nvn.index] : Range{};
@@ -534,16 +548,20 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
                         map_test = value && std::strcmp(value, "1") == 0;
                         flag_frame = frame;
                     }
+                    const uint64_t ubo_align = vk_robust_ubo_align();
+                    const uint64_t pad = vk_robust_buffer_access2()
+                                             ? std::max<uint64_t>((size + ubo_align - 1) & ~(ubo_align - 1), ubo_align)
+                                             : (indexed ? 0x10000 : 0x1000);
                     if (map_test && !uw_fragcoord_x_on() && g_uw_wide && p && size >= 68 &&
                         s->stage == ShaderStage::Fragment && s->hash == "0bebd775cd1a4238" && b.nvn.index == 0 &&
                         !written_overlaps(p, size)) {
                         std::vector<uint8_t> copy(p, p + size);
                         float reciprocal; std::memcpy(&reciprocal, copy.data() + 64, 4);
                         reciprocal /= uw_factor(); std::memcpy(copy.data() + 64, &reciprocal, 4);
-                        info = buffer_of(cb, copy.data(), size, indexed ? 0x10000 : 0x1000, false, false);
+                        info = buffer_of(cb, copy.data(), size, pad, false, false);
                         static bool logged = false;
                         if (!logged) { logged = true; log("ultrawide map composite test: adjusted horizontal sampling reciprocal to %g", double(reciprocal)); }
-                    } else info = buffer_of(cb, p, size, indexed ? 0x10000 : 0x1000);
+                    } else info = buffer_of(cb, p, size, pad);
                     break;
                 }
                 case NvnSource::StorageBuffer: {
@@ -551,9 +569,13 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
                     uint64_t size;
                     bool written = storage(s, b, st, p, size);
                     if (!written && s->stage != ShaderStage::Compute && written_overlaps(p, size)) written_count_bind();
-                    // At least 64 KB: Metal does not bound-check, and a shader writing past a small or missing
-                    // buffer overwrote the next data in the upload buffer (garbage everywhere after a compute).
-                    info = buffer_of(cb, p, size, 0x10000, written);
+                    // At least 64 KB when robustBufferAccess2 is unavailable (Metal does not bound-check); with
+                    // robustBufferAccess2, read-only storage bindings only need alignment padding.
+                    const uint64_t ssbo_align = vk_robust_ssbo_align();
+                    const uint64_t min_ssbo = (!written && vk_robust_buffer_access2())
+                                                  ? std::max<uint64_t>((size + ssbo_align - 1) & ~(ssbo_align - 1), ssbo_align)
+                                                  : 0x10000;
+                    info = buffer_of(cb, p, size, min_ssbo, written);
                     break;
                 }
                 case NvnSource::DriverConstants: {
@@ -584,9 +606,10 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
         }
     }
     const DrawTextures& t = g_textures;
+    static const ResolvedTexture kEmptyResolved{};
     for (size_t k = 0; k < t.bindings.size(); k++) {
         auto [s, b] = t.bindings[k];
-        const ResolvedTexture r = k < t.resolved.size() ? t.resolved[k] : ResolvedTexture{};
+        const ResolvedTexture& r = k < t.resolved.size() ? t.resolved[k] : kEmptyResolved;
         VkDescriptorImageInfo ii{};
         ii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         ii.imageView = r.texture ? sampled_view(cb, r.texture, b->image, &r.view, &ii.imageLayout)
@@ -630,6 +653,16 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
 // A set with no binding in the layout is statically used by no shader, so nothing need be bound there: the runs of
 // sets build_sets allocated are bound, in ascending order (each bind leaves the lower sets, bound with this same
 // layout, undisturbed).
+struct BoundDesc {
+    VkCommandBuffer cb = VK_NULL_HANDLE;
+    VkPipelineBindPoint point = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkDescriptorSet sets[4] = {};
+    uint32_t noff = 0;
+    uint32_t offsets[64] = {};
+} g_bound_desc;
+uint64_t g_desc_bound = 0, g_desc_kept = 0;
+
 void bind_sets(VkCommandBuffer cb, VkPipelineBindPoint point, const ProgramLayout& layout) {
     Descriptors& d = g_sets;
     if (set_cache_on()) resolve_sets(layout);
@@ -643,16 +676,37 @@ void bind_sets(VkCommandBuffer cb, VkPipelineBindPoint point, const ProgramLayou
     }
     if (draw_slow(kSlowEmptySets)) {
         p_vkCmdBindDescriptorSets(cb, point, layout.layout, 0, 4, d.sets, noff, offsets);
+        g_bound_desc = BoundDesc{};
         return;
+    }
+    const bool same_ctx = !draw_slow(kSlowState) && g_bound_desc.cb == cb && g_bound_desc.point == point &&
+                          g_bound_desc.layout == layout.layout;
+    if (!same_ctx) {
+        g_bound_desc = BoundDesc{};
+        g_bound_desc.cb = cb, g_bound_desc.point = point, g_bound_desc.layout = layout.layout;
     }
     for (uint32_t k = 0; k < 4;) {
         if (!d.sets[k]) {
             k++, g_sets_skipped++;
             continue;
         }
+        bool unchanged = same_ctx && g_bound_desc.sets[k] == d.sets[k];
+        if (unchanged && k == 0)
+            unchanged = g_bound_desc.noff == noff &&
+                        (noff == 0 || std::memcmp(g_bound_desc.offsets, offsets, noff * sizeof(uint32_t)) == 0);
+        if (unchanged) {
+            g_desc_kept++, k++;
+            continue;
+        }
         uint32_t n = 1;
-        while (k + n < 4 && d.sets[k + n]) n++;
+        while (k + n < 4 && d.sets[k + n] && !(same_ctx && g_bound_desc.sets[k + n] == d.sets[k + n])) n++;
         p_vkCmdBindDescriptorSets(cb, point, layout.layout, k, n, d.sets + k, k == 0 ? noff : 0, offsets);
+        for (uint32_t j = 0; j < n; j++) g_bound_desc.sets[k + j] = d.sets[k + j];
+        if (k == 0) {
+            g_bound_desc.noff = noff;
+            if (noff) std::memcpy(g_bound_desc.offsets, offsets, noff * sizeof(uint32_t));
+        }
+        g_desc_bound += n;
         k += n;
     }
 }
@@ -753,16 +807,20 @@ bool draw_inputs_shared(VkCommandBuffer cb, const ShaderInfo* vs, bool indexed, 
     if (!indexed || draw_slow(kSlowUploads) || vk_index_type(c.mask) == VK_INDEX_TYPE_UINT8_EXT)
         return draw_inputs(cb, vs, indexed, c, in);
     draw_inputs(cb, vs, false, c, in);  // the vertex streams
-    const uint8_t* p = guest_bytes(c.a[0]);
+    PoolSlice slice{};
+    const uint8_t* p = guest_bytes_pool(c.a[0], &slice);
     if (!p) return false;
     in.index_type = vk_index_type(c.mask);
     uint64_t bytes = uint64_t(uint32_t(c.i[0])) * index_size(c.mask);
-    if (!written_read(cb, p, bytes, bytes, index_size(c.mask), in.index)) in.index = dedup_upload(p, bytes, bytes, 16);
+    if (!written_read(cb, p, bytes, bytes, index_size(c.mask), in.index) &&
+        !static_buf_upload(cb, p, bytes, bytes, 16, slice, in.index))
+        in.index = dedup_upload(p, bytes, bytes, 16);
     return true;
 }
 
 void sets_begin_submit() {
     handles_reset();
+    g_bound_desc = BoundDesc{};
     g_set_generation++, g_set_used = 0, g_set_arena.clear();
     g_support_used = g_constants_used = 0;
 }
@@ -772,9 +830,10 @@ void sets_log() {
         log("nvn: texture handles: %llu from the submit's cache, %llu looked up; %llu empty descriptor sets skipped",
             (unsigned long long)g_handle_hits, (unsigned long long)g_handle_misses, (unsigned long long)g_sets_skipped);
     if (g_set_hits + g_set_misses)
-        log("nvn: descriptor sets: %llu reused from the submit's cache, %llu made", (unsigned long long)g_set_hits,
-            (unsigned long long)g_set_misses);
-    g_handle_hits = g_handle_misses = g_sets_skipped = g_set_hits = g_set_misses = 0;
+        log("nvn: descriptor sets: %llu reused from the submit's cache, %llu made; binds: %llu recorded, %llu skipped",
+            (unsigned long long)g_set_hits, (unsigned long long)g_set_misses, (unsigned long long)g_desc_bound,
+            (unsigned long long)g_desc_kept);
+    g_handle_hits = g_handle_misses = g_sets_skipped = g_set_hits = g_set_misses = g_desc_bound = g_desc_kept = 0;
 }
 
 }  // namespace nx::nvn::replay

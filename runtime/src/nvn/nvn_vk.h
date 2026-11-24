@@ -109,6 +109,10 @@ bool vk_depth_clip_control();
 bool vk_gpl();
 // VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT works (Vulkan 1.3 pipelineCreationCacheControl).
 bool vk_pipeline_cache_control();
+// VK_EXT_robustness2 (robustBufferAccess2): out-of-bounds UBO/SSBO reads return 0 in hardware (avoids 4KB/64KB zero-padding).
+bool vk_robust_buffer_access2();
+uint64_t vk_robust_ubo_align();
+uint64_t vk_robust_ssbo_align();
 // The serial the submit being recorded will get (nvn_frames.cpp): a handle it uses may go once
 // frame_completed() reaches it.
 uint64_t frame_recording_serial();
