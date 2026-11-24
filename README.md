@@ -1,5 +1,9 @@
 # SuperWonders — Super Mario Bros. Wonder PC Recompilation
 
+> [!NOTE]
+> **Nintendo Switch 2 Edition Port:** A port for the Nintendo Switch 2 version of *Super Mario Bros. Wonder* is currently being developed over at **[wondershot](https://github.com/Kendoismebutmaybenot/wondershot)** — go check it out!
+> Please note that **this is not my repository/project**; for any issues, bug reports, or questions regarding it, please open an issue directly on [their repository](https://github.com/Kendoismebutmaybenot/wondershot/issues).
+
 I'm working on SuperWonders, an experimental Windows and Linux x86-64 static recompilation of *Super Mario Bros. Wonder* (Nintendo Switch, base version 1.0.0 and update 1.2.1) for native execution on PC. I started from the DKB/TOTK recompilation framework and have been adapting its runtime and graphics support for Wonder. The graphics backend uses Vulkan.
 
 This repository contains source code and project documentation. It does not contain the builder package, the game, game assets, a game dump, firmware, or a compiled game. The separate Windows GUI Builder is distributed through [GitHub Releases](https://github.com/vfjoo888/SuperWonders/releases).
