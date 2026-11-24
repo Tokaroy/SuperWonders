@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <string_view>
+static inline std::filesystem::path nx_u8path(std::string_view s) { return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size())); }
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -195,7 +197,7 @@ uint64_t monotonic_ns() {
 // ---- files and output -----------------------------------------------------------------------------------------
 
 FILE* fopen_utf8(const std::string& path, const char* mode) {
-    std::wstring wp = std::filesystem::u8path(path).wstring();
+    std::wstring wp = nx_u8path(path).wstring();
     std::wstring wm(mode, mode + std::strlen(mode));
     return _wfopen(wp.c_str(), wm.c_str());
 }
@@ -210,7 +212,7 @@ uint64_t read_at(FILE* f, int64_t off, void* buf, uint64_t size) {
 }
 bool make_dirs(const std::string& path) {
     std::error_code ec;
-    std::filesystem::create_directories(std::filesystem::u8path(path), ec);
+    std::filesystem::create_directories(nx_u8path(path), ec);
     return !ec;
 }
 
@@ -247,8 +249,8 @@ std::string path_utf8(const std::filesystem::path& p) {
 }
 
 bool paths_same(const std::string& a, const std::string& b) {
-    const auto pa = std::filesystem::u8path(clean_root_string(a)).lexically_normal();
-    const auto pb = std::filesystem::u8path(clean_root_string(b)).lexically_normal();
+    const auto pa = nx_u8path(clean_root_string(a)).lexically_normal();
+    const auto pb = nx_u8path(clean_root_string(b)).lexically_normal();
     std::error_code ec;
     if (std::filesystem::exists(pa, ec) && std::filesystem::exists(pb, ec)) {
         const bool eq = std::filesystem::equivalent(pa, pb, ec);
@@ -258,7 +260,7 @@ bool paths_same(const std::string& a, const std::string& b) {
 }
 
 std::filesystem::path data_root_pointer_path() {
-    return std::filesystem::u8path(default_data_root()) / "data_root.txt";
+    return nx_u8path(default_data_root()) / "data_root.txt";
 }
 
 }  // namespace
@@ -285,7 +287,7 @@ std::string data_root() {
             line = clean_root_string(std::move(line));
             if (!line.empty()) {
                 std::error_code ec;
-                const auto p = std::filesystem::u8path(line);
+                const auto p = nx_u8path(line);
                 if (std::filesystem::is_directory(p, ec) || (std::filesystem::create_directories(p, ec) && !ec)) {
                     g_data_root_value = std::move(line);
                     return g_data_root_value;
@@ -311,7 +313,7 @@ bool set_data_root(const std::string& path) {
         g_data_root_value = def;
         return true;
     }
-    const auto target = std::filesystem::u8path(cleaned);
+    const auto target = nx_u8path(cleaned);
     if (!std::filesystem::is_directory(target, ec) && (!std::filesystem::create_directories(target, ec) || ec))
         return false;
     std::filesystem::create_directories(ptr.parent_path(), ec);
@@ -498,7 +500,7 @@ static void apply_input_bindings(const PcMenuState& state) {
 }
 
 static void save_pc_settings() {
-    std::ofstream file(std::filesystem::u8path(data_root()) / "pc-settings.ini", std::ios::trunc);
+    std::ofstream file(nx_u8path(data_root()) / "pc-settings.ini", std::ios::trunc);
     if (!file) return;
     file << "width=" << g_pc_settings.width << "\nheight=" << g_pc_settings.height << "\nvolume=" << g_pc_settings.volume
          << "\naudio_mode=" << g_pc_settings.audio_mode << "\nstereo_separation=" << g_pc_settings.stereo_separation
@@ -725,12 +727,12 @@ static void apply_loaded_pc_settings(const PcMenuState& state) {
 }
 
 static void load_pc_settings() {
-    parse_pc_settings_file(std::filesystem::u8path(data_root()) / "pc-settings.ini", g_pc_settings);
+    parse_pc_settings_file(nx_u8path(data_root()) / "pc-settings.ini", g_pc_settings);
     apply_loaded_pc_settings(g_pc_settings);
 }
 
 void reload_pc_settings() {
-    const auto ini = std::filesystem::u8path(data_root()) / "pc-settings.ini";
+    const auto ini = nx_u8path(data_root()) / "pc-settings.ini";
     std::error_code ec;
     if (!std::filesystem::is_regular_file(ini, ec)) return;
     PcMenuState fresh;

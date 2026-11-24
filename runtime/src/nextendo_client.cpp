@@ -12,6 +12,8 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <string_view>
+static inline std::filesystem::path nx_u8path(std::string_view s) { return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size())); }
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -144,8 +146,8 @@ int64_t json_get_int(const std::string& json, const char* key) {
 void save_locked() {
     if (g_data_root.empty()) return;
     std::error_code ec;
-    std::filesystem::create_directories(std::filesystem::u8path(g_data_root), ec);
-    const auto p = std::filesystem::u8path(g_data_root) / "nextendo.ini";
+    std::filesystem::create_directories(nx_u8path(g_data_root), ec);
+    const auto p = nx_u8path(g_data_root) / "nextendo.ini";
     std::ofstream f(p, std::ios::trunc);
     if (!f) return;
     f << "enabled=" << (g_enabled ? 1 : 0) << "\n";
@@ -161,7 +163,7 @@ void save_locked() {
 
 void load_locked() {
     if (g_data_root.empty()) return;
-    const auto p = std::filesystem::u8path(g_data_root) / "nextendo.ini";
+    const auto p = nx_u8path(g_data_root) / "nextendo.ini";
     std::ifstream f(p);
     if (!f) return;
     std::string line;
@@ -250,7 +252,7 @@ std::string sign_rs256_jwt(const std::string& header_and_payload) {
     BCRYPT_KEY_HANDLE key = nullptr;
     if (BCryptOpenAlgorithmProvider(&rsa_alg, BCRYPT_RSA_ALGORITHM, nullptr, 0) != 0) return {};
 
-    const auto key_path = std::filesystem::u8path(g_data_root) / "nextendo-rsa.bin";
+    const auto key_path = nx_u8path(g_data_root) / "nextendo-rsa.bin";
     std::vector<uint8_t> blob;
     {
         std::ifstream kf(key_path, std::ios::binary | std::ios::ate);
@@ -457,7 +459,7 @@ bool sha256_bytes(const uint8_t* in, size_t len, uint8_t out[32]) {
 
 std::string sign_rs256_jwt(const std::string& header_and_payload) {
     if (g_data_root.empty()) return {};
-    const auto key_path = std::filesystem::u8path(g_data_root) / "nextendo-rsa.pem";
+    const auto key_path = nx_u8path(g_data_root) / "nextendo-rsa.pem";
     std::error_code ec;
     if (!std::filesystem::is_regular_file(key_path, ec)) {
         std::string out;
@@ -801,7 +803,7 @@ std::vector<FriendInfo> get_friends() {
         cid = g_client_id;
     }
     if (!root.empty()) {
-        std::ifstream ff(std::filesystem::u8path(root) / "friends.txt");
+        std::ifstream ff(nx_u8path(root) / "friends.txt");
         std::string line;
         while (std::getline(ff, line)) {
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();

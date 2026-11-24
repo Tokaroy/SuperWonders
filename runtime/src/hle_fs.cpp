@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <string_view>
+static inline std::filesystem::path nx_u8path(std::string_view s) { return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size())); }
 #include <map>
 #include <memory>
 #include <mutex>
@@ -90,7 +92,7 @@ struct Dir {
 std::vector<std::pair<uint64_t, Dir>> g_dirs;
 uint64_t g_next = 1;
 
-fs::path data_root() { return fs::u8path(plat::data_root()); }
+fs::path data_root() { return nx_u8path(plat::data_root()); }
 
 std::string utf8(const fs::path& p) {
     auto s = p.u8string();
@@ -157,7 +159,7 @@ std::vector<fs::path> mod_paths(const std::string& guest) {
     std::vector<fs::path> v;
     auto [mnt, rest] = split(guest);
     if (g_rom_mounts.count(mnt))
-        for (const fs::path& r : mod_roots()) v.push_back(r / fs::u8path(rest));
+        for (const fs::path& r : mod_roots()) v.push_back(r / nx_u8path(rest));
     return v;
 }
 
@@ -173,7 +175,7 @@ fs::path resolve(const std::string& guest) {
             if (logged.insert(rest).second) log("mods: %s from %s", rest.c_str(), utf8(m).c_str());
             return m;
         }
-    return it->second / fs::u8path(rest);
+    return it->second / nx_u8path(rest);
 }
 
 void mount(const std::string& name, const fs::path& p) {
@@ -566,11 +568,11 @@ NX_HLE("_ZN2nn2fs26DeleteDirectoryRecursivelyEPKc", DeleteDirectoryRecursively);
 
 void add_virtual_file(const std::string& path, std::string data) {
     std::lock_guard lk(g_fs);
-    g_virtual[virtual_key(fs::u8path(path))] = std::move(data);
+    g_virtual[virtual_key(nx_u8path(path))] = std::move(data);
 }
 
 std::string read_game_file(const std::string& relative_to_romfs) {
-    FILE* f = plat::fopen_utf8(utf8(data_root() / "extract" / "romfs" / fs::u8path(relative_to_romfs)), "rb");
+    FILE* f = plat::fopen_utf8(utf8(data_root() / "extract" / "romfs" / nx_u8path(relative_to_romfs)), "rb");
     if (!f) return {};
     std::string s;
     char buf[65536];

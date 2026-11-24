@@ -82,8 +82,10 @@ void draw_progress(float height) {
     ImFont* tf = ui::title();
     ImFont* bf = ui::body();
     const char* title = g_kind == 0 ? "Compiling shaders" : "Preparing pipelines";
-    const char* const notes[] = {"This happens once, after an update or a new graphics driver.",
-                                 "The game starts by itself when it is done."};
+    const char* const notes[] = {
+        g_kind == 0 ? "Translating Switch shaders into Vulkan pipelines for your GPU to prevent in-game stutter."
+                    : "Warming up graphics pipelines for your current GPU, driver, and video settings.",
+        "Cached on disk so future launches start faster; the game starts automatically when done."};
     const float tfs = 52 * k, sfs = 26 * k, line_h = bf->CalcTextSizeA(sfs, FLT_MAX, 0, "A").y;
     const ImVec2 ts = tf->CalcTextSizeA(tfs, FLT_MAX, 0, title);
     float pw = std::min(ds.x * 0.6f, 900 * k);
