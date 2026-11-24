@@ -66,6 +66,8 @@ bool dump_presented() {
 VkSemaphore g_acquired = VK_NULL_HANDLE, g_rendered = VK_NULL_HANDLE;
 VkBool32 g_depth_clip_control = VK_FALSE;
 bool g_gpl = false, g_cache_control = false;  // vk_gpl(), vk_pipeline_cache_control()
+bool g_robust_buf2 = false;
+uint64_t g_robust_ubo_align = 256, g_robust_ssbo_align = 256;
 VkPhysicalDeviceFeatures g_features{};  // the core features enabled (vk_features())
 VkDescriptorPool g_descriptors = VK_NULL_HANDLE;
 
@@ -216,6 +218,12 @@ bool init() {
         dexts.push_back("VK_KHR_portability_subset");
         *tail = &fport, tail = &fport.pNext;
     }
+    VkPhysicalDeviceRobustness2FeaturesEXT frob2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
+    const bool rob2_ext = has_extension(dext, "VK_EXT_robustness2");
+    if (rob2_ext) {
+        dexts.push_back("VK_EXT_robustness2");
+        *tail = &frob2, tail = &frob2.pNext;
+    }
     // VK_EXT_graphics_pipeline_library (nvn_pipeline.cpp): last in the chain, so it can be unlinked again when unused.
     VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT fgpl{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT};
@@ -274,6 +282,20 @@ bool init() {
     log("nvn/vk: samplerMirrorClampToEdge %u, shaderDrawParameters %u", mirror_clamp, draw_params);
     g_depth_clip_control = fclip.depthClipControl;
     g_features = features.features;
+    {
+        const char* rp = std::getenv("NX_ROBUST_PAD");
+        const bool rp_wanted = !(rp && rp[0] == '0');
+        g_robust_buf2 = rp_wanted && rob2_ext && frob2.robustBufferAccess2 && g_features.robustBufferAccess;
+        if (g_robust_buf2) {
+            VkPhysicalDeviceRobustness2PropertiesEXT prob2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_PROPERTIES_EXT};
+            VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &prob2};
+            p_vkGetPhysicalDeviceProperties2(g_physical, &p2);
+            g_robust_ubo_align = std::max<uint64_t>(prob2.robustUniformBufferAccessSizeAlignment, 16);
+            g_robust_ssbo_align = std::max<uint64_t>(prob2.robustStorageBufferAccessSizeAlignment, 16);
+            log("nvn/vk: VK_EXT_robustness2 active (ubo align %llu, ssbo align %llu)",
+                (unsigned long long)g_robust_ubo_align, (unsigned long long)g_robust_ssbo_align);
+        }
+    }
     // NX_ASTC_DECODE=1|linear|srgb: the CPU decoder even where the GPU has ASTC (to compare the two on one GPU).
     set_astc_native(g_features.textureCompressionASTC_LDR, g_features.textureCompressionBC);
     log("nvn/vk: ASTC %s", astc_native() ? "native" : "decoded to RGBA8 at upload (no textureCompressionASTC_LDR)");
@@ -530,6 +552,9 @@ uint32_t vk_queue_family() { return g_family; }
 bool vk_depth_clip_control() { return g_depth_clip_control; }
 bool vk_gpl() { return g_gpl; }
 bool vk_pipeline_cache_control() { return g_cache_control; }
+bool vk_robust_buffer_access2() { return g_robust_buf2; }
+uint64_t vk_robust_ubo_align() { return g_robust_ubo_align; }
+uint64_t vk_robust_ssbo_align() { return g_robust_ssbo_align; }
 const VkPhysicalDeviceFeatures& vk_features() { return g_features; }
 
 const VkPhysicalDeviceMemoryProperties& vk_memory_properties() { return g_memory; }
@@ -894,6 +919,8 @@ uint64_t gpu_vram_bytes() {
 }
 
 void gpu_present(uint64_t texture, const int32_t* crop) {
+    thread_local bool prio_set = false;
+    if (!prio_set) plat::set_thread_high_priority(), prio_set = true;
     plat::perf_hint_thread();  // the thread that presents takes part in the frame (perf_hint.cpp)
     std::lock_guard lk(g_gpu);
     PresentTimer timer;
@@ -1003,13 +1030,15 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
     }
     static uint64_t presents = 0;
     presents++;
-    if (std::getenv("NX_DRAW_STATS") && presents % (presents < 300 ? 60 : 300) == 0) draw_log_stats();
+    static const bool draw_stats = std::getenv("NX_DRAW_STATS") != nullptr;
+    static const bool dump_fsr = std::getenv("NX_DUMP_FSR") != nullptr;
+    if (draw_stats && presents % (presents < 300 ? 60 : 300) == 0) draw_log_stats();
     if (presents % 60 == 0) log_timing(60), gpu_profile_log(60);
-    if (std::getenv("NX_DRAW_STATS") && presents % 300 == 0) zero_draws_log();
+    if (draw_stats && presents % 300 == 0) zero_draws_log();
     frame_sig_flush(presents);
     const bool due = frame_dump_due(presents);
     GpuImage* shown = src;  // NX_DUMP_FSR: the image as presented (after FXAA and FSR 1)
-    if (std::getenv("NX_DUMP_FSR")) shown = upscaled && fsr_output() ? fsr_output() : in;
+    if (dump_fsr) shown = upscaled && fsr_output() ? fsr_output() : in;
     // NX_DUMP_PRESENTED: the swapchain image as it goes to the display (after the overlay), back to PRESENT_SRC after
     // the copy. Needs the TRANSFER_SRC usage make_swapchain asked for.
     GpuImage presented = swap_dst;

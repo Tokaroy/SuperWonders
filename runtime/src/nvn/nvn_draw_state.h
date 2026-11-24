@@ -51,6 +51,7 @@ extern State g_state;
 extern Stats g_stats;
 
 const uint8_t* guest_bytes(uint64_t gpu);
+const uint8_t* guest_bytes_pool(uint64_t gpu, PoolSlice* slice);
 uint32_t handle_texture(uint64_t handle, uint32_t* sampler);
 // The texture and sampler a handle names in the bound pools.
 void texture_for(uint64_t handle, uint64_t& texture, SamplerInfo& sampler, ViewInfo* view = nullptr);
@@ -79,8 +80,14 @@ void dispatch_call(VkCommandBuffer cb, const Cmd& c);
 
 namespace nx::nvn::replay {
 
-// nvn_dedup.cpp: one copy per submit of the same guest bytes (padded to `padded` with zeros).
+// nvn_dedup.cpp: one copy per submit of the same guest bytes (padded to `padded` with zeros),
+// plus a cross-frame DEVICE_LOCAL VRAM cache for static VB/IB ranges in CPU_CACHED / CPU_NO_ACCESS pools.
 Upload dedup_upload(const uint8_t* p, uint64_t size, uint64_t padded, uint64_t align);
+bool static_buf_upload(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_t padded, uint64_t align,
+                       const PoolSlice& slice, Upload& out);
+bool static_buf_upload_immutable(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_t padded, uint64_t align,
+                                 Upload& out);
+void static_buf_begin_submit();
 void dedup_reset();                                     // at each submit
 void dedup_invalidate(const uint8_t* p, uint64_t size);  // guest bytes written during the replay
 void dedup_log();

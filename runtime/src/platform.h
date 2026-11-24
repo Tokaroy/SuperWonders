@@ -27,6 +27,22 @@ void sleep_ns(int64_t ns);
 // blank is not available or the refresh is no multiple of 60 Hz (the caller then times 60 Hz itself).
 bool wait_vblank();
 void yield();
+inline void cpu_pause() {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    __asm__ __volatile__("yield");
+#else
+    yield();
+#endif
+}
+#if defined(_WIN32)
+void set_thread_high_priority();
+void set_thread_low_priority();
+#else
+inline void set_thread_high_priority() {}
+inline void set_thread_low_priority() {}
+#endif
 void set_thread_name(const char* name);
 int64_t current_thread_id();  // the host OS thread id
 // Samples the given threads (thread CPU time, 1 kHz) for `seconds`: host pc, a few host frames and the guest lr
@@ -130,6 +146,11 @@ bool write_watch_add(uint64_t addr, uint64_t size);
 void write_watch_remove(uint64_t addr);
 bool write_watch_take(uint64_t addr);
 bool write_watch_fault(void* at);
+// Hardware dirty-page tracking (Windows MEM_WRITE_WATCH): polls and resets 4 KB pages written since the last call.
+bool write_watch_hw_supported();
+bool write_watch_hw_reset(uint64_t addr, uint64_t size);
+// Returns number of dirty pages written into `out_pages` (up to `max_pages`), or -1 if unsupported/failed.
+int write_watch_hw_poll(uint64_t addr, uint64_t size, void** out_pages, size_t max_pages, uint64_t* out_granularity);
 // NX_HEADLESS=1: no visible window (it is created hidden) and nothing presented; frames still render and
 // NX_DUMP_FRAMES still writes them. For unattended test runs.
 bool headless();

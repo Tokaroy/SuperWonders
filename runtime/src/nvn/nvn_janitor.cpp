@@ -24,6 +24,7 @@ bool g_started = false;
 
 void run() {
     plat::set_thread_name("nvn janitor");
+    plat::set_thread_low_priority();
     for (;;) {
         std::function<void()> job;
         {
@@ -63,7 +64,7 @@ void janitor_run(std::function<void()> job) {
 }
 
 void janitor_wait(const std::atomic<bool>& done) {
-    for (int k = 0; k < 200 && !done.load(std::memory_order_acquire); k++) plat::yield();  // normally done already
+    for (int k = 0; k < 200 && !done.load(std::memory_order_acquire); k++) plat::cpu_pause();  // normally done already
     if (done.load(std::memory_order_acquire)) return;
     std::unique_lock lk(g_lock);
     g_done_cv.wait(lk, [&] { return done.load(std::memory_order_acquire); });

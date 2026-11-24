@@ -432,9 +432,11 @@ uint64_t pace_present(int interval) {
             return 0;
         }
         const uint64_t wait_ns = custom_next - now;
-        constexpr uint64_t kSpinMarginNs = 1'200'000ull;
+        // High-res waitable timer wakes within ~0.5 ms; spin with PAUSE (no SwitchToThread syscall preemption!)
+        // for the final 0.5 ms so frame delivery stays sub-0.1 ms accurate for smooth 1% lows.
+        constexpr uint64_t kSpinMarginNs = 500'000ull;
         if (wait_ns > kSpinMarginNs) plat::sleep_ns(int64_t(wait_ns - kSpinMarginNs));
-        while (plat::monotonic_ns() < custom_next) plat::yield();
+        while (plat::monotonic_ns() < custom_next) plat::cpu_pause();
         const uint64_t done = plat::monotonic_ns();
         return done > now ? done - now : 0;
     }

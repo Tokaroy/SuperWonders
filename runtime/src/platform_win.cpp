@@ -62,6 +62,8 @@ namespace nx::plat {
 // ---- memory ---------------------------------------------------------------------------------------------------
 
 bool reserve(uint64_t addr, uint64_t size) {
+    if (VirtualAlloc(reinterpret_cast<void*>(addr), size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS) != nullptr)
+        return true;
     return VirtualAlloc(reinterpret_cast<void*>(addr), size, MEM_RESERVE, PAGE_NOACCESS) != nullptr;
 }
 
@@ -98,6 +100,15 @@ void exit_process(int code) {
     ExitProcess(UINT(code));
 }
 void sleep_ns(int64_t ns) {
+    // Request 1 ms Windows timer resolution once so waitable timers and scheduler wakeups have minimal jitter.
+    static const bool timer_res_ok = [] {
+        if (HMODULE winmm = LoadLibraryW(L"winmm.dll")) {
+            using TimeBeginPeriodFn = UINT(WINAPI*)(UINT);
+            if (auto fn = reinterpret_cast<TimeBeginPeriodFn>(GetProcAddress(winmm, "timeBeginPeriod"))) fn(1);
+        }
+        return true;
+    }();
+    (void)timer_res_ok;
     // A high-resolution waitable timer (Windows 10 1803+): Sleep rounds to the system tick (1 to 15.6 ms), and the
     // 60 Hz pacing jittered by that much.
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
@@ -153,6 +164,8 @@ bool wait_vblank() {
     return per_tick != 0;
 }
 void yield() { SwitchToThread(); }
+void set_thread_high_priority() { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL); }
+void set_thread_low_priority() { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL); }
 void set_thread_name(const char*) {}
 float default_render_scale() { return 1.0f; }
 void release_window(void*) {}
