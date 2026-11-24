@@ -1636,10 +1636,15 @@ static PlayerInputs sample_players_uncached() {
             else if (action == PcDpadUp) keyboard.ly = kStickMax;
             else if (action == PcDpadDown) keyboard.ly = -kStickMax;
         }
-        if (key_focused('A')) keyboard.lx = -kStickMax;
-        if (key_focused('D')) keyboard.lx = kStickMax;
-        if (key_focused('W')) keyboard.ly = kStickMax;
-        if (key_focused('S')) keyboard.ly = -kStickMax;
+        auto is_bound = [](int vk) {
+            for (const auto& b : g_keyboard_bindings)
+                if (b.load() == vk) return true;
+            return false;
+        };
+        if (!is_bound('A') && key_focused('A')) keyboard.lx = -kStickMax;
+        if (!is_bound('D') && key_focused('D')) keyboard.lx = kStickMax;
+        if (!is_bound('W') && key_focused('W')) keyboard.ly = kStickMax;
+        if (!is_bound('S') && key_focused('S')) keyboard.ly = -kStickMax;
     }
     std::array<int, 4> assignment{};
     bool manual = false;
