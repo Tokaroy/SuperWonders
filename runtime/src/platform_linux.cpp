@@ -643,6 +643,12 @@ int main() {
             case SDL_EVENT_WINDOW_SHOWN:
                 g_minimized = false;
                 break;
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                linux_host::set_window_focused(true);
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                linux_host::set_window_focused(false);
+                break;
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 g_pixel_w = uint32_t(e.window.data1), g_pixel_h = uint32_t(e.window.data2);
                 break;

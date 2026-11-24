@@ -598,6 +598,7 @@ bool frame_wanted() {
 }
 
 void notify(const char* text) { ui::notify(text); }
+void notify_screenshot(const uint8_t* rgba, int w, int h) { ui::notify_screenshot(rgba, w, h); }
 
 void ensure_context() {
     if (ImGui::GetCurrentContext()) return;

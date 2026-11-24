@@ -952,11 +952,11 @@ void profile_dialog(bool open) {
     }
     ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f}, ImGuiCond_Appearing, {0.5f, 0.5f});
     ImGui::SetNextWindowSize({std::min(io.DisplaySize.x * 0.92f, 1080 * k), 0}, ImGuiCond_Always);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {32 * k, 28 * k});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {36 * k, 32 * k});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 16 * k);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10 * k);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {14 * k, 9 * k});
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {12 * k, 12 * k});
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {14 * k, 10 * k});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {16 * k, 16 * k});
     ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGui::ColorConvertU32ToFloat4(th.card));
     ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(ui::mix(th.card, th.accent, 0.45f)));
     ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(th.panel));
@@ -1048,7 +1048,7 @@ void profile_dialog(bool open) {
     }
 
     const float total_w = ImGui::GetContentRegionAvail().x;
-    const float col_gap = 24 * k;
+    const float col_gap = 30 * k;
     const float left_w = std::floor(total_w * 0.32f);
     const float right_w = total_w - left_w - col_gap;
 
@@ -1059,13 +1059,13 @@ void profile_dialog(bool open) {
     ImGui::Text("LOCAL PROFILES (%zu/8)", db.users.size());
     ImGui::SetWindowFontScale(1.0f);
     ImGui::PopStyleColor();
-    ImGui::Dummy({0, 4 * k});
+    ImGui::Dummy({0, 8 * k});
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(th.panel));
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12 * k);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {12 * k, 12 * k});
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8 * k, 8 * k});
-    ImGui::BeginChild("##profile_list", {left_w, 316 * k}, ImGuiChildFlags_Borders);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14 * k, 14 * k});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {10 * k, 12 * k});
+    ImGui::BeginChild("##profile_list", {left_w, 336 * k}, ImGuiChildFlags_Borders);
     ImDrawList* list_dl = ImGui::GetWindowDrawList();
     for (int i = 0; i < int(db.users.size()); ++i) {
         ImGui::PushID(i);
@@ -1073,7 +1073,7 @@ void profile_dialog(bool open) {
         const bool is_active = i == int(db.selected);
         const ImVec2 p0 = ImGui::GetCursorScreenPos();
         const float row_w = ImGui::GetContentRegionAvail().x;
-        const float row_h = 52 * k;
+        const float row_h = 58 * k;
         if (ImGui::InvisibleButton("##prof_row", {row_w, row_h})) {
             edited = i;
             read_fields();
@@ -1101,6 +1101,7 @@ void profile_dialog(bool open) {
     ImGui::EndChild();
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor();
+    ImGui::Dummy({0, 8 * k});
 
     auto valid = [&] {
         if (!name[0]) { message = "Enter a name."; return false; }
@@ -1147,9 +1148,19 @@ void profile_dialog(bool open) {
         } else message = "Could not save profiles.";
     }
     if (at_limit) ImGui::EndDisabled();
+    static std::vector<profiles::EmulatorSave> detected_saves;
+    static bool open_import_modal = false;
+    const float half_w = (left_w - 8 * k) * 0.5f;
     if (db.users.size() < 2) ImGui::BeginDisabled();
-    if (ImGui::Button("Copy saves...", {left_w, 42 * k})) { message.clear(); ImGui::OpenPopup("##copy_saves_modal"); }
+    if (ImGui::Button("Copy saves...", {half_w, 42 * k})) { message.clear(); ImGui::OpenPopup("##copy_saves_modal"); }
     if (db.users.size() < 2) ImGui::EndDisabled();
+    ImGui::SameLine(0, 8 * k);
+    if (ImGui::Button("Import save...", {half_w, 42 * k})) {
+        message.clear();
+        detected_saves = profiles::detect_emulator_saves();
+        log("profiles: Import save clicked, detected %zu emulator save(s)", detected_saves.size());
+        open_import_modal = true;
+    }
     ImGui::PopStyleColor(3);
     ImGui::EndGroup();
 
@@ -1162,12 +1173,13 @@ void profile_dialog(bool open) {
     ImGui::TextUnformatted("PROFILE DETAILS");
     ImGui::SetWindowFontScale(1.0f);
     ImGui::PopStyleColor();
-    ImGui::Dummy({0, 4 * k});
+    ImGui::Dummy({0, 8 * k});
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(th.panel));
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12 * k);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {22 * k, 20 * k});
-    ImGui::BeginChild("##profile_editor", {right_w, 412 * k}, ImGuiChildFlags_Borders);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {26 * k, 24 * k});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {12 * k, 14 * k});
+    ImGui::BeginChild("##profile_editor", {right_w, 456 * k}, ImGuiChildFlags_Borders);
 
     // Preview + Name row
     {
@@ -1247,12 +1259,12 @@ void profile_dialog(bool open) {
     ImGui::PopStyleColor();
 
     ImGui::EndChild();
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
     ImGui::PopStyleColor();
     ImGui::EndGroup();
 
     // Footer: message + primary actions
-    ImGui::Dummy({0, 10 * k});
+    ImGui::Dummy({0, 14 * k});
     if (!message.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.accent2));
         ImGui::TextWrapped("%s", message.c_str());
@@ -1333,6 +1345,116 @@ void profile_dialog(bool open) {
         }
         ImGui::PopStyleColor(3);
         if (copy_from == copy_to) ImGui::EndDisabled();
+        ImGui::SameLine(0, 10 * k);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(th.panel));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(ui::mix(th.panel, th.accent, 0.25f)));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(th.panel));
+        if (ImGui::Button("Cancel", {0, 40 * k})) ImGui::CloseCurrentPopup();
+        ImGui::PopStyleColor(3);
+        ImGui::EndPopup();
+    }
+
+    // Import save from emulator sub-modal
+    static int import_to = 0;
+    static std::string import_folder;
+    static std::string picked_import_folder;
+    static std::mutex import_lock;
+    {
+        std::lock_guard lk(import_lock);
+        if (!picked_import_folder.empty()) {
+            import_folder = std::move(picked_import_folder);
+            picked_import_folder.clear();
+        }
+    }
+    import_to = std::clamp(import_to, 0, int(db.users.size()) - 1);
+    if (open_import_modal) {
+        open_import_modal = false;
+        ImGui::OpenPopup("##import_save_modal");
+    }
+    ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f}, ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSize({std::min(io.DisplaySize.x * 0.80f, 540 * k), 0}, ImGuiCond_Always);
+    if (ImGui::BeginPopupModal("##import_save_modal", nullptr,
+                               ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                   ImGuiWindowFlags_NoSavedSettings)) {
+        if (ImGui::IsWindowAppearing()) log("profiles: ##import_save_modal opened");
+        ImGui::PushFont(ui::title());
+        ImGui::SetWindowFontScale(0.60f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text));
+        ImGui::TextUnformatted("Import save from emulator");
+        ImGui::PopStyleColor();
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::PopFont();
+        ImGui::Dummy({0, 6 * k});
+        if (ImGui::BeginCombo("To profile", db.users[import_to].name.c_str())) {
+            for (int i = 0; i < int(db.users.size()); ++i) {
+                ImGui::PushID(i);
+                if (ImGui::Selectable(db.users[i].name.c_str(), i == import_to)) import_to = i;
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::Dummy({0, 6 * k});
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.accent2));
+        ImGui::SetWindowFontScale(0.88f);
+        ImGui::TextUnformatted("DETECTED EMULATOR SAVES");
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::PopStyleColor();
+        ImGui::Dummy({0, 2 * k});
+        if (detected_saves.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text_dim));
+            ImGui::TextWrapped("No Eden or Ryubing Wonder saves found automatically.");
+            ImGui::PopStyleColor();
+        } else {
+            for (int i = 0; i < int(detected_saves.size()); ++i) {
+                ImGui::PushID(i);
+                const std::string p_str = str(detected_saves[i].path);
+                const bool sel = (import_folder == p_str);
+                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(sel ? th.accent : th.card));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(ui::mix(th.card, th.accent, 0.35f)));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(th.accent));
+                if (ImGui::Button(detected_saves[i].label.c_str(), {-1, 34 * k})) {
+                    import_folder = p_str;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::PopID();
+            }
+        }
+        ImGui::Dummy({0, 6 * k});
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text_dim));
+        ImGui::TextWrapped("Folder: %s", import_folder.empty() ? "(none selected)" : import_folder.c_str());
+        ImGui::PopStyleColor();
+        ImGui::Dummy({0, 4 * k});
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(th.card));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(ui::mix(th.card, th.accent, 0.25f)));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(th.card));
+        if (ImGui::Button("Choose save folder...", {0, 38 * k})) {
+            plat::pick_folder("Select emulator save folder (containing *.sav)", import_folder, [](std::string p) {
+                std::lock_guard lk(import_lock);
+                picked_import_folder = std::move(p);
+            });
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::Dummy({0, 4 * k});
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(th.text_dim));
+        ImGui::TextWrapped("Close any running game before importing. Any existing save in the destination profile will be backed up.");
+        ImGui::PopStyleColor();
+        ImGui::Dummy({0, 10 * k});
+        const bool can_import = !import_folder.empty();
+        if (!can_import) ImGui::BeginDisabled();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(th.accent));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(th.accent2));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(th.accent));
+        if (ImGui::Button("Confirm import", {0, 40 * k})) {
+            fs::path backup;
+            std::string error;
+            if (profiles::import_save(root, u8(import_folder), db.users[import_to], backup, error)) {
+                message = "Save imported into " + db.users[import_to].name + ".";
+                if (!backup.empty()) message += " Backup: " + str(backup);
+                ImGui::CloseCurrentPopup();
+            } else message = error;
+        }
+        ImGui::PopStyleColor(3);
+        if (!can_import) ImGui::EndDisabled();
         ImGui::SameLine(0, 10 * k);
         ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(th.panel));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(ui::mix(th.panel, th.accent, 0.25f)));
@@ -1758,6 +1880,7 @@ void screen(float w, float h) {
     // Sidebar navigation: clean Sentence/Title Case labels with left accent indicator, matching the settings rows.
     const bool busy = g->job.running || g->demo_progress;
     ImGui::SetCursorPos({margin, top});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0, 8 * k});
     ImGui::BeginGroup();
     bool list_focused = false;
     for (int i = 0; i < kPages; ++i) {
@@ -1802,6 +1925,7 @@ void screen(float w, float h) {
         ImGui::PopID();
     }
     ImGui::EndGroup();
+    ImGui::PopStyleVar();
     g->in_list = list_focused;
 
     // Detailed status note, lower left

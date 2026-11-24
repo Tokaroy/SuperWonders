@@ -354,7 +354,8 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.language = s.language, o.theme = s.theme, o.game_language = s.game_language, o.memory_limit_gb = s.memory_limit_gb;
     o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask, o.pad_presets = s.pad_presets;
     o.keyboard_separate = s.keyboard_separate;
-    o.controller_preset = s.controller_preset, o.button_icons = s.button_icons, o.muted = s.muted, o.fullscreen = s.fullscreen;
+    o.controller_preset = s.controller_preset, o.button_icons = s.button_icons, o.muted = s.muted,
+        o.mute_in_background = s.mute_in_background, o.fullscreen = s.fullscreen;
     o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile, o.discord_rpc = s.discord_rpc;
     o.metric_fps = s.metric_fps, o.metric_one_percent_low = s.metric_one_percent_low;
     o.metric_game_speed = s.metric_game_speed, o.metric_frametime_graph = s.metric_frametime_graph;
@@ -363,7 +364,7 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.speedrun_timer_position = s.speedrun_timer_position, o.speedrun_timer_size = s.speedrun_timer_size;
     o.speedrun_timer_color = s.speedrun_timer_color;
     o.upscaler = s.upscaler, o.fsr_sharpness = s.fsr_sharpness, o.antialiasing = s.antialiasing;
-    o.anisotropy = s.anisotropy, o.rumble = s.rumble, o.vsync = s.vsync, o.frame_cap = s.frame_cap;
+    o.anisotropy = s.anisotropy, o.shadow_scale = s.shadow_scale, o.rumble = s.rumble, o.vsync = s.vsync, o.frame_cap = s.frame_cap;
     o.hdr = s.hdr, o.hdr_peak = s.hdr_peak, o.hdr_paper_white = s.hdr_paper_white;
     o.hdr_highlights = s.hdr_highlights, o.hdr_highlight_start = s.hdr_highlight_start, o.hdr_sdr_eotf = s.hdr_sdr_eotf;
     o.hdr_exposure = s.hdr_exposure, o.hdr_contrast = s.hdr_contrast, o.hdr_shadows = s.hdr_shadows;
@@ -380,7 +381,8 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.language = o.language, s.theme = o.theme, s.game_language = o.game_language, s.memory_limit_gb = o.memory_limit_gb;
     s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask, s.pad_presets = o.pad_presets;
     s.keyboard_separate = o.keyboard_separate;
-    s.controller_preset = o.controller_preset, s.button_icons = o.button_icons, s.muted = o.muted, s.fullscreen = o.fullscreen;
+    s.controller_preset = o.controller_preset, s.button_icons = o.button_icons, s.muted = o.muted,
+        s.mute_in_background = o.mute_in_background, s.fullscreen = o.fullscreen;
     s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile, s.discord_rpc = o.discord_rpc;
     s.metric_fps = o.metric_fps, s.metric_one_percent_low = o.metric_one_percent_low;
     s.metric_game_speed = o.metric_game_speed, s.metric_frametime_graph = o.metric_frametime_graph;
@@ -389,7 +391,7 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.speedrun_timer_position = o.speedrun_timer_position, s.speedrun_timer_size = o.speedrun_timer_size;
     s.speedrun_timer_color = o.speedrun_timer_color;
     s.upscaler = o.upscaler, s.fsr_sharpness = o.fsr_sharpness, s.antialiasing = o.antialiasing;
-    s.anisotropy = o.anisotropy, s.rumble = o.rumble, s.vsync = o.vsync, s.frame_cap = o.frame_cap;
+    s.anisotropy = o.anisotropy, s.shadow_scale = o.shadow_scale, s.rumble = o.rumble, s.vsync = o.vsync, s.frame_cap = o.frame_cap;
     s.hdr = o.hdr, s.hdr_peak = o.hdr_peak, s.hdr_paper_white = o.hdr_paper_white;
     s.hdr_highlights = o.hdr_highlights, s.hdr_highlight_start = o.hdr_highlight_start, s.hdr_sdr_eotf = o.hdr_sdr_eotf;
     s.hdr_exposure = o.hdr_exposure, s.hdr_contrast = o.hdr_contrast, s.hdr_shadows = o.hdr_shadows;
@@ -488,7 +490,8 @@ static void save_pc_settings() {
     file << "width=" << g_pc_settings.width << "\nheight=" << g_pc_settings.height << "\nvolume=" << g_pc_settings.volume
          << "\naudio_mode=" << g_pc_settings.audio_mode << "\nstereo_separation=" << g_pc_settings.stereo_separation
          << "\naspect_ratio=" << std::max(0, g_pc_settings.aspect_ratio)
-         << "\ninternal_resolution=" << g_pc_settings.internal_resolution << "\nmuted=" << g_pc_settings.muted << "\nfullscreen=" << g_pc_settings.fullscreen
+         << "\ninternal_resolution=" << g_pc_settings.internal_resolution << "\nmuted=" << g_pc_settings.muted
+         << "\nmute_in_background=" << g_pc_settings.mute_in_background << "\nfullscreen=" << g_pc_settings.fullscreen
          << "\nalways_on_top=" << g_pc_settings.always_on_top << "\nlanguage=" << g_pc_settings.language
          << "\ntheme=" << g_pc_settings.theme
          << "\ngame_language=" << g_pc_settings.game_language
@@ -511,6 +514,7 @@ static void save_pc_settings() {
          << "\ncontroller_custom_mask=" << g_pc_settings.controller_custom_mask
          << "\nupscaler=" << g_pc_settings.upscaler << "\nfsr_sharpness=" << g_pc_settings.fsr_sharpness
          << "\nantialiasing=" << g_pc_settings.antialiasing << "\nanisotropy=" << g_pc_settings.anisotropy
+         << "\nshadow_scale=" << g_pc_settings.shadow_scale
          << "\nrumble=" << g_pc_settings.rumble << "\nvsync=" << g_pc_settings.vsync
          << "\nframe_cap=" << g_pc_settings.frame_cap
          << "\nhdr=" << g_pc_settings.hdr << "\nhdr_peak=" << g_pc_settings.hdr_peak
@@ -552,6 +556,8 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         else if (std::sscanf(line.c_str(), "stereo_separation=%d", &value) == 1)
             state.stereo_separation = std::clamp(value, 0, 100);
         else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) state.muted = value != 0;
+        else if (std::sscanf(line.c_str(), "mute_in_background=%d", &value) == 1)
+            state.mute_in_background = value != 0;
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) state.fullscreen = value != 0;
         else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) state.always_on_top = value != 0;
         else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) state.language = std::clamp(value, 0, 12);
@@ -598,6 +604,8 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
             state.antialiasing = std::clamp(value, 0, 1);
         else if (std::sscanf(line.c_str(), "anisotropy=%d", &value) == 1)
             state.anisotropy = std::clamp(value, 0, 16);
+        else if (std::sscanf(line.c_str(), "shadow_scale=%d", &value) == 1)
+            state.shadow_scale = (value == 2 || value == 4) ? value : 1;
         else if (std::sscanf(line.c_str(), "rumble=%d", &value) == 1) state.rumble = std::clamp(value, 0, 100);
         else if (std::sscanf(line.c_str(), "vsync=%d", &value) == 1) state.vsync = std::clamp(value, 0, 3);
         else if (std::sscanf(line.c_str(), "hdr=%d", &value) == 1) state.hdr = value != 0;
@@ -688,6 +696,7 @@ static void apply_loaded_pc_settings(const PcMenuState& state) {
     nx::nvn::set_fsr(state.upscaler == 1, float(state.fsr_sharpness) / 100.0f);
     nx::nvn::set_fxaa(state.antialiasing == 1);
     nx::nvn::set_anisotropy(state.anisotropy);
+    nx::nvn::set_shadow_scale(state.shadow_scale);
     nx::nvn::set_vsync(state.vsync);
     nx::nvn::set_frame_cap(state.frame_cap);
     nx::nvn::set_hdr(state.hdr != 0, state.hdr_peak, state.hdr_paper_white, state.hdr_highlights,
@@ -723,12 +732,16 @@ void reload_pc_settings() {
     if (overlay::enabled()) overlay::sync(to_overlay(fresh));
 }
 
+static std::atomic<bool> g_window_focused{true};
+
 static void set_game_volume() {
     if (IXAudio2MasteringVoice* voice = g_master_voice.load()) {
+        const bool muted = g_pc_settings.muted ||
+                           (g_pc_settings.mute_in_background && !g_window_focused.load(std::memory_order_relaxed));
         const int percent = std::clamp(g_pc_settings.volume, 0, 200);
         const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
                                           : float(percent) / 100.0f;
-        voice->SetVolume(g_pc_settings.muted ? 0.0f : gain, XAUDIO2_COMMIT_NOW);
+        voice->SetVolume(muted ? 0.0f : gain, XAUDIO2_COMMIT_NOW);
     }
 }
 
@@ -944,6 +957,7 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     nx::nvn::set_fsr(g_pc_settings.upscaler == 1, float(g_pc_settings.fsr_sharpness) / 100.0f);
     nx::nvn::set_fxaa(g_pc_settings.antialiasing == 1);
     nx::nvn::set_anisotropy(g_pc_settings.anisotropy);
+    nx::nvn::set_shadow_scale(g_pc_settings.shadow_scale);
     nx::nvn::set_vsync(g_pc_settings.vsync);
     nx::nvn::set_frame_cap(g_pc_settings.frame_cap);
     nx::nvn::set_hdr(g_pc_settings.hdr != 0, g_pc_settings.hdr_peak, g_pc_settings.hdr_paper_white,
@@ -1013,7 +1027,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         switch (msg) {
             case WM_KEYDOWN:
             case WM_KEYUP:
-                if (w == VK_F1 || w == VK_F11) break;  // handled below
+                if (w == VK_F1 || w == VK_F2 || w == VK_F11) break;  // handled below
                 if (msg == WM_KEYUP || !(l & (1ll << 30))) overlay::key_event(int(w), overlay_key(w), msg == WM_KEYDOWN);
                 return 0;
             case WM_CHAR: {
@@ -1030,6 +1044,14 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         }
     }
     switch (msg) {
+        case WM_ACTIVATEAPP:
+            g_window_focused.store(w != FALSE, std::memory_order_relaxed);
+            set_game_volume();
+            break;
+        case WM_ACTIVATE:
+            g_window_focused.store(LOWORD(w) != WA_INACTIVE, std::memory_order_relaxed);
+            set_game_volume();
+            break;
         case WM_MOVE:
         case WM_SIZE:
             metrics_reposition();
@@ -1091,6 +1113,10 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                     overlay::toggle();
                 else
                     pc_menu_toggle();
+                return 0;
+            }
+            if (w == VK_F2 && !(l & (1ll << 30))) {
+                nx::nvn::request_screenshot();
                 return 0;
             }
             if (w == VK_F11) toggle_fullscreen(h);

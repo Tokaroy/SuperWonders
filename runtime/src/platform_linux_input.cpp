@@ -61,6 +61,16 @@ std::mutex g_gamepad_lock;
 std::array<SDL_Gamepad*, 4> g_gamepads{};
 std::array<std::atomic<uint64_t>, 4> g_pending_rumble{};
 std::atomic<int> g_rumble_strength{100};  // percent
+std::atomic<bool> g_window_focused{true};
+
+void update_audio_gain(const overlay::Settings& s) {
+    if (!g_stream) return;
+    const bool muted = s.muted || (s.mute_in_background && !g_window_focused.load(std::memory_order_relaxed));
+    const int percent = std::clamp(s.volume, 0, 200);
+    const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
+                                      : float(percent) / 100.0f;
+    SDL_SetAudioStreamGain(g_stream, muted ? 0.0f : gain);
+}
 
 std::mutex g_posted_lock;
 std::deque<std::function<void()>> g_posted;
@@ -84,12 +94,7 @@ void apply_settings(const overlay::Settings& s, bool persist) {
         for (size_t slot = 0; slot < 4; ++slot) g_pad_binding[slot][a] = overlay::controller_binding_for_slot(s, slot, a);
     }
     for (size_t i = 0; i < 4; ++i) g_assignments[i] = s.player_devices[i];
-    if (g_stream) {
-        const int percent = std::clamp(s.volume, 0, 200);
-        const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
-                                          : float(percent) / 100.0f;
-        SDL_SetAudioStreamGain(g_stream, s.muted ? 0.0f : gain);
-    }
+    update_audio_gain(s);
     nx::set_audio_output(s.audio_mode, s.stereo_separation);
     nx::set_internal_resolution_preset(s.internal_resolution);  // read at the next boot
     int nw = s.width, nh = s.height;
@@ -102,6 +107,7 @@ void apply_settings(const overlay::Settings& s, bool persist) {
     nvn::set_fsr(s.upscaler == 1, float(s.fsr_sharpness) / 100.0f);
     nvn::set_fxaa(s.antialiasing == 1);
     nvn::set_anisotropy(s.anisotropy);
+    nvn::set_shadow_scale(s.shadow_scale);
     nvn::set_vsync(s.vsync);
     nvn::set_frame_cap(s.frame_cap);
     nvn::set_hdr(s.hdr != 0, s.hdr_peak, s.hdr_paper_white, s.hdr_highlights, s.hdr_highlight_start);
@@ -384,6 +390,10 @@ bool handle_event(const SDL_Event& e) {
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP: {
             const bool down = e.type == SDL_EVENT_KEY_DOWN;
+            if (down && !e.key.repeat && e.key.scancode == SDL_SCANCODE_F2) {
+                nvn::request_screenshot();
+                return true;
+            }
             if (down && e.key.scancode == SDL_SCANCODE_F11 && g_window) {
                 bool full = !(SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN);
                 SDL_SetWindowFullscreen(g_window, full);
@@ -545,6 +555,12 @@ void sample_input() {
         if (g_connected[i] != connected[i])
             log("hid: player %zu %s", i + 1, connected[i] ? "connected" : "disconnected");
     g_connected = connected;
+}
+
+void linux_host::set_window_focused(bool focused) {
+    g_window_focused.store(focused, std::memory_order_relaxed);
+    std::lock_guard lk(g_settings_lock);
+    update_audio_gain(g_settings);
 }
 
 }  // namespace linux_host

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <random>
@@ -121,19 +122,15 @@ std::filesystem::path save_path(const std::filesystem::path& root, const User& u
     std::snprintf(uid, sizeof uid, "%016llx%016llx", (unsigned long long)user.hi, (unsigned long long)user.lo);
     return root / "user" / "profiles" / uid / "save";
 }
-bool copy_save(const std::filesystem::path& root, const User& source, const User& destination,
-               std::filesystem::path& backup, std::string& error) {
+static bool copy_save_dir(const std::filesystem::path& from, const std::filesystem::path& to,
+                          std::filesystem::path& backup, std::string& error) {
     namespace fs = std::filesystem;
     backup.clear(); error.clear();
-    if (source.lo == destination.lo && source.hi == destination.hi) {
-        error = "Choose two different profiles."; return false;
-    }
-    const auto from = save_path(root, source), to = save_path(root, destination);
     std::error_code ec;
     if (fs::is_symlink(fs::symlink_status(from, ec)) || ec || !fs::is_directory(from, ec) || ec) {
-        error = "The source profile has no accessible save."; return false;
+        error = "The source save directory is not accessible."; return false;
     }
-    // Refuse links and special files so copies cannot escape their profile directories.
+    // Refuse links and special files so copies cannot escape their directories.
     for (fs::recursive_directory_iterator it(from, ec), end; !ec && it != end; it.increment(ec)) {
         const auto status = it->symlink_status(ec);
         if (ec || (!fs::is_regular_file(status) && !fs::is_directory(status))) {
@@ -183,6 +180,128 @@ bool copy_save(const std::filesystem::path& root, const User& source, const User
         error = "Could not install the copied save."; return false;
     }
     return true;
+}
+
+bool copy_save(const std::filesystem::path& root, const User& source, const User& destination,
+               std::filesystem::path& backup, std::string& error) {
+    if (source.lo == destination.lo && source.hi == destination.hi) {
+        backup.clear();
+        error = "Choose two different profiles.";
+        return false;
+    }
+    return copy_save_dir(save_path(root, source), save_path(root, destination), backup, error);
+}
+
+bool import_save(const std::filesystem::path& root, const std::filesystem::path& source_dir,
+                 const User& destination, std::filesystem::path& backup, std::string& error) {
+    namespace fs = std::filesystem;
+    backup.clear(); error.clear();
+    auto has_sav = [](const fs::path& dir) {
+        std::error_code ec;
+        if (!fs::is_directory(dir, ec) || ec) return false;
+        for (const auto& entry : fs::directory_iterator(dir, ec)) {
+            if (!ec && entry.is_regular_file(ec) && entry.path().extension() == ".sav") return true;
+        }
+        return false;
+    };
+    fs::path from = source_dir;
+    if (!has_sav(from)) {
+        if (has_sav(source_dir / "0")) from = source_dir / "0";
+        else {
+            error = "Selected folder does not contain Wonder save files (*.sav).";
+            return false;
+        }
+    }
+    return copy_save_dir(from, save_path(root, destination), backup, error);
+}
+
+std::vector<EmulatorSave> detect_emulator_saves() {
+    namespace fs = std::filesystem;
+    std::vector<EmulatorSave> out;
+    std::error_code ec;
+
+    auto is_wonder_save = [](const fs::path& dir) {
+        std::error_code lec;
+        if (!fs::is_directory(dir, lec) || lec) return false;
+        return fs::is_regular_file(dir / "game_data.sav", lec) && !lec &&
+               fs::is_regular_file(dir / "game_account.sav", lec) && !lec;
+    };
+    auto add_unique = [&](std::string label, const fs::path& p) {
+        const fs::path norm = p.lexically_normal();
+        for (const auto& existing : out) {
+            if (existing.path == norm) return;
+        }
+        out.push_back({std::move(label), norm});
+    };
+    auto short_id = [](const std::string& id) {
+        if (id.size() <= 8) return id;
+        return id.substr(0, 4) + "..." + id.substr(id.size() - 4);
+    };
+
+    std::vector<fs::path> eden_roots;
+    std::vector<fs::path> ryu_roots;
+#ifdef _WIN32
+    if (const char* appdata = std::getenv("APPDATA"); appdata && *appdata) {
+        const fs::path base(appdata);
+        eden_roots.push_back(base / "eden" / "nand" / "user" / "save");
+        ryu_roots.push_back(base / "Ryujinx" / "bis" / "user" / "save");
+        ryu_roots.push_back(base / "Ryubing" / "bis" / "user" / "save");
+    }
+#else
+    const char* home = std::getenv("HOME");
+    const char* xdg_data = std::getenv("XDG_DATA_HOME");
+    const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg_data && *xdg_data) eden_roots.push_back(fs::path(xdg_data) / "eden" / "nand" / "user" / "save");
+    else if (home && *home) eden_roots.push_back(fs::path(home) / ".local" / "share" / "eden" / "nand" / "user" / "save");
+    if (xdg_cfg && *xdg_cfg) {
+        ryu_roots.push_back(fs::path(xdg_cfg) / "Ryujinx" / "bis" / "user" / "save");
+        ryu_roots.push_back(fs::path(xdg_cfg) / "Ryubing" / "bis" / "user" / "save");
+    } else if (home && *home) {
+        ryu_roots.push_back(fs::path(home) / ".config" / "Ryujinx" / "bis" / "user" / "save");
+        ryu_roots.push_back(fs::path(home) / ".config" / "Ryubing" / "bis" / "user" / "save");
+    }
+#endif
+
+    for (const auto& save_root : eden_roots) {
+        ec.clear();
+        if (!fs::is_directory(save_root, ec) || ec) continue;
+        for (const auto& acct : fs::directory_iterator(save_root, ec)) {
+            if (ec) break;
+            std::error_code dec;
+            if (!acct.is_directory(dec) || dec) continue;
+            for (const auto& uid_dir : fs::directory_iterator(acct.path(), dec)) {
+                if (dec) break;
+                std::error_code uec;
+                if (!uid_dir.is_directory(uec) || uec) continue;
+                for (const char* tid : {"010015100B514000", "010015100b514000"}) {
+                    const fs::path candidate = uid_dir.path() / tid;
+                    if (is_wonder_save(candidate)) {
+                        add_unique("Eden (" + short_id(uid_dir.path().filename().string()) + ")", candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    for (const auto& save_root : ryu_roots) {
+        ec.clear();
+        if (!fs::is_directory(save_root, ec) || ec) continue;
+        for (const auto& slot_parent : fs::directory_iterator(save_root, ec)) {
+            if (ec) break;
+            std::error_code sec;
+            if (!slot_parent.is_directory(sec) || sec) continue;
+            const fs::path slot0 = slot_parent.path() / "0";
+            const fs::path slot1 = slot_parent.path() / "1";
+            const fs::path candidate = is_wonder_save(slot0) ? slot0 : (is_wonder_save(slot1) ? slot1 : fs::path{});
+            if (!candidate.empty()) {
+                std::string id = slot_parent.path().filename().string();
+                size_t nz = id.find_first_not_of('0');
+                if (nz != std::string::npos) id = id.substr(nz);
+                add_unique("Ryubing (save " + id + ")", candidate);
+            }
+        }
+    }
+    return out;
 }
 
 }

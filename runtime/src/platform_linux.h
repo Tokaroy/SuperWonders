@@ -17,5 +17,6 @@ bool handle_event(const SDL_Event& e);  // keys and mouse (F11, the overlay menu
 void run_posted();            // settings work posted by other threads (window size, fullscreen)
 // The window's first size and fullscreen state from the settings.
 void initial_window(int& w, int& h, bool& fullscreen);
+void set_window_focused(bool focused);
 
 }  // namespace nx::plat::linux_host

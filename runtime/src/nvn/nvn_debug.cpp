@@ -3,14 +3,18 @@
 // is blitted to RGBA8 first, so float and packed formats come out as the GPU would display them (clamped to 0..1).
 // Runs under the GPU lock, after the frame's work completed, on its own command buffer.
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <map>
 #include <string>
 #include <vector>
 
+#include "../../../third_party/stb/stb_image_write.h"
 #include "nvn_vk.h"
+#include "overlay/overlay.h"
 #include "platform.h"
 #include "play.h"
 
@@ -325,6 +329,72 @@ void frame_dump_write(const GpuImage& img, uint64_t frame) {
         std::fclose(f);
     }
     p_vkUnmapMemory(vk_device(), g_readback.memory);
+}
+
+namespace {
+std::atomic<bool> g_screenshot_pending{false};
+}  // namespace
+
+void request_screenshot() { g_screenshot_pending.store(true, std::memory_order_release); }
+bool take_screenshot_request() { return g_screenshot_pending.exchange(false, std::memory_order_acq_rel); }
+
+void screenshot_write_png(const GpuImage& img) {
+    void* p = nullptr;
+    if (p_vkMapMemory(vk_device(), g_readback.memory, 0, VK_WHOLE_SIZE, 0, &p) != VK_SUCCESS) return;
+    const uint8_t* src = static_cast<const uint8_t*>(p);
+    const bool bgra = img.format == VK_FORMAT_B8G8R8A8_UNORM;
+    std::vector<uint8_t> rgb(size_t(img.width) * img.height * 3);
+    for (size_t k = 0, n = size_t(img.width) * img.height; k < n; ++k) {
+        const uint8_t* s = src + k * 4;
+        rgb[k * 3 + 0] = bgra ? s[2] : s[0];
+        rgb[k * 3 + 1] = s[1];
+        rgb[k * 3 + 2] = bgra ? s[0] : s[2];
+    }
+    p_vkUnmapMemory(vk_device(), g_readback.memory);
+
+    std::vector<uint8_t> png;
+    auto append = [](void* ctx, void* data, int n) {
+        auto* out = static_cast<std::vector<uint8_t>*>(ctx);
+        auto* bytes = static_cast<const uint8_t*>(data);
+        out->insert(out->end(), bytes, bytes + n);
+    };
+    if (!stbi_write_png_to_func(append, &png, int(img.width), int(img.height), 3, rgb.data(), int(img.width) * 3) ||
+        png.empty())
+        return;
+
+    std::string dir = plat::data_root() + "/screenshots";
+    plat::make_dirs(dir);
+    std::time_t now = std::time(nullptr);
+    std::tm tm_now{};
+#if defined(_WIN32)
+    localtime_s(&tm_now, &now);
+#else
+    localtime_r(&now, &tm_now);
+#endif
+    static uint32_t seq = 0;
+    char name[96];
+    std::snprintf(name, sizeof name, "/wonder_%04d%02d%02d_%02d%02d%02d_%03u.png", tm_now.tm_year + 1900,
+                  tm_now.tm_mon + 1, tm_now.tm_mday, tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec, (++seq) % 1000u);
+    const std::string path = dir + name;
+    if (FILE* f = plat::fopen_utf8(path, "wb")) {
+        std::fwrite(png.data(), 1, png.size(), f);
+        std::fclose(f);
+        log("nvn: screenshot saved: %s (%ux%u)", path.c_str(), img.width, img.height);
+        // Build a crisp downsampled RGBA preview thumbnail for the top-right overlay toast.
+        const int tw = 192;
+        const int th = std::clamp(int(std::lround(double(tw) * double(img.height) / std::max(1u, img.width))), 32, 192);
+        std::vector<uint8_t> thumb(size_t(tw) * th * 4);
+        for (int y = 0; y < th; ++y) {
+            const uint32_t sy = std::min(img.height - 1, uint32_t((uint64_t(y) * img.height) / uint32_t(th)));
+            for (int x = 0; x < tw; ++x) {
+                const uint32_t sx = std::min(img.width - 1, uint32_t((uint64_t(x) * img.width) / uint32_t(tw)));
+                const uint8_t* p_in = rgb.data() + (size_t(sy) * img.width + sx) * 3;
+                uint8_t* p_out = thumb.data() + (size_t(y) * tw + x) * 4;
+                p_out[0] = p_in[0], p_out[1] = p_in[1], p_out[2] = p_in[2], p_out[3] = 255;
+            }
+        }
+        overlay::notify_screenshot(thumb.data(), tw, th);
+    }
 }
 
 // ---- GPU profile (NX_GPU_PROFILE=1) --------------------------------------------------------------------------------

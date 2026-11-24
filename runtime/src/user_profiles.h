@@ -25,4 +25,11 @@ std::filesystem::path save_path(const std::filesystem::path& root, const User& u
 // Copies through a staging directory and preserves any old destination as a sibling backup.
 bool copy_save(const std::filesystem::path& root, const User& source, const User& destination,
                std::filesystem::path& backup, std::string& error);
+struct EmulatorSave {
+    std::string label;
+    std::filesystem::path path;
+};
+std::vector<EmulatorSave> detect_emulator_saves();
+bool import_save(const std::filesystem::path& root, const std::filesystem::path& source_dir,
+                 const User& destination, std::filesystem::path& backup, std::string& error);
 }

@@ -29,26 +29,39 @@ uint64_t simulated_image_memory_budget() {
     return bytes;
 }
 
+std::atomic<int> g_shadow_scale{1};
+
+int shadow_scale_multiplier() {
+    if (const char* e = std::getenv("NX_SHADOW_SCALE"); e && *e) {
+        int v = std::atoi(e);
+        if (v == 1 || v == 2 || v == 4) return v;
+    }
+    int v = g_shadow_scale.load(std::memory_order_relaxed);
+    return (v == 2 || v == 4) ? v : 1;
+}
+
 float render_scale_for(const Texture& texture) {
     const uint32_t target_width = internal_resolution_target_width();
-    if (!target_width) return 1.0f;  // Original / dynamic
-    static float scene_scale = 0.0f;  // the last full-size game target determines scale for its smaller post passes
-    if (scene_scale == 0.0f) scene_scale = float(target_width) / 1920.0f;
-    const uint64_t ratio_width = uint64_t(texture.width) * 9, ratio_height = uint64_t(texture.height) * 16;
     const bool render_target = (texture.flags & 0x8) || texture.render_target.load(std::memory_order_relaxed);
     const bool eligible = render_target && texture.levels <= 1 && texture.target == 1 && texture.width >= 16 &&
                           texture.height >= 9;
+    // Wonder's D24 shadow maps (NVN format 0x32) are square and track the guest's dynamic scene size
+    // at about 16/15 of its width. Keep their host images and depth-only viewports at the same scale
+    // as the scene (times any user shadow map multiplier); leaving them at 1.0 while scaling 16:9 targets misaligns shadows.
+    const bool shadow_depth = eligible && (texture.flags & 0x8) && texture.format == 0x32 &&
+                              texture.width == texture.height && texture.width >= 1360;
+    const float shadow_mult = float(shadow_scale_multiplier());
+    if (!target_width) return shadow_depth ? shadow_mult : 1.0f;  // Original / dynamic
+    static float scene_scale = 0.0f;  // the last full-size game target determines scale for its smaller post passes
+    if (scene_scale == 0.0f) scene_scale = float(target_width) / 1920.0f;
+    const uint64_t ratio_width = uint64_t(texture.width) * 9, ratio_height = uint64_t(texture.height) * 16;
     const bool wide = ratio_width + 16 >= ratio_height && ratio_width <= ratio_height + 16;
     if (eligible && wide && (texture.flags & 0x8) && texture.width >= 1360) {
         scene_scale = float(target_width) / float(texture.width);
         return scene_scale;
     }
-    // Wonder's D24 shadow maps (NVN format 0x32) are square and track the guest's dynamic scene size
-    // at about 16/15 of its width. Keep their host images and depth-only viewports at the same scale
-    // as the scene; leaving these images at 1.0 while scaling 16:9 scene targets misaligns shadows.
-    const bool shadow_depth = eligible && (texture.flags & 0x8) && texture.format == 0x32 &&
-                              texture.width == texture.height && texture.width >= 1360;
-    if (shadow_depth || (eligible && wide)) return scene_scale;
+    if (shadow_depth) return scene_scale * shadow_mult;
+    if (eligible && wide) return scene_scale;
     return 1.0f;
 }
 
@@ -199,6 +212,20 @@ GpuImage* image_of(uint64_t guest) {
     img->width = t->uw ? uw_host_width(*t, img->render_scale)
                        : std::max(1u, uint32_t(std::lround(img->logical_width * img->render_scale)));
     img->height = std::max(1u, uint32_t(std::lround(img->logical_height * img->render_scale)));
+    if (img->render_scale > 1.0f && vk_physical()) {
+        static const uint32_t max_dim = [] {
+            VkPhysicalDeviceProperties props{};
+            p_vkGetPhysicalDeviceProperties(vk_physical(), &props);
+            return std::max(4096u, props.limits.maxImageDimension2D);
+        }();
+        if (img->width > max_dim || img->height > max_dim) {
+            const float clamp_scale = std::min(float(max_dim) / float(img->logical_width),
+                                               float(max_dim) / float(img->logical_height));
+            img->render_scale = clamp_scale;
+            img->width = std::max(1u, uint32_t(std::lround(img->logical_width * img->render_scale)));
+            img->height = std::max(1u, uint32_t(std::lround(img->logical_height * img->render_scale)));
+        }
+    }
     img->levels = std::max(1u, t->levels);
     uint32_t depth = std::max(1u, t->target == 3 && !one_d && t->depth <= 1 ? t->height : t->depth);  // GL-style layers
     bool is3d = t->target == 2, cube = t->target == 8 || t->target == 9;
@@ -397,6 +424,10 @@ GpuImage* image_of(uint64_t guest) {
     t->image = img;
     if (t->memory) g_live_images[key] = img;
     return img.get();
+}
+
+void set_shadow_scale(int mult) {
+    g_shadow_scale.store((mult == 2 || mult == 4) ? mult : 1, std::memory_order_relaxed);
 }
 
 GpuImage* latest_overlapping_shadow_image(uint64_t guest, GpuImage* image) {

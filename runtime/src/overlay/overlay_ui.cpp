@@ -1,6 +1,7 @@
 // The overlay's look (see overlay_ui.h). Style sizes follow Savage Wind's menu (runtime/ui/menu.mm style_init, MIT);
 // the colours are SuperWonders' own and the font is Nunito (SIL OFL 1.1, third_party/fonts/Nunito).
 #include "overlay/overlay_ui.h"
+#include "overlay/overlay_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -397,6 +398,17 @@ float smoothstep(float t) {
 
 // ---- notices ----
 
+struct ShotToast {
+    bool active = false;
+    bool pending_upload = false;
+    uint64_t at_ns = 0;
+    int w = 0, h = 0;
+    std::vector<uint8_t> rgba;
+    uint64_t tex_id = 0;
+};
+ShotToast g_shot;
+constexpr double kShotSeconds = 2.8;
+
 void notify(const char* text) {
     if (!text || !*text) return;
     std::lock_guard lk(g_notice_lock);
@@ -409,29 +421,93 @@ void notify(const char* text) {
     while (g_notices.size() > 3) g_notices.pop_front();
 }
 
+void notify_screenshot(const uint8_t* rgba, int w, int h) {
+    if (!rgba || w <= 0 || h <= 0) return;
+    std::lock_guard lk(g_notice_lock);
+    g_shot.rgba.assign(rgba, rgba + size_t(w) * size_t(h) * 4);
+    g_shot.w = w;
+    g_shot.h = h;
+    g_shot.at_ns = plat::monotonic_ns();
+    g_shot.pending_upload = true;
+    g_shot.active = true;
+}
+
 bool notices_active() {
     std::lock_guard lk(g_notice_lock);
     const uint64_t now = plat::monotonic_ns();
     while (!g_notices.empty() && double(now - g_notices.front().at_ns) / 1e9 > kNoticeSeconds) g_notices.pop_front();
-    return !g_notices.empty();
+    if (g_shot.active && double(now - g_shot.at_ns) / 1e9 > kShotSeconds) g_shot.active = false;
+    return !g_notices.empty() || g_shot.active;
 }
 
 // Savage Wind's "Picture saved" notice (menu.mm photo_overlay_draw): a dark card in the bottom-right corner that fades
 // out over its last half second; here it also slides in from the right.
 void draw_notices(float height) {
     std::deque<Notice> list;
+    bool shot_active = false;
+    uint64_t shot_at_ns = 0;
+    int shot_w = 0, shot_h = 0;
+    uint64_t shot_tex = 0;
     {
         std::lock_guard lk(g_notice_lock);
         list = g_notices;
+        if (g_shot.pending_upload) {
+            if (g_shot.tex_id) {
+                vk_free_rgba_texture(g_shot.tex_id);
+                g_shot.tex_id = 0;
+            }
+            if (!g_shot.rgba.empty() && g_shot.w > 0 && g_shot.h > 0)
+                g_shot.tex_id = vk_upload_rgba_texture(g_shot.rgba.data(), g_shot.w, g_shot.h);
+            g_shot.rgba.clear();
+            g_shot.pending_upload = false;
+        }
+        if (g_shot.active) {
+            shot_active = true;
+            shot_at_ns = g_shot.at_ns;
+            shot_w = g_shot.w;
+            shot_h = g_shot.h;
+            shot_tex = g_shot.tex_id;
+        }
     }
-    if (list.empty()) return;
     const float k = std::clamp(height / 1080.0f, 0.5f, 3.0f);
     const ImVec2 ds = ImGui::GetIO().DisplaySize;
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImFont* f = body();
+    const uint64_t now = plat::monotonic_ns();
+
+    if (shot_active && shot_w > 0 && shot_h > 0) {
+        const float age = float(double(now - shot_at_ns) / 1e9);
+        const float in = smoothstep(age / 0.24f);
+        const float out = age > float(kShotSeconds - 0.30) ? 1.0f - smoothstep((age - float(kShotSeconds - 0.30)) / 0.30f) : 1.0f;
+        const float slide = std::min(in, out);
+        const float fs = ImGui::GetFontSize() * 0.92f;
+        const float pad = 12 * k;
+        const float thumb_h = 54 * k;
+        const float thumb_w = std::clamp(thumb_h * float(shot_w) / float(shot_h), 54 * k, 128 * k);
+        const char* label = "Screenshot Saved";
+        const ImVec2 ts = f->CalcTextSizeA(fs, 320 * k, 320 * k, label);
+        const float card_w = pad + 5 * k + thumb_w + 14 * k + ts.x + pad * 1.3f;
+        const float card_h = thumb_h + pad * 2.0f;
+        const float x = ds.x - 28 * k - card_w;
+        const float y_rest = 24 * k;
+        const float y_hidden = -card_h - 12 * k;
+        const float y = y_hidden + (y_rest - y_hidden) * slide;
+        const ImVec2 p0(x, y), p1(x + card_w, y + card_h);
+        dl->AddRectFilled(p0, p1, fade(theme().card, slide * 0.96f), 10 * k);
+        dl->AddRect(p0, p1, fade(theme().accent, slide * 0.45f), 10 * k, 0, std::max(1.0f, k));
+        dl->AddRectFilled(p0, ImVec2(p0.x + 5 * k, p1.y), fade(theme().accent, slide), 10 * k, ImDrawFlags_RoundCornersLeft);
+        const ImVec2 tp0(p0.x + pad + 4 * k, p0.y + pad);
+        const ImVec2 tp1(tp0.x + thumb_w, tp0.y + thumb_h);
+        if (shot_tex)
+            dl->AddImageRounded(ImTextureID(uintptr_t(shot_tex)), tp0, tp1, {0, 0}, {1, 1}, fade(IM_COL32_WHITE, slide), 6 * k);
+        else
+            dl->AddRectFilled(tp0, tp1, fade(theme().panel, slide), 6 * k);
+        dl->AddText(f, fs, ImVec2(tp1.x + 14 * k, p0.y + (card_h - ts.y) * 0.5f), fade(theme().text, slide), label);
+    }
+
+    if (list.empty()) return;
     const float fs = ImGui::GetFontSize() * 0.9f, pad = 16 * k;
     float y = ds.y - 28 * k;
-    const uint64_t now = plat::monotonic_ns();
     for (auto it = list.rbegin(); it != list.rend(); ++it) {
         const float age = float(double(now - it->at_ns) / 1e9);
         const float in = smoothstep(age / 0.22f);

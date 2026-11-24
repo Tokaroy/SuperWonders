@@ -47,7 +47,7 @@ int row(const char* label, const std::string& value, bool changed, const char* d
     ImGui::PushID(label);
     if (g_indent) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + g_indent * 28 * g_k);
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float w = ImGui::GetContentRegionAvail().x, h = ImGui::GetFontSize() * 1.9f;
+    const float w = ImGui::GetContentRegionAvail().x, h = ImGui::GetFontSize() * 2.05f;
     if (out_p) *out_p = p;
     if (out_w) *out_w = w;
     if (out_h) *out_h = h;
@@ -152,12 +152,12 @@ void begin(const char* id, float height) {
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     ImGui::PushID(id);
     ImGui::BeginChild("##rows", ImVec2(avail.x * 0.54f, avail.y), ImGuiChildFlags_NavFlattened);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 5 * g_k));  // (rows close)
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 10 * g_k));
 }
 
 void section(const char* title) {
     const std::string t = upper(title);
-    if (ImGui::GetCursorPosY() > ImGui::GetStyle().WindowPadding.y + 1) ImGui::Dummy(ImVec2(0, 14 * g_k));
+    if (ImGui::GetCursorPosY() > ImGui::GetStyle().WindowPadding.y + 1) ImGui::Dummy(ImVec2(0, 20 * g_k));
     ImGui::SetWindowFontScale(0.76f);
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ui::theme().text_dim));
     ImGui::TextUnformatted(t.c_str());
@@ -167,7 +167,7 @@ void section(const char* title) {
     const float w = ImGui::GetContentRegionAvail().x;
     ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y - 2 * g_k), ImVec2(p.x + w, p.y - 2 * g_k),
                                         ui::fade(IM_COL32(255, 255, 255, 18)), std::max(1.0f, g_k));
-    ImGui::Dummy(ImVec2(0, 4 * g_k));
+    ImGui::Dummy(ImVec2(0, 8 * g_k));
 }
 
 bool toggle(const char* label, bool* v, bool def, const char* desc) {

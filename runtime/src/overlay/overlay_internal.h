@@ -40,7 +40,8 @@ void settings_changed(bool persist);
 bool progress_wanted();
 void draw_progress(float height);
 
-// overlay_vk.cpp: upload an RGBA8 image for ImGui rendering (returns ImTextureID as uint64_t, 0 on failure)
+// overlay_vk.cpp: upload/free an RGBA8 image for ImGui rendering (returns ImTextureID as uint64_t, 0 on failure)
 uint64_t vk_upload_rgba_texture(const uint8_t* rgba, int w, int h);
+void vk_free_rgba_texture(uint64_t tex_id);
 
 }  // namespace nx::overlay

@@ -52,6 +52,7 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "audio_mode=%d", &v) == 1) s.audio_mode = std::clamp(v, 0, 2);
         else if (std::sscanf(l, "stereo_separation=%d", &v) == 1) s.stereo_separation = std::clamp(v, 0, 100);
         else if (std::sscanf(l, "muted=%d", &v) == 1) s.muted = v != 0;
+        else if (std::sscanf(l, "mute_in_background=%d", &v) == 1) s.mute_in_background = v != 0;
         else if (std::sscanf(l, "fullscreen=%d", &v) == 1) s.fullscreen = v != 0;
         else if (std::sscanf(l, "always_on_top=%d", &v) == 1) s.always_on_top = v != 0;
         else if (std::sscanf(l, "language=%d", &v) == 1) s.language = std::clamp(v, 0, 12);
@@ -82,6 +83,7 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "fsr_sharpness=%d", &v) == 1) s.fsr_sharpness = std::clamp(v, 0, 200);
         else if (std::sscanf(l, "antialiasing=%d", &v) == 1) s.antialiasing = std::clamp(v, 0, 1);
         else if (std::sscanf(l, "anisotropy=%d", &v) == 1) s.anisotropy = std::clamp(v, 0, 16);
+        else if (std::sscanf(l, "shadow_scale=%d", &v) == 1) s.shadow_scale = (v == 2 || v == 4) ? v : 1;
         else if (std::sscanf(l, "rumble=%d", &v) == 1) s.rumble = std::clamp(v, 0, 100);
         else if (std::sscanf(l, "vsync=%d", &v) == 1) s.vsync = std::clamp(v, 0, 3);
         else if (std::sscanf(l, "frame_cap=%d", &v) == 1)
@@ -129,7 +131,8 @@ void save_settings(const std::string& path, const Settings& s) {
     f << "width=" << s.width << "\nheight=" << s.height << "\nvolume=" << s.volume
       << "\naudio_mode=" << s.audio_mode << "\nstereo_separation=" << s.stereo_separation
       << "\naspect_ratio=" << std::max(0, s.aspect_ratio)
-      << "\ninternal_resolution=" << s.internal_resolution << "\nmuted=" << s.muted << "\nfullscreen=" << s.fullscreen
+      << "\ninternal_resolution=" << s.internal_resolution << "\nmuted=" << s.muted
+      << "\nmute_in_background=" << s.mute_in_background << "\nfullscreen=" << s.fullscreen
       << "\nalways_on_top=" << s.always_on_top << "\nlanguage=" << s.language << "\ntheme=" << s.theme << "\ngame_language=" << s.game_language
       << "\ngame_language_version=2"
       << "\nmemory_limit_gb=" << s.memory_limit_gb << "\nlow_vram_profile=" << s.low_vram_profile
@@ -146,7 +149,7 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\nspeedrun_timer_color=" << s.speedrun_timer_color
       << "\ncontroller_custom_mask=" << s.controller_custom_mask
       << "\nupscaler=" << s.upscaler << "\nfsr_sharpness=" << s.fsr_sharpness << "\nantialiasing=" << s.antialiasing
-      << "\nanisotropy=" << s.anisotropy << "\nrumble=" << s.rumble << "\nvsync=" << s.vsync
+      << "\nanisotropy=" << s.anisotropy << "\nshadow_scale=" << s.shadow_scale << "\nrumble=" << s.rumble << "\nvsync=" << s.vsync
       << "\nframe_cap=" << s.frame_cap
       << "\nhdr=" << s.hdr << "\nhdr_peak=" << s.hdr_peak << "\nhdr_paper_white=" << s.hdr_paper_white
       << "\nhdr_highlights=" << s.hdr_highlights << "\nhdr_highlight_start=" << s.hdr_highlight_start
