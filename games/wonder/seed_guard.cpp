@@ -61,6 +61,7 @@ struct VersionLayout {
     uint64_t anm_delta_vel_y;
     uint64_t cam_scroll_update;
     uint64_t grav_scale_update;
+    uint64_t player_comp_calc;
 };
 
 void body_off(CPU& c);
@@ -71,6 +72,7 @@ void anm_driven_vel(CPU& c);
 void anm_delta_vel_y(CPU& c);
 void cam_scroll_update(CPU& c);
 void grav_scale_update(CPU& c);
+void player_comp_calc(CPU& c);
 
 Hook g_off = {"rigid body off",
               {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xf9400408, 0xf9400508, 0xf940fd09, 0xf9410528, 0xb4000348},
@@ -114,10 +116,14 @@ Hook g_grav_scale_update = {"PlayerSetGravityScale",
                             {0xd102c3ff, 0xfd0023ec, 0x6d052beb, 0x6d0623e9, 0xa9077bfd, 0xa9085ff8, 0xa90957f6, 0xa90a4ff4},
                             8,
                             grav_scale_update};
+Hook g_player_comp_calc = {"PlayerComponent::calc",
+                           {0xd10383ff, 0x6d0723e9, 0xa9087bfd, 0xa9096ffc, 0xa90a67fa, 0xa90b5ff8, 0xa90c57f6, 0xa90d4ff4},
+                           8,
+                           player_comp_calc};
 
 constexpr VersionLayout kVersions[] = {
-    {"1.0.0", 0x33326b8, 0x2b7238, 0x4d42f0, 0x16d877c, 0x16d87b4, 0x36427b0, 0x16553ac, 0x153d750, 0x6b7eb4, 0},
-    {"1.2.1", 0x34bbc88, 0x2dfb70, 0x4d4c28, 0x17fd50c, 0x17fd544, 0x37cf340, 0x177a76c, 0x16629bc, 0x6c55ac, 0x1653344},
+    {"1.0.0", 0x33326b8, 0x2b7238, 0x4d42f0, 0x16d877c, 0x16d87b4, 0x36427b0, 0x16553ac, 0x153d750, 0x6b7eb4, 0x152dfd4, 0x273868},
+    {"1.2.1", 0x34bbc88, 0x2dfb70, 0x4d4c28, 0x17fd50c, 0x17fd544, 0x37cf340, 0x177a76c, 0x16629bc, 0x6c55ac, 0x1653344, 0x2885a4},
 };
 
 uint64_t g_rigid_body_vtable = 0;
@@ -367,6 +373,39 @@ void grav_scale_update(CPU& c) {
     s_last_flag = flag_2a8;
 }
 
+void player_comp_calc(CPU& c) {
+    const uint64_t pc = c.x[0];
+    const uint64_t step_info = c.x[1];
+    const float ratio = step_info ? ld<float>(step_info + 4) : current_step_ratio();
+    if (!(ratio > 0.01f && ratio < 0.99f)) {
+        g_player_comp_calc.game(c);
+        return;
+    }
+    const int32_t c6cc_before = ld<int32_t>(pc + 0x6cc);
+    const int32_t c6d0_before = ld<int32_t>(pc + 0x6d0);
+    g_player_comp_calc.game(c);
+
+    // 0x2895c8 (1.2.1) truncates step_ratio (< 1.0 above 60 FPS) with fcvtzs to 0,
+    // freezing [player_comp+0x6cc] and [+0x6d0] at 0 (breaking Dolphin Kick AttackSensor
+    // StartFrame/EndFrame checks and other frame-counted player state checks).
+    const int32_t c6cc_after = ld<int32_t>(pc + 0x6cc);
+    const int32_t c6d0_after = ld<int32_t>(pc + 0x6d0);
+    struct Acc { uint64_t pc; float acc; };
+    static Acc s_accs[4]{};
+    float* acc = &s_accs[0].acc;
+    for (auto& slot : s_accs) {
+        if (slot.pc == pc) { acc = &slot.acc; break; }
+        if (slot.pc == 0) { slot.pc = pc; slot.acc = 0.0f; acc = &slot.acc; break; }
+    }
+    *acc += ratio;
+    const int32_t inc = static_cast<int32_t>(*acc);
+    *acc -= static_cast<float>(inc);
+    if (inc > 0) {
+        if (c6cc_after == c6cc_before) st<int32_t>(pc + 0x6cc, c6cc_after + inc);
+        if (c6d0_after == c6d0_before) st<int32_t>(pc + 0x6d0, c6d0_after + inc);
+    }
+}
+
 bool matches(uint64_t offset, const Hook& h) {
     const ModuleInfo* main = game_lib().main;
     if (!main || offset + sizeof(uint32_t) * h.code_words > main->text_size || (offset & 3u) != 0) return false;
@@ -405,7 +444,9 @@ void seed_guard_init() {
             log("wonder: high-FPS CourseCameraScroll::update_ fix on (%s)", v.version);
         }
         if (v.grav_scale_update && install(v.grav_scale_update, g_grav_scale_update))
-            log("wonder: high-FPS PlayerSetGravityScale diag on (%s)", v.version);
+            log("wonder: high-FPS PlayerSetGravityScale fix on (%s)", v.version);
+        if (v.player_comp_calc && install(v.player_comp_calc, g_player_comp_calc))
+            log("wonder: high-FPS PlayerComponent::calc counter fix on (%s)", v.version);
         break;
     }
 
