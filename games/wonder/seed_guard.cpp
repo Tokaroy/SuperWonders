@@ -21,6 +21,7 @@
 // vtables, so swapping their function-table entries sees every switch. The node's actor: node+8 -> +8; its type
 // name: actor+0x138 (a C string, "ItemWonderFinishWonderSead").
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -43,6 +44,7 @@ namespace {
 struct Hook {
     const char* what;
     uint32_t code[8];
+    int code_words = 8;
     Fn replacement;
     Fn game = nullptr;
 };
@@ -54,34 +56,72 @@ struct VersionLayout {
     uint64_t on;
     uint64_t hit_enter;
     uint64_t hit_update;
+    uint64_t step_info_ptr;
+    uint64_t anm_driven_vel;
+    uint64_t anm_delta_vel_y;
+    uint64_t cam_scroll_update;
+    uint64_t grav_scale_update;
 };
 
 void body_off(CPU& c);
 void body_on(CPU& c);
 void hit_enter(CPU& c);
 void hit_update(CPU& c);
+void anm_driven_vel(CPU& c);
+void anm_delta_vel_y(CPU& c);
+void cam_scroll_update(CPU& c);
+void grav_scale_update(CPU& c);
 
 Hook g_off = {"rigid body off",
               {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xf9400408, 0xf9400508, 0xf940fd09, 0xf9410528, 0xb4000348},
+              8,
               body_off};
 Hook g_on = {"rigid body on",
              {0xd10103ff, 0xa9027bfd, 0xa9034ff4, 0x910083fd, 0xf9400408, 0xf9400508, 0xf940fd09, 0xf9410528},
+             8,
              body_on};
 
 // IsHitInfoRepOut: enter +0xd0 and update +0x118; the result is written through node+0x30.
 Hook g_hit_enter = {"IsHitInfoRepOut enter",
                     {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xaa0003f3, 0x94000016, 0xb9401a68, 0x52b00009, 0x33007509},
+                    8,
                     hit_enter};
 Hook g_hit_update = {"IsHitInfoRepOut update",
                      {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xaa0003f3, 0x94000008, 0xb9401a68, 0x52b00009, 0x33007509},
+                     8,
                      hit_update};
 
+// GetAnmDrivenPosVel::calc and its sibling delta_y*60 helper:
+// both multiply the per-step animation delta by a hardcoded 60.0f instead of 60.0f / step_ratio,
+// under-scaling launch/exit velocity above 60 FPS (e.g. Course010 Wonder_Space / ItemWonderHole).
+Hook g_anm_driven_vel = {"GetAnmDrivenPosVel",
+                         {0xd10103ff, 0xfd000be8, 0xf90017f5, 0xa901fbfd, 0xa9034ff4, 0x910063fd, 0x9100c013, 0},
+                         7,
+                         anm_driven_vel};
+Hook g_anm_delta_vel_y = {"AnmDeltaVelY",
+                          {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0xf9400408, 0xaa0003f3, 0xf9400508, 0xf940fd00, 0},
+                          7,
+                          anm_delta_vel_y};
+// CourseCameraScroll::update_ (virtual) calls GameCourseCamera::calc, which computes
+// the vertical camera speed cap [cam+0xe4] from player delta_y (already O(step_ratio))
+// and clamps it to +-1.5 * step_ratio, then multiplies [cam+0xe4] by step_ratio a second
+// time (0x6c6a04 in 1.2.1), making vertical camera tracking O(step_ratio^2) above 60 FPS.
+Hook g_cam_scroll_update = {"CourseCameraScroll::update_",
+                            {0xd10203ff, 0xfd0013e8, 0xa9037bfd, 0xa90467fa, 0xa9055ff8, 0xa90657f6, 0xa9074ff4, 0x9100c3fd},
+                            8,
+                            cam_scroll_update};
+Hook g_grav_scale_update = {"PlayerSetGravityScale",
+                            {0xd102c3ff, 0xfd0023ec, 0x6d052beb, 0x6d0623e9, 0xa9077bfd, 0xa9085ff8, 0xa90957f6, 0xa90a4ff4},
+                            8,
+                            grav_scale_update};
+
 constexpr VersionLayout kVersions[] = {
-    {"1.0.0", 0x33326b8, 0x2b7238, 0x4d42f0, 0x16d877c, 0x16d87b4},
-    {"1.2.1", 0x34bbc88, 0x2dfb70, 0x4d4c28, 0x17fd50c, 0x17fd544},
+    {"1.0.0", 0x33326b8, 0x2b7238, 0x4d42f0, 0x16d877c, 0x16d87b4, 0x36427b0, 0x16553ac, 0x153d750, 0x6b7eb4, 0},
+    {"1.2.1", 0x34bbc88, 0x2dfb70, 0x4d4c28, 0x17fd50c, 0x17fd544, 0x37cf340, 0x177a76c, 0x16629bc, 0x6c55ac, 0x1653344},
 };
 
 uint64_t g_rigid_body_vtable = 0;
+uint64_t g_step_info_ptr = 0;
 bool g_hold_mode = false;               // NX_SEED_GUARD=60
 std::atomic<bool> g_landed{false};      // the seed has touched down since its appearance began
 std::atomic<uint64_t> g_kept{0};        // checks answered "touching" by the guard, this appearance
@@ -160,11 +200,178 @@ void body_on(CPU& c) {
     if (seed && seed == g_seed.load()) release("can be taken");
 }
 
+float current_step_ratio() {
+    if (!g_step_info_ptr) return 1.0f;
+    const uint64_t step_info = ld<uint64_t>(g_main + g_step_info_ptr);
+    if (!step_info) return 1.0f;
+    return ld<float>(step_info + 0x8);
+}
+
+void anm_driven_vel(CPU& c) {
+    const uint64_t node = c.x[0];
+    g_anm_driven_vel.game(c);
+    const float ratio = current_step_ratio();
+    if (!(ratio > 0.01f && ratio < 0.99f)) return;
+    const uint64_t dst = ld<uint64_t>(node + 0x30) & ~3ULL;
+    if (!dst) return;
+    const float inv = 1.0f / ratio;
+    const float vx = ld<float>(dst + 0x0) * inv;
+    const float vy = ld<float>(dst + 0x4) * inv;
+    const float vz = ld<float>(dst + 0x8) * inv;
+    st<float>(dst + 0x0, vx);
+    st<float>(dst + 0x4, vy);
+    st<float>(dst + 0x8, vz);
+    static int s_anm_log = 0;
+    if (vy > 10.0f && s_anm_log < 10) {
+        s_anm_log++;
+        log("wonder: anm_driven_vel vy=%.2f ratio=%.3f", vy, ratio);
+    }
+}
+
+void anm_delta_vel_y(CPU& c) {
+    const uint64_t node = c.x[0];
+    const uint32_t prev_bits = ld<uint32_t>(node + 0x48);
+    constexpr uint32_t kSentinel = 0x7fc01234u;
+    st<uint32_t>(node + 0x48, kSentinel);
+    g_anm_delta_vel_y.game(c);
+    if (ld<uint32_t>(node + 0x48) == kSentinel) {
+        st<uint32_t>(node + 0x48, prev_bits);
+        return;
+    }
+    const float ratio = current_step_ratio();
+    if (!(ratio > 0.01f && ratio < 0.99f)) return;
+    const float vy = ld<float>(node + 0x48) / ratio;
+    st<float>(node + 0x48, vy);
+    static int s_delta_log = 0;
+    if (vy > 10.0f && s_delta_log < 10) {
+        s_delta_log++;
+        log("wonder: anm_delta_vel_y vy=%.2f ratio=%.3f", vy, ratio);
+    }
+}
+
+void cam_scroll_update(CPU& c) {
+    const uint64_t cam = c.x[0];
+    const float ratio = current_step_ratio();
+    if (!(ratio > 0.01f && ratio < 0.99f)) {
+        g_cam_scroll_update.game(c);
+        return;
+    }
+    uint64_t pcam = 0;
+    if (uint64_t ai = ld<uint64_t>(cam + 8)) {
+        if (uint64_t actor = ld<uint64_t>(ai + 8)) {
+            if (uint64_t impl = ld<uint64_t>(actor + 0x1f8)) {
+                uint64_t comps = ld<uint64_t>(impl + 0x208);
+                uint32_t max_c = ld<uint32_t>(impl + 0x200);
+                if (comps && max_c > 0x42) pcam = ld<uint64_t>(comps + 0x210);
+            }
+        }
+    }
+    const float pcam_y_before = pcam ? ld<float>(pcam + 0x2c) : 0.0f;
+    const float e4_before = ld<float>(cam + 0xe4);
+    g_cam_scroll_update.game(c);
+    const float e4_after = ld<float>(cam + 0xe4);
+    const float delta = e4_after - e4_before;
+    if (std::fabs(delta) > 1e-6f) {
+        const float k = 1.0f - std::pow(0.75f, ratio);
+        const float target_scaled = e4_before + delta / k;
+        const float target_60 = target_scaled / ratio;
+        float step = k * (target_60 - e4_before);
+        if (step > 0.1f) step = 0.1f;
+        if (step < -0.1f) step = -0.1f;
+        st<float>(cam + 0xe4, e4_before + step);
+    }
+    // GameCourseCamera::calc clamps the vertical deadzone overshoot [cam+0xa4] to +-1.5 * step_ratio,
+    // then multiplies it by (1 - 0.5^step_ratio) (~0.159 at 240 FPS vs 0.5 at 60 FPS), capping vertical
+    // camera speed at ~14.3 u/s instead of 45 u/s. Restore the 60 Hz max vertical tracking speed.
+    if (pcam) {
+        const float a4 = ld<float>(cam + 0xa4);
+        if (std::fabs(a4) >= 1.5f * ratio - 1e-3f) {
+            const float pcam_y_after = ld<float>(pcam + 0x2c);
+            const float step_y = pcam_y_after - pcam_y_before;
+            const float scale = 0.5f / (1.0f - std::pow(0.5f, ratio));
+            float fixed_step = step_y * scale;
+            const float max_step = 0.75f * ratio;
+            if (fixed_step > max_step) fixed_step = max_step;
+            if (fixed_step < -max_step) fixed_step = -max_step;
+            const float extra_y = fixed_step - step_y;
+            if (std::fabs(extra_y) > 1e-6f) {
+                st<float>(pcam + 0x2c, pcam_y_before + fixed_step);
+                st<float>(pcam + 0x38, ld<float>(pcam + 0x38) + extra_y);
+            }
+        }
+    }
+}
+
+void grav_scale_update(CPU& c) {
+    const uint64_t node = c.x[0];
+    const uint8_t node_active = (ld<uint8_t>(node + 0x18) >> 1) & 1;
+    const float ratio = current_step_ratio();
+    static uint8_t s_last_flag = 255;
+
+    const uint64_t ai = ld<uint64_t>(node + 8);
+    const uint64_t actor = ai ? ld<uint64_t>(ai + 8) : 0;
+    const uint64_t actor_impl = actor ? ld<uint64_t>(actor + 0x1f8) : 0;
+    const uint64_t bb = actor ? ld<uint64_t>(actor + 0x200) : 0;
+    const uint64_t comps = actor_impl ? ld<uint64_t>(actor_impl + 0x208) : 0;
+    const uint32_t max_c = actor_impl ? ld<uint32_t>(actor_impl + 0x200) : 0;
+    const uint64_t player_comp = (comps && max_c > 0x1c) ? ld<uint64_t>(comps + 0xe0) : 0;
+
+    auto read_state = [&](int32_t& grav_idx, float& vel_y, uint8_t& keep_val, uint8_t& flag_2a8, uint8_t& v2ac, int32_t& v300) -> bool {
+        if (!actor_impl || !bb || !player_comp) return false;
+        const uint32_t grav_idx_key = ld<uint32_t>(node + 0x64);
+        grav_idx = (grav_idx_key < ld<uint32_t>(bb + 0xa8))
+                       ? ld<int32_t>(ld<uint64_t>(bb + 0xb0) + 4ULL * grav_idx_key)
+                       : -1;
+        vel_y = ld<float>(actor_impl + 0x304);
+        const uint32_t keep_key = ld<uint32_t>(player_comp + 0x23c);
+        keep_val = (keep_key < ld<uint32_t>(bb + 0x198))
+                       ? ld<uint8_t>(ld<uint64_t>(bb + 0x1a0) + keep_key)
+                       : 0;
+        const uint32_t flag_2a8_key = ld<uint32_t>(player_comp + 0x2a8);
+        flag_2a8 = (flag_2a8_key < ld<uint32_t>(bb + 0x198))
+                       ? ld<uint8_t>(ld<uint64_t>(bb + 0x1a0) + flag_2a8_key)
+                       : 0;
+        const uint32_t key_2ac = ld<uint32_t>(player_comp + 0x2ac);
+        v2ac = (key_2ac < ld<uint32_t>(bb + 0x198))
+                   ? ld<uint8_t>(ld<uint64_t>(bb + 0x1a0) + key_2ac)
+                   : 0;
+        const uint32_t key_300 = ld<uint32_t>(player_comp + 0x300);
+        v300 = (key_300 < ld<uint32_t>(bb + 0xa8))
+                   ? ld<int32_t>(ld<uint64_t>(bb + 0xb0) + 4ULL * key_300)
+                   : -1;
+        return true;
+    };
+
+    int32_t grav_idx = -1, v300 = -1;
+    float pre_vel_y = 0.0f;
+    uint8_t keep_val = 0, flag_2a8 = 0, v2ac = 0;
+    const bool have_state = read_state(grav_idx, pre_vel_y, keep_val, flag_2a8, v2ac, v300);
+
+    // Above 60 FPS, a frame-counted jump state expires early (~1.33s at 240 FPS vs ~5.33s at 60 FPS)
+    // and drops vel_y below 39.0f while still inside AreaKeepJumpSpeed. Keep the float active
+    // until the player leaves the area (keep == 0), changes gravity table, or hits a ceiling.
+    if (have_state && ratio > 0.01f && ratio < 0.99f && node_active &&
+        s_last_flag == 1 && keep_val == 1 && grav_idx == 6 && v2ac == 1 && v300 == 1 &&
+        pre_vel_y > 0.0f && pre_vel_y < 39.1f) {
+        st<float>(actor_impl + 0x304, 39.1f);
+        const uint32_t flag_2a8_key = ld<uint32_t>(player_comp + 0x2a8);
+        if (flag_2a8_key < ld<uint32_t>(bb + 0x198))
+            st<uint8_t>(ld<uint64_t>(bb + 0x1a0) + flag_2a8_key, 1);
+    }
+
+    g_grav_scale_update.game(c);
+
+    if (!have_state) return;
+    float vel_y = 0.0f;
+    read_state(grav_idx, vel_y, keep_val, flag_2a8, v2ac, v300);
+    s_last_flag = flag_2a8;
+}
+
 bool matches(uint64_t offset, const Hook& h) {
     const ModuleInfo* main = game_lib().main;
-    if (!main || offset + sizeof(h.code) > main->text_size || (offset & 3u) != 0) return false;
+    if (!main || offset + sizeof(uint32_t) * h.code_words > main->text_size || (offset & 3u) != 0) return false;
     const uint64_t at = g_main + offset;
-    for (int k = 0; k < 8; k++)
+    for (int k = 0; k < h.code_words; k++)
         if (ld<uint32_t>(at + 4 * k) != h.code[k]) return false;
     return true;
 }
@@ -182,13 +389,30 @@ bool install(uint64_t offset, Hook& h) {
 
 void seed_guard_init() {
     const char* e = std::getenv("NX_SEED_GUARD");
+    const ModuleInfo* main = game_lib().main;
+    if (!main) return;
+    g_main = main->base;
+
+    for (const VersionLayout& v : kVersions) {
+        if (!matches(v.anm_driven_vel, g_anm_driven_vel)) continue;
+        g_step_info_ptr = v.step_info_ptr;
+        bool vel_ok = install(v.anm_driven_vel, g_anm_driven_vel);
+        if (matches(v.anm_delta_vel_y, g_anm_delta_vel_y))
+            vel_ok = install(v.anm_delta_vel_y, g_anm_delta_vel_y) && vel_ok;
+        if (vel_ok)
+            log("wonder: high-FPS anim-driven velocity fix on (%s)", v.version);
+        if (v.cam_scroll_update && install(v.cam_scroll_update, g_cam_scroll_update)) {
+            log("wonder: high-FPS CourseCameraScroll::update_ fix on (%s)", v.version);
+        }
+        if (v.grav_scale_update && install(v.grav_scale_update, g_grav_scale_update))
+            log("wonder: high-FPS PlayerSetGravityScale diag on (%s)", v.version);
+        break;
+    }
+
     if (e && e[0] == '0') {
         log("wonder: Wonder Seed guard off (NX_SEED_GUARD=0)");
         return;
     }
-    const ModuleInfo* main = game_lib().main;
-    if (!main) return;
-    g_main = main->base;
     g_hold_mode = e && std::strcmp(e, "60") == 0;
     for (const VersionLayout& v : kVersions) {
         if (!matches(v.off, g_off) || !matches(v.on, g_on)) continue;
