@@ -36,6 +36,8 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <string_view>
+static inline std::filesystem::path nx_u8path(std::string_view s) { return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size())); }
 #include <fstream>
 #include <functional>
 #include <mutex>
@@ -247,8 +249,8 @@ std::string clean_linux_root(std::string s) {
 }
 
 bool linux_paths_same(const std::string& a, const std::string& b) {
-    const auto pa = std::filesystem::u8path(clean_linux_root(a)).lexically_normal();
-    const auto pb = std::filesystem::u8path(clean_linux_root(b)).lexically_normal();
+    const auto pa = nx_u8path(clean_linux_root(a)).lexically_normal();
+    const auto pb = nx_u8path(clean_linux_root(b)).lexically_normal();
     std::error_code ec;
     if (std::filesystem::exists(pa, ec) && std::filesystem::exists(pb, ec)) {
         const bool eq = std::filesystem::equivalent(pa, pb, ec);
@@ -258,7 +260,7 @@ bool linux_paths_same(const std::string& a, const std::string& b) {
 }
 
 std::filesystem::path linux_pointer_path() {
-    return std::filesystem::u8path(default_data_root()) / "data_root.txt";
+    return nx_u8path(default_data_root()) / "data_root.txt";
 }
 
 }  // namespace
@@ -300,7 +302,7 @@ std::string data_root() {
             line = clean_linux_root(std::move(line));
             if (!line.empty()) {
                 std::error_code ec;
-                const auto p = std::filesystem::u8path(line);
+                const auto p = nx_u8path(line);
                 if (std::filesystem::is_directory(p, ec) || (std::filesystem::create_directories(p, ec) && !ec)) {
                     g_data_root_value = std::move(line);
                     return g_data_root_value;
@@ -326,11 +328,11 @@ bool set_data_root(const std::string& path) {
         g_data_root_value = def;
         return true;
     }
-    const auto target = std::filesystem::u8path(cleaned);
+    const auto target = nx_u8path(cleaned);
     if (!std::filesystem::is_directory(target, ec) && (!std::filesystem::create_directories(target, ec) || ec))
         return false;
     std::filesystem::create_directories(ptr.parent_path(), ec);
-    const auto tmp = std::filesystem::u8path(ptr.string() + ".tmp");
+    const auto tmp = nx_u8path(ptr.string() + ".tmp");
     {
         std::ofstream f(tmp, std::ios::trunc);
         if (!f) return false;

@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <fstream>
 #include <filesystem>
+#include <string_view>
+static inline std::filesystem::path nx_u8path(std::string_view s) { return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size())); }
 
 namespace nx {
 
@@ -83,7 +85,7 @@ std::shared_ptr<Service> profile() {
         if (user().icon.empty()) return bytes;
         if (user().icon.rfind("builtin:", 0) == 0 && user().icon.size() == 9)
             return profiles::builtin_icon(user().icon[8] - '0');
-        std::ifstream f(std::filesystem::u8path(user().icon), std::ios::binary | std::ios::ate);
+        std::ifstream f(nx_u8path(user().icon), std::ios::binary | std::ios::ate);
         if (!f) return bytes;
         const auto size = f.tellg();
         if (size <= 0 || size > 0x20000) return bytes;

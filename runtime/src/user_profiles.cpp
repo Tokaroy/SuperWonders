@@ -1,4 +1,7 @@
 #include "user_profiles.h"
+#include <filesystem>
+#include <string_view>
+static inline std::filesystem::path nx_u8path(std::string_view s) { return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size())); }
 #include "platform.h"
 
 #include <algorithm>
@@ -17,7 +20,7 @@ std::filesystem::path path(const std::filesystem::path& root) { return root / "u
 }
 const User& current() {
     static const User selected = [] {
-        const Database db = load(std::filesystem::u8path(plat::data_root()));
+        const Database db = load(nx_u8path(plat::data_root()));
         return db.users[db.selected];
     }();
     return selected;

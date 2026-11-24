@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <string_view>
+static inline std::filesystem::path nx_u8path(std::string_view s) { return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size())); }
 #include <fstream>
 #include <functional>
 #include <mutex>
@@ -572,7 +574,7 @@ void speedrun_finish_course() {
     }
     const std::string& root = plat::data_root();
     if (!root.empty()) {
-        std::ofstream f(std::filesystem::u8path(root) / "speedrun_times.txt", std::ios::app);
+        std::ofstream f(nx_u8path(root) / "speedrun_times.txt", std::ios::app);
         if (f) f << line;
     }
     nx::log("speedrun: %s", line);

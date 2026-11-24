@@ -11,6 +11,8 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <string_view>
+static inline std::filesystem::path nx_u8path(std::string_view s) { return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size())); }
 #include <functional>
 #include <mutex>
 #include <string>
@@ -333,7 +335,7 @@ void load_player_settings() {
 void reload_player_settings() {
     std::error_code ec;
     const std::string path = settings_path();
-    if (!std::filesystem::is_regular_file(std::filesystem::u8path(path), ec)) return;
+    if (!std::filesystem::is_regular_file(nx_u8path(path), ec)) return;
     overlay::Settings s;
     const int keys[overlay::kControlCount] = {
         SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_J, SDL_SCANCODE_K, SDL_SCANCODE_Q, SDL_SCANCODE_E,
