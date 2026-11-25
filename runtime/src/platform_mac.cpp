@@ -177,6 +177,7 @@ void yield() {
 }
 bool wait_vblank() { return false; }
 bool fast_forward() { return false; }
+bool paused() { return false; }
 void set_thread_name(const char* name) { pthread_setname_np(name); }  // Darwin: the calling thread only
 
 int64_t current_thread_id() {

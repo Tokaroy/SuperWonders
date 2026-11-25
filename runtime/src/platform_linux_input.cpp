@@ -67,10 +67,11 @@ std::atomic<int> g_rumble_strength{100};  // percent
 std::array<std::atomic<int>, 4> g_pad_left_deadzone{{{16}, {16}, {16}, {16}}};
 std::array<std::atomic<int>, 4> g_pad_right_deadzone{{{16}, {16}, {16}, {16}}};
 std::atomic<bool> g_window_focused{true};
+std::atomic<bool> g_pause_in_background{false};
 
 void update_audio_gain(const overlay::Settings& s) {
     if (!g_stream) return;
-    const bool muted = s.muted || (s.mute_in_background && !g_window_focused.load(std::memory_order_relaxed));
+    const bool muted = s.muted || (s.mute_in_background && !g_window_focused.load(std::memory_order_relaxed)) || paused();
     const int percent = std::clamp(s.volume, 0, 200);
     const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
                                       : float(percent) / 100.0f;
@@ -99,6 +100,7 @@ void apply_settings(const overlay::Settings& s, bool persist) {
         for (size_t slot = 0; slot < 4; ++slot) g_pad_binding[slot][a] = overlay::controller_binding_for_slot(s, slot, a);
     }
     for (size_t i = 0; i < 4; ++i) g_assignments[i] = s.player_devices[i];
+    g_pause_in_background.store(s.pause_in_background, std::memory_order_relaxed);
     update_audio_gain(s);
     nx::set_audio_output(s.audio_mode, s.stereo_separation);
     nx::set_internal_resolution_preset(s.internal_resolution);  // read at the next boot
@@ -207,6 +209,7 @@ int detect_gamepad_style(SDL_Gamepad* pad) {
 }  // namespace
 
 bool fast_forward() { return g_fast_forward.load(std::memory_order_relaxed); }
+bool paused() { return g_pause_in_background.load(std::memory_order_relaxed) && (!g_window_focused.load(std::memory_order_relaxed) || window_minimized()); }
 
 void rumble_player(unsigned player, float low, float high) {
     int slot = -1;

@@ -476,6 +476,11 @@ void audio_render_thread(CPU& c) {
     log("audio: render thread running");
     uint64_t next = plat::monotonic_ns();
     for (;;) {
+        if (plat::paused()) {
+            plat::sleep_ns(20'000'000);
+            next = plat::monotonic_ns();
+            continue;
+        }
         if (plat::fast_forward()) {
             plat::sleep_ns(1'000'000);
             next = plat::monotonic_ns();

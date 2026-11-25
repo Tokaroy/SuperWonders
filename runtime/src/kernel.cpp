@@ -85,7 +85,7 @@ uint64_t system_tick() {  // 19.2 MHz (scaled during fast-forward so delta-time 
         last_real = now;
         scaled_ns = now;
     } else if (now > last_real) {
-        const uint64_t mult = plat::fast_forward() ? 4 : 1;
+        const uint64_t mult = plat::paused() ? 0 : (plat::fast_forward() ? 4 : 1);
         scaled_ns += (now - last_real) * mult;
         last_real = now;
     }

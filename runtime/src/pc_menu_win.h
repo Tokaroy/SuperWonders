@@ -53,6 +53,7 @@ struct PcMenuState {
     int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation
     bool muted = false;
     bool mute_in_background = false;
+    bool pause_in_background = false;
     bool fullscreen = false;
     bool always_on_top = false;
     bool metrics_enabled = false;

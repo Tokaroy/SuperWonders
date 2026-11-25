@@ -334,6 +334,7 @@ static std::atomic<IXAudio2MasteringVoice*> g_master_voice{nullptr};
 static std::array<std::atomic<int>, kPcControlCount> g_keyboard_bindings{};
 static std::array<std::atomic<int>, kPcControlCount> g_controller_bindings{};
 static std::array<std::atomic<int>, kPcHotkeyCount> g_hotkey_bindings{{{VK_F1}, {VK_F2}, {VK_F11}, {VK_TAB}}};
+static std::atomic<bool> g_pause_in_background{false};
 static std::atomic<HWND> g_metrics_window{nullptr};
 static std::atomic<bool> g_metrics_enabled{false}, g_metric_fps{true}, g_metric_one_percent_low{true};
 static std::atomic<bool> g_metric_game_speed{true}, g_metric_frametime_graph{true};
@@ -360,7 +361,7 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask, o.pad_presets = s.pad_presets;
     o.keyboard_separate = s.keyboard_separate;
     o.controller_preset = s.controller_preset, o.button_icons = s.button_icons, o.muted = s.muted,
-        o.mute_in_background = s.mute_in_background, o.fullscreen = s.fullscreen;
+        o.mute_in_background = s.mute_in_background, o.pause_in_background = s.pause_in_background, o.fullscreen = s.fullscreen;
     o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile, o.discord_rpc = s.discord_rpc;
     o.metric_fps = s.metric_fps, o.metric_one_percent_low = s.metric_one_percent_low;
     o.metric_game_speed = s.metric_game_speed, o.metric_frametime_graph = s.metric_frametime_graph;
@@ -389,7 +390,7 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask, s.pad_presets = o.pad_presets;
     s.keyboard_separate = o.keyboard_separate;
     s.controller_preset = o.controller_preset, s.button_icons = o.button_icons, s.muted = o.muted,
-        s.mute_in_background = o.mute_in_background, s.fullscreen = o.fullscreen;
+        s.mute_in_background = o.mute_in_background, s.pause_in_background = o.pause_in_background, s.fullscreen = o.fullscreen;
     s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile, s.discord_rpc = o.discord_rpc;
     s.metric_fps = o.metric_fps, s.metric_one_percent_low = o.metric_one_percent_low;
     s.metric_game_speed = o.metric_game_speed, s.metric_frametime_graph = o.metric_frametime_graph;
@@ -507,7 +508,7 @@ static void save_pc_settings() {
          << "\naudio_mode=" << g_pc_settings.audio_mode << "\nstereo_separation=" << g_pc_settings.stereo_separation
          << "\naspect_ratio=" << std::max(0, g_pc_settings.aspect_ratio)
          << "\ninternal_resolution=" << g_pc_settings.internal_resolution << "\nmuted=" << g_pc_settings.muted
-         << "\nmute_in_background=" << g_pc_settings.mute_in_background << "\nfullscreen=" << g_pc_settings.fullscreen
+         << "\nmute_in_background=" << g_pc_settings.mute_in_background << "\npause_in_background=" << g_pc_settings.pause_in_background << "\nfullscreen=" << g_pc_settings.fullscreen
          << "\nalways_on_top=" << g_pc_settings.always_on_top << "\nlanguage=" << g_pc_settings.language
          << "\ntheme=" << g_pc_settings.theme
          << "\ngame_language=" << g_pc_settings.game_language
@@ -579,6 +580,8 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) state.muted = value != 0;
         else if (std::sscanf(line.c_str(), "mute_in_background=%d", &value) == 1)
             state.mute_in_background = value != 0;
+        else if (std::sscanf(line.c_str(), "pause_in_background=%d", &value) == 1)
+            state.pause_in_background = value != 0;
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) state.fullscreen = value != 0;
         else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) state.always_on_top = value != 0;
         else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) state.language = std::clamp(value, 0, 12);
@@ -725,6 +728,7 @@ static void apply_loaded_pc_settings(const PcMenuState& state) {
     nx::set_audio_output(state.audio_mode, state.stereo_separation);
     nx::set_game_language(state.game_language);
     apply_input_bindings(state);
+    g_pause_in_background.store(state.pause_in_background, std::memory_order_relaxed);
     set_memory_limit_gb(state.memory_limit_gb);
     _putenv_s("NX_LOW_VRAM_PROFILE", state.low_vram_profile ? "1" : "0");
     nx::nvn::set_fsr(state.upscaler == 1, float(state.fsr_sharpness) / 100.0f);
@@ -771,7 +775,7 @@ static std::atomic<bool> g_window_focused{true};
 static void set_game_volume() {
     if (IXAudio2MasteringVoice* voice = g_master_voice.load()) {
         const bool muted = g_pc_settings.muted ||
-                           (g_pc_settings.mute_in_background && !g_window_focused.load(std::memory_order_relaxed));
+                           (g_pc_settings.mute_in_background && !g_window_focused.load(std::memory_order_relaxed)) || paused();
         const int percent = std::clamp(g_pc_settings.volume, 0, 200);
         const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
                                           : float(percent) / 100.0f;
@@ -984,6 +988,8 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings.button_icons = std::clamp(g_pc_settings.button_icons, 0, 3);
     g_pc_settings.overlay_position = std::clamp(g_pc_settings.overlay_position, 0, 3);
     apply_input_bindings(g_pc_settings);
+    g_pause_in_background.store(g_pc_settings.pause_in_background, std::memory_order_relaxed);
+    set_game_volume();
     nx::set_game_language(g_pc_settings.game_language);
     apply_metrics_settings(g_pc_settings);
     set_memory_limit_gb(g_pc_settings.memory_limit_gb);
@@ -1093,6 +1099,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         case WM_MOVE:
         case WM_SIZE:
             metrics_reposition();
+            set_game_volume();
             break;
         case WM_PAINT: {
             if (!g_shader_progress_visible.load(std::memory_order_acquire) || overlay::enabled())
@@ -1323,6 +1330,9 @@ static void ensure_input_poller();
 bool fast_forward() {
     ensure_input_poller();
     return g_fast_forward_down.load(std::memory_order_relaxed);
+}
+bool paused() {
+    return g_pause_in_background.load(std::memory_order_relaxed) && (!g_window_focused.load(std::memory_order_relaxed) || window_minimized());
 }
 
 bool headless() {  // NX_HEADLESS (platform.h)

@@ -1700,6 +1700,25 @@ void system_tab(MenuContext& c, const Labels& l) {
     if (rows::toggle("Discord Rich Presence", &s.discord_rpc, kDefaults.discord_rpc, kDiscordDesc[lang]))
         settings_changed(true);
     {
+        constexpr const char* kBgPauseText[13][2] = {
+            {"Pause in background", "Automatically pauses the game and audio when the window loses focus or is minimized."},
+            {"Pausa in background", "Mette automaticamente in pausa il gioco e l'audio quando la finestra perde il focus o è minimizzata."},
+            {"Im Hintergrund pausieren", "Pausiert Spiel und Audio automatisch, wenn das Fenster den Fokus verliert oder minimiert wird."},
+            {"Pause en arrière-plan", "Met automatiquement le jeu et le son en pause lorsque la fenêtre perd le focus ou est réduite."},
+            {"Pausar en segundo plano", "Pausa automáticamente el juego y el audio cuando la ventana pierde el foco o se minimiza."},
+            {"백그라운드 일시정지", "창이 포커스를 잃거나 최소화되면 게임과 오디오를 자동으로 일시정지합니다."},
+            {"バックグラウンド時に一時停止", "ウィンドウが非アクティブまたは最小化されると、ゲームと音声を自動で一時停止します。"},
+            {"إيقاف مؤقت في الخلفية", "يوقف اللعبة والصوت مؤقتاً تلقائياً عند فقدان النافذة للتركيز أو تصغيرها."},
+            {"Пауза в фоне", "Автоматически ставит игру и звук на паузу при потере фокуса или сворачивании окна."},
+            {"Arka planda duraklat", "Pencere odağı kaybettiğinde veya simge durumuna küçültüldüğünde oyunu ve sesi otomatik duraklatır."},
+            {"Pauzeren op achtergrond", "Pauzeert het spel en geluid automatisch wanneer het venster de focus verliest of wordt geminimaliseerd."},
+            {"后台暂停", "窗口失去焦点或最小化时自动暂停游戏和音频。"},
+            {"背景暫停", "視窗失去焦點或最小化時自動暫停遊戲與音訊。"},
+        };
+        if (rows::toggle(kBgPauseText[lang][0], &s.pause_in_background, kDefaults.pause_in_background, kBgPauseText[lang][1]))
+            settings_changed(true);
+    }
+    {
         constexpr const char* kFolderActionsText[13][4] = {
             {"Open data folder", "Opens the active data folder (saves, nx.log, mods) in your file manager.",
              "Open screenshots folder", "Opens the folder where F2 PNG screenshots are saved."},
@@ -1746,6 +1765,7 @@ void system_tab(MenuContext& c, const Labels& l) {
         if (rows::action(rlabel, "", kExtraUiText[lang].reset_tab_desc)) {
             s.language = kDefaults.language, s.theme = kDefaults.theme;
             s.memory_limit_gb = kDefaults.memory_limit_gb, s.low_vram_profile = kDefaults.low_vram_profile;
+            s.discord_rpc = kDefaults.discord_rpc, s.pause_in_background = kDefaults.pause_in_background;
             ui::set_theme(s.theme);
             settings_changed(true);
             ui::notify(kExtraUiText[lang].reset_tab_note);

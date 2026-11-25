@@ -103,6 +103,7 @@ ButtonPromptConfig button_prompt_config();
 bool upgrade_button_font(const std::string& out_path);
 #endif
 bool fast_forward();  // held: the game runs unpaced (Tab on PC; false where there is no key for it)
+bool paused();        // true when pause_in_background is enabled and the window is unfocused or minimized
 // Player 1's controller rumble: low (heavy) and high (light) motor, 0..1, scaled by the player's strength setting.
 // Called on every vibration value the game sends; the platform keeps it running until the next.
 void rumble(float low, float high);
