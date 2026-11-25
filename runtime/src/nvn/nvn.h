@@ -173,12 +173,19 @@ struct MemoryPool : Object {
     // Virtual pools (nvnMemoryPoolMapVirtual): virtual offset -> (physical pool, its offset, size).
     struct Mapping {
         uint64_t physical = 0, physical_offset = 0, size = 0;
+        uint64_t physical_memory = 0, physical_size = 0;
+        uint32_t physical_flags = 0;
     };
     std::map<uint64_t, Mapping> mappings;
 };
 
+struct PoolSlice {
+    uint64_t base = 0, size = 0;
+    uint32_t flags = 0;
+};
+
 // Host address of `offset` in a pool, through its virtual mappings if it has no storage of its own; 0 if unmapped.
-uint64_t pool_host(const MemoryPool& pool, uint64_t offset);
+uint64_t pool_host(const MemoryPool& pool, uint64_t offset, PoolSlice* slice_out = nullptr);
 
 // GPU virtual addresses: every pool gets a range; address -> (pool, offset) for command translation.
 uint64_t gpu_alloc(uint64_t size);
@@ -375,6 +382,7 @@ struct TargetViews {  // SetRenderTargets' blob: level and layer per color targe
 std::shared_ptr<CmdList> command_list(uint64_t handle);  // a recorded handle's commands (nvn_cmd.cpp)
 std::string explain_handle(uint64_t handle);             // why a handle has no list (NX_CMD_DROPS=1: what dropped it)
 void command_memory_released(uint64_t gpu, uint64_t size);  // a pool finalized: the lists recorded in it go
+void static_buf_invalidate(uint64_t host_addr, uint64_t size);  // persistent static VB/IB cache invalidation (nvn_dedup.cpp)
 // Appends to the command buffer (guest NVNcommandBuffer*) being recorded; `blob` is copied into the list.
 void record(uint64_t cmdbuf, Cmd cmd, const void* blob = nullptr, size_t size = 0);
 

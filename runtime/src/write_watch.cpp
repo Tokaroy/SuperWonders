@@ -18,6 +18,11 @@
 #if !defined(_WIN32)
 #include <sys/mman.h>
 #include <unistd.h>
+#else
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #endif
 
 namespace nx::plat {
@@ -90,10 +95,105 @@ bool write_watch_fault(void* at) {
     if (hit) mprotect(reinterpret_cast<void*>(a & ~(page_size() - 1)), page_size(), PROT_READ | PROT_WRITE);
     return hit;
 }
+bool write_watch_hw_supported() { return false; }
+bool write_watch_hw_reset(uint64_t, uint64_t) { return false; }
+int write_watch_hw_poll(uint64_t, uint64_t, void**, size_t, uint64_t*) { return -1; }
 #else
-bool write_watch_add(uint64_t, uint64_t) { return false; }
-void write_watch_remove(uint64_t) {}
-bool write_watch_take(uint64_t) { return true; }
+namespace {
+
+struct WinWatch {
+    std::atomic<uint64_t> addr{0};
+    std::atomic<uint64_t> begin{0}, end{0};
+    std::atomic<bool> written{false};
+};
+constexpr int kWinWatches = 16;
+WinWatch g_win_watches[kWinWatches];
+
+bool win_enabled() {
+    static const bool on = [] {
+        const char* e = std::getenv("NX_WRITE_WATCH");
+        return !(e && e[0] == '0');
+    }();
+    return on;
+}
+
+}  // namespace
+
+bool write_watch_hw_supported() { return win_enabled(); }
+
+bool write_watch_hw_reset(uint64_t addr, uint64_t size) {
+    if (!win_enabled() || !addr || !size) return false;
+    uint64_t b = addr & ~0xFFFull;
+    uint64_t e = (addr + size + 0xFFF) & ~0xFFFull;
+    return ResetWriteWatch(reinterpret_cast<void*>(b), SIZE_T(e - b)) == 0;
+}
+
+int write_watch_hw_poll(uint64_t addr, uint64_t size, void** out_pages, size_t max_pages, uint64_t* out_granularity) {
+    if (!win_enabled() || !addr || !size || !out_pages || !max_pages) return -1;
+    uint64_t b = addr & ~0xFFFull;
+    uint64_t e = (addr + size + 0xFFF) & ~0xFFFull;
+    ULONG_PTR count = ULONG_PTR(max_pages);
+    DWORD gran = 4096;
+    if (GetWriteWatch(WRITE_WATCH_FLAG_RESET, reinterpret_cast<void*>(b), SIZE_T(e - b), out_pages, &count, &gran) != 0)
+        return -1;
+    if (out_granularity) *out_granularity = gran;
+    // Forward any dirty page overlapping a texture write_watch_add() range so polling a pool never drops texture writes.
+    for (ULONG_PTR i = 0; i < count; ++i) {
+        uint64_t pa = reinterpret_cast<uint64_t>(out_pages[i]);
+        for (WinWatch& w : g_win_watches)
+            if (w.addr.load(std::memory_order_relaxed) && pa < w.end.load(std::memory_order_relaxed) &&
+                pa + gran > w.begin.load(std::memory_order_relaxed))
+                w.written.store(true, std::memory_order_relaxed);
+    }
+    return int(count);
+}
+
+bool write_watch_add(uint64_t addr, uint64_t size) {
+    if (!win_enabled() || !addr || !size) return false;
+    uint64_t b = addr & ~0xFFFull, e = (addr + size + 0xFFF) & ~0xFFFull;
+    if (ResetWriteWatch(reinterpret_cast<void*>(b), SIZE_T(e - b)) != 0) return false;
+    for (WinWatch& w : g_win_watches) {
+        uint64_t expected = 0;
+        if (!w.addr.compare_exchange_strong(expected, addr)) continue;
+        w.begin = b, w.end = e, w.written = true;
+        return true;
+    }
+    return false;
+}
+
+void write_watch_remove(uint64_t addr) {
+    for (WinWatch& w : g_win_watches)
+        if (w.addr == addr) {
+            w.begin = w.end = 0;
+            w.addr = 0;
+        }
+}
+
+bool write_watch_take(uint64_t addr) {
+    for (WinWatch& w : g_win_watches) {
+        if (w.addr != addr) continue;
+        void* pages[64];
+        ULONG_PTR count = 64;
+        DWORD gran = 4096;
+        uint64_t b = w.begin.load(), e = w.end.load();
+        bool dirty = w.written.exchange(false);
+        if (b < e && GetWriteWatch(WRITE_WATCH_FLAG_RESET, reinterpret_cast<void*>(b), SIZE_T(e - b), pages, &count,
+                                   &gran) == 0) {
+            if (count > 0) dirty = true;
+            while (count == 64) {
+                count = 64;
+                if (GetWriteWatch(WRITE_WATCH_FLAG_RESET, reinterpret_cast<void*>(b), SIZE_T(e - b), pages, &count,
+                                  &gran) != 0)
+                    break;
+            }
+        } else {
+            dirty = true;
+        }
+        return dirty;
+    }
+    return true;
+}
+
 bool write_watch_fault(void*) { return false; }
 #endif
 

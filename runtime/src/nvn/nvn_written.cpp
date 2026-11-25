@@ -25,35 +25,49 @@ constexpr uint64_t kAlign = 256;          // the largest buffer offset alignment
 constexpr uint64_t kTail = 0x10000 + 16;  // zeros after a range: storage bindings are padded to 64 KB (nvn_draw.cpp)
 
 struct Region {
-    uint64_t size = 0;  // guest bytes from the key
+    const uint8_t* p = nullptr;
+    uint64_t size = 0;  // guest bytes from p
     uint64_t cap = 0;   // bytes of the copy from up.offset (size, then zeros)
-    Upload up;          // the copy of the key's first byte
+    Upload up;          // the copy of p's first byte
     std::shared_ptr<std::vector<uint8_t>> before;  // the guest bytes copied in (what the GPU did not change)
 };
-using Regions = std::map<const uint8_t*, Region>;
-using It = Regions::iterator;
-Regions g_regions;
+std::vector<Region> g_regions;  // disjoint, sorted by Region::p (capacity kept across submits)
 const uint8_t* g_min_addr = nullptr;
 const uint8_t* g_max_addr = nullptr;
 bool g_read = false;  // a copy was bound for reading since the last write_after_read
 uint64_t g_binds = 0;  // written_bind calls, ever (nvn_frames.cpp: did a dispatch write storage after the split)
 uint64_t g_shared = 0, g_merged = 0, g_composed = 0, g_indirect = 0;  // for written_log
 
-bool has_overlap_fast(const uint8_t* p, uint64_t size) {
-    if (!p || !size || g_regions.empty() || p + size <= g_min_addr || p >= g_max_addr) return false;
-    It it = g_regions.upper_bound(p);
-    if (it != g_regions.begin() && std::prev(it)->first + std::prev(it)->second.size > p) return true;
-    return it != g_regions.end() && it->first < p + size;
+// First index i in g_regions with g_regions[i].p > p.
+size_t upper_idx(const uint8_t* p) {
+    size_t lo = 0, hi = g_regions.size();
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (g_regions[mid].p <= p)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
 }
 
-// The regions overlapping [p, p + size), in address order.
-std::vector<It> overlapping(const uint8_t* p, uint64_t size) {
-    std::vector<It> v;
-    if (!p || !size || g_regions.empty() || p + size <= g_min_addr || p >= g_max_addr) return v;
-    It it = g_regions.upper_bound(p);
-    if (it != g_regions.begin() && std::prev(it)->first + std::prev(it)->second.size > p) v.push_back(std::prev(it));
-    for (; it != g_regions.end() && it->first < p + size; ++it) v.push_back(it);
-    return v;
+bool has_overlap_fast(const uint8_t* p, uint64_t size) {
+    if (!p || !size || g_regions.empty() || p + size <= g_min_addr || p >= g_max_addr) return false;
+    size_t idx = upper_idx(p);
+    if (idx > 0 && g_regions[idx - 1].p + g_regions[idx - 1].size > p) return true;
+    return idx < g_regions.size() && g_regions[idx].p < p + size;
+}
+
+// Contiguous index range [lo, hi) in g_regions overlapping [p, p + size), in address order (zero heap allocs).
+std::pair<size_t, size_t> overlapping_range(const uint8_t* p, uint64_t size) {
+    if (!p || !size || g_regions.empty() || p + size <= g_min_addr || p >= g_max_addr) return {0, 0};
+    size_t idx = upper_idx(p);
+    size_t lo = idx;
+    if (idx > 0 && g_regions[idx - 1].p + g_regions[idx - 1].size > p) lo = idx - 1;
+    size_t hi = idx;
+    const uint8_t* end = p + size;
+    while (hi < g_regions.size() && g_regions[hi].p < end) ++hi;
+    return {lo, hi};
 }
 
 // `bytes` of upload memory whose byte `anchor` is kAlign aligned (so it can start a binding).
@@ -64,16 +78,17 @@ Upload alloc_anchored(uint64_t bytes, uint64_t anchor) {
     return u;
 }
 
-// The parts of `regions` inside [p, p + size) copied on the GPU into `to` (whose first byte is p's), then made
+// The parts of g_regions[lo..hi) inside [p, p + size) copied on the GPU into `to` (whose first byte is p's), then made
 // visible to everything after. What the dispatches recorded so far wrote is there when the copy runs: dispatch()
 // ends each one with a barrier to all later commands. Outside render passes.
-void copy_regions(VkCommandBuffer cb, const std::vector<It>& regions, const uint8_t* p, uint64_t size, const Upload& to) {
-    for (It it : regions) {
-        const uint8_t* lo = std::max(it->first, p);
-        const uint8_t* hi = std::min(it->first + it->second.size, p + size);
+void copy_regions(VkCommandBuffer cb, size_t rlo, size_t rhi, const uint8_t* p, uint64_t size, const Upload& to) {
+    for (size_t i = rlo; i < rhi; ++i) {
+        const Region& r = g_regions[i];
+        const uint8_t* lo = std::max(r.p, p);
+        const uint8_t* hi = std::min(r.p + r.size, p + size);
         if (lo >= hi) continue;
-        VkBufferCopy c{it->second.up.offset + uint64_t(lo - it->first), to.offset + uint64_t(lo - p), uint64_t(hi - lo)};
-        p_vkCmdCopyBuffer(cb, it->second.up.buffer, to.buffer, 1, &c);
+        VkBufferCopy c{r.up.offset + uint64_t(lo - r.p), to.offset + uint64_t(lo - p), uint64_t(hi - lo)};
+        p_vkCmdCopyBuffer(cb, r.up.buffer, to.buffer, 1, &c);
     }
     VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
     mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -102,18 +117,21 @@ uint64_t bind_align() {
     return a;
 }
 
-Upload at(const It& it, uint64_t off) { return {it->second.up.buffer, it->second.up.offset + off, it->second.up.ptr + off}; }
+Upload at(size_t idx, uint64_t off) {
+    const Region& r = g_regions[idx];
+    return {r.up.buffer, r.up.offset + off, r.up.ptr + off};
+}
 
 // [p, p + size) as a sub-range of one region, bindable at `align` (at most the device's descriptor alignment; the
-// callers ask 256 for descriptors) with `padded` bytes behind it: else end(). A copy is anchored at its first writer,
+// callers ask 256 for descriptors) with `padded` bytes behind it: else SIZE_MAX. A copy is anchored at its first writer,
 // so two pointers aligned in guest memory are aligned in the copy.
-It containing(const uint8_t* p, uint64_t size, uint64_t padded, uint64_t align, const std::vector<It>& regions) {
-    if (regions.size() != 1) return g_regions.end();
-    It it = regions[0];
-    uint64_t off = uint64_t(p - it->first);
-    if (p < it->first || off + size > it->second.size || off + padded > it->second.cap) return g_regions.end();
-    if ((it->second.up.offset + off) % std::clamp<uint64_t>(align, 1, bind_align())) return g_regions.end();
-    return it;
+size_t containing(const uint8_t* p, uint64_t size, uint64_t padded, uint64_t align, size_t rlo, size_t rhi) {
+    if (rhi - rlo != 1) return SIZE_MAX;
+    const Region& r = g_regions[rlo];
+    uint64_t off = uint64_t(p - r.p);
+    if (p < r.p || off + size > r.size || off + padded > r.cap) return SIZE_MAX;
+    if ((r.up.offset + off) % std::clamp<uint64_t>(align, 1, bind_align())) return SIZE_MAX;
+    return rlo;
 }
 
 }  // namespace
@@ -128,46 +146,50 @@ void written_count_bind() { g_binds++; }
 
 Upload written_bind(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_t padded) {
     g_binds++;
-    std::vector<It> old = overlapping(p, size);
-    if (It it = containing(p, size, padded, bind_align(), old); it != g_regions.end()) {
+    auto [rlo, rhi] = overlapping_range(p, size);
+    if (size_t idx = containing(p, size, padded, bind_align(), rlo, rhi); idx != SIZE_MAX) {
         write_after_read(cb);
         g_shared++;
-        return at(it, uint64_t(p - it->first));
+        return at(idx, uint64_t(p - g_regions[idx].p));
     }
     // A new range, or one meeting others (or misaligned in its copy): one copy covering all of them, anchored at p.
     const uint8_t* lo = p;
     const uint8_t* hi = p + size;
-    for (It it : old) lo = std::min(lo, it->first), hi = std::max(hi, it->first + it->second.size);
+    for (size_t i = rlo; i < rhi; ++i)
+        lo = std::min(lo, g_regions[i].p), hi = std::max(hi, g_regions[i].p + g_regions[i].size);
     uint64_t n = uint64_t(hi - lo), off = uint64_t(p - lo);
     Region r;
+    r.p = lo;
     r.size = n;
     r.cap = std::max(n + kTail, off + padded);
     r.up = alloc_anchored(r.cap, off);
     std::memcpy(r.up.ptr, lo, n);
     std::memset(r.up.ptr + n, 0, r.cap - n);
     r.before = std::make_shared<std::vector<uint8_t>>(lo, lo + n);
-    for (It it : old)  // their parts: as they were before their own GPU writes
-        if (it->second.before)
-            std::memcpy(r.before->data() + (it->first - lo), it->second.before->data(), it->second.before->size());
-    if (!old.empty()) {
-        copy_regions(cb, old, lo, n, r.up);  // dispatch(): no render pass is open
-        for (It it : old) g_regions.erase(it);
+    for (size_t i = rlo; i < rhi; ++i)  // their parts: as they were before their own GPU writes
+        if (g_regions[i].before)
+            std::memcpy(r.before->data() + (g_regions[i].p - lo), g_regions[i].before->data(),
+                        g_regions[i].before->size());
+    if (rlo < rhi) {
+        copy_regions(cb, rlo, rhi, lo, n, r.up);  // dispatch(): no render pass is open
+        g_regions.erase(g_regions.begin() + ptrdiff_t(rlo), g_regions.begin() + ptrdiff_t(rhi));
         g_merged++;
     }
     dedup_invalidate(lo, n);  // copies of these bytes made earlier in the submit are not what later work reads
     if (!g_min_addr || lo < g_min_addr) g_min_addr = lo;
     if (!g_max_addr || hi > g_max_addr) g_max_addr = hi;
-    It it = g_regions.emplace(lo, r).first;
-    return at(it, off);
+    size_t insert_at = upper_idx(lo);
+    g_regions.insert(g_regions.begin() + ptrdiff_t(insert_at), std::move(r));
+    return at(insert_at, off);
 }
 
 bool written_read(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_t padded, uint64_t align, Upload& out) {
     if (!p || !size || g_regions.empty() || p + size <= g_min_addr || p >= g_max_addr || written_separate()) return false;
-    std::vector<It> regions = overlapping(p, size);
-    if (regions.empty()) return false;
-    if (It it = containing(p, size, padded, align, regions); it != g_regions.end()) {
+    auto [rlo, rhi] = overlapping_range(p, size);
+    if (rlo == rhi) return false;
+    if (size_t idx = containing(p, size, padded, align, rlo, rhi); idx != SIZE_MAX) {
         g_shared++, g_read = true;
-        out = at(it, uint64_t(p - it->first));
+        out = at(idx, uint64_t(p - g_regions[idx].p));
         return true;
     }
     // Partly written, or not bindable in place: a copy of its own, the written parts copied in on the GPU. This is
@@ -176,7 +198,7 @@ bool written_read(VkCommandBuffer cb, const uint8_t* p, uint64_t size, uint64_t 
     out = upload_alloc(std::max(padded, size), std::max<uint64_t>(align, 16));
     std::memcpy(out.ptr, p, size);
     if (padded > size) std::memset(out.ptr + size, 0, padded - size);
-    copy_regions(cb, regions, p, size, out);
+    copy_regions(cb, rlo, rhi, p, size, out);
     g_composed++;
     return true;
 }
@@ -207,13 +229,18 @@ bool draw_inputs(VkCommandBuffer cb, const ShaderInfo* vs, bool indexed, const C
     for (uint32_t s = 0; s < 15; s++) {
         if (!(in.used >> s & 1)) continue;
         const Range& r = g_state.vertex_buffers[s];
-        const uint8_t* p = r.address ? guest_bytes(r.address) : nullptr;
+        PoolSlice slice{};
+        const uint8_t* p = r.address ? guest_bytes_pool(r.address, &slice) : nullptr;
         uint64_t size = p ? std::min<uint64_t>(r.size, 64ull << 20) : 0;
-        in.vertex[s] = read_upload(cb, p, size, std::max<uint64_t>((size + 15) & ~15ull, 16), 16);
+        uint64_t padded = std::max<uint64_t>((size + 15) & ~15ull, 16);
+        if (!written_read(cb, p, size, padded, 16, in.vertex[s]) &&
+            !static_buf_upload(cb, p, size, padded, 16, slice, in.vertex[s]))
+            in.vertex[s] = dedup_upload(p, size, padded, 16);
     }
     if (!indexed) return true;
     uint32_t count = uint32_t(c.i[0]);
-    const uint8_t* p = guest_bytes(c.a[0]);
+    PoolSlice slice{};
+    const uint8_t* p = guest_bytes_pool(c.a[0], &slice);
     if (!p) return false;
     in.index_type = vk_index_type(c.mask);
     if (in.index_type == VK_INDEX_TYPE_UINT8_EXT) {
@@ -228,7 +255,9 @@ bool draw_inputs(VkCommandBuffer cb, const ShaderInfo* vs, bool indexed, const C
         return true;
     }
     uint64_t bytes = uint64_t(count) * index_size(c.mask);
-    if (!written_read(cb, p, bytes, bytes, index_size(c.mask), in.index)) in.index = dedup_upload(p, bytes, bytes, 16);
+    if (!written_read(cb, p, bytes, bytes, index_size(c.mask), in.index) &&
+        !static_buf_upload(cb, p, bytes, bytes, 16, slice, in.index))
+        in.index = dedup_upload(p, bytes, bytes, 16);
     return true;
 }
 
@@ -292,7 +321,7 @@ void written_cpu_write(const uint8_t* p, uint64_t size) {
 std::vector<WriteBack> written_take() {
     std::vector<WriteBack> v;
     v.reserve(g_regions.size());
-    for (auto& [p, r] : g_regions) v.push_back({r.up.ptr, const_cast<uint8_t*>(p), r.size, r.before});
+    for (auto& r : g_regions) v.push_back({r.up.ptr, const_cast<uint8_t*>(r.p), r.size, r.before});
     g_regions.clear();
     g_min_addr = g_max_addr = nullptr;
     return v;

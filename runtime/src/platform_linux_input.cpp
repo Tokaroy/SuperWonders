@@ -529,10 +529,15 @@ void sample_input() {
         const int ff_sc = g_hotkey_bindings[3].load(std::memory_order_relaxed);
         tab = ff_sc > 0 && ff_sc < count && k[ff_sc];  // fast-forward (hle_vi.cpp)
         auto held = [&](int sc) { return sc > 0 && sc < count && k[sc]; };
-        if (k[SDL_SCANCODE_A] || k[SDL_SCANCODE_LEFT]) p.lx = -kStickMax;
-        if (k[SDL_SCANCODE_D] || k[SDL_SCANCODE_RIGHT]) p.lx = kStickMax;
-        if (k[SDL_SCANCODE_W] || k[SDL_SCANCODE_UP]) p.ly = kStickMax;
-        if (k[SDL_SCANCODE_S] || k[SDL_SCANCODE_DOWN]) p.ly = -kStickMax;
+        auto is_bound = [](int sc) {
+            for (const auto& b : g_key_binding)
+                if (b.load() == sc) return true;
+            return false;
+        };
+        if ((!is_bound(SDL_SCANCODE_A) && k[SDL_SCANCODE_A]) || k[SDL_SCANCODE_LEFT]) p.lx = -kStickMax;
+        if ((!is_bound(SDL_SCANCODE_D) && k[SDL_SCANCODE_D]) || k[SDL_SCANCODE_RIGHT]) p.lx = kStickMax;
+        if ((!is_bound(SDL_SCANCODE_W) && k[SDL_SCANCODE_W]) || k[SDL_SCANCODE_UP]) p.ly = kStickMax;
+        if ((!is_bound(SDL_SCANCODE_S) && k[SDL_SCANCODE_S]) || k[SDL_SCANCODE_DOWN]) p.ly = -kStickMax;
         for (size_t a = 0; a < overlay::kControlCount; ++a)
             if (held(g_key_binding[a].load())) p.buttons |= kActionBits[a];
         if (k[SDL_SCANCODE_RSHIFT] && g_key_binding[overlay::CtlB].load() == SDL_SCANCODE_LSHIFT) p.buttons |= kB;

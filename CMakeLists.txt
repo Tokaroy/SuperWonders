@@ -37,7 +37,7 @@ endif()
 if(MSVC)
     add_compile_options(/arch:AVX2)
 elseif(MINGW)
-    add_compile_options(-mavx2)
+    add_compile_options(-march=x86-64-v3)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # x86-64-v3 (Haswell and later): AVX2, as on Windows, and CMPXCHG16B, without which the recompiled code's
     # 128-bit __atomic_compare_exchange_n becomes a libatomic call (__atomic_compare_exchange_16, unresolved).

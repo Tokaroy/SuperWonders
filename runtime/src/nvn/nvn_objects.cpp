@@ -96,15 +96,43 @@ ViewInfo read_view(CPU& c, uint64_t view) {
     return v;
 }
 
-uint64_t pool_host(const MemoryPool& pool, uint64_t offset) {
-    if (pool.memory) return pool.memory + offset;
-    std::lock_guard lk(objects_lock());
+std::atomic<uint64_t> g_vmap_generation{1};
+
+uint64_t pool_host(const MemoryPool& pool, uint64_t offset, PoolSlice* slice_out) {
+    if (pool.memory) {
+        if (slice_out) *slice_out = {pool.memory, pool.size, pool.flags};
+        return pool.memory + offset;
+    }
+    struct VHit {
+        uint64_t gen = 0, voff = 0, size = 0, phys_mem = 0, phys_size = 0, phys_off = 0;
+        const MemoryPool* pool = nullptr;
+        uint32_t phys_flags = 0;
+    };
+    thread_local VHit vhits[8];
+    thread_local uint32_t vnext = 0;
+    uint64_t gen = g_vmap_generation.load(std::memory_order_acquire);
+    for (const VHit& h : vhits) {
+        if (h.gen == gen && h.pool == &pool && offset - h.voff < h.size) {
+            if (slice_out) *slice_out = {h.phys_mem, h.phys_size, h.phys_flags};
+            return h.phys_mem ? h.phys_mem + h.phys_off + (offset - h.voff) : 0;
+        }
+    }
+    std::shared_lock lk(objects_lock());
     auto it = pool.mappings.upper_bound(offset);
     if (it == pool.mappings.begin()) return 0;
     --it;
     if (offset - it->first >= it->second.size) return 0;
-    auto* phys = dynamic_cast<MemoryPool*>(objects().count(it->second.physical) ? objects()[it->second.physical].get() : nullptr);
-    return phys && phys->memory ? phys->memory + it->second.physical_offset + (offset - it->first) : 0;
+    uint64_t pmem = it->second.physical_memory;
+    uint64_t psize = it->second.physical_size;
+    uint32_t pflags = it->second.physical_flags;
+    if (!pmem) {
+        auto o = objects().find(it->second.physical);
+        auto* phys = o != objects().end() ? dynamic_cast<MemoryPool*>(o->second.get()) : nullptr;
+        if (phys) pmem = phys->memory, psize = phys->size, pflags = phys->flags;
+    }
+    vhits[vnext++ & 7] = {gen, it->first, it->second.size, pmem, psize, it->second.physical_offset, &pool, pflags};
+    if (slice_out) *slice_out = {pmem, psize, pflags};
+    return pmem ? pmem + it->second.physical_offset + (offset - it->first) : 0;
 }
 
 namespace {
@@ -130,7 +158,11 @@ void MemoryPoolFinalize(CPU& c) {
     wait_submits_so_far(kWaitInvalidate);  // a submit replayed on another thread may still read it
     worker_finish();                    // the replay thread may still read it
     gpu_wait(gpu_write_back_serial());  // NX_ASYNC_GPU: no compute result lands in freed memory
-    if (auto* p = get<MemoryPool>(c.x[0])) pool_unregister(p), command_memory_released(p->gpu, p->size);
+    if (auto* p = get<MemoryPool>(c.x[0])) {
+        if (p->memory && p->size) static_buf_invalidate(p->memory, p->size);
+        g_vmap_generation.fetch_add(1, std::memory_order_release);
+        pool_unregister(p), command_memory_released(p->gpu, p->size);
+    }
     destroy(c.x[0]);
 }
 
@@ -173,10 +205,17 @@ void MemoryPoolMapVirtual(CPU& c) {
         }
         if (!v) continue;
         std::lock_guard lk(objects_lock());
-        if (phys)
-            v->mappings[voff] = {phys, poff, size};
-        else
+        if (phys) {
+            uint64_t pmem = 0, psize = 0;
+            uint32_t pflags = 0;
+            if (auto o = objects().find(phys); o != objects().end())
+                if (auto* pp = dynamic_cast<MemoryPool*>(o->second.get()))
+                    pmem = pp->memory, psize = pp->size, pflags = pp->flags;
+            v->mappings[voff] = {phys, poff, size, pmem, psize, pflags};
+        } else {
             v->mappings.erase(voff);  // unmap
+        }
+        g_vmap_generation.fetch_add(1, std::memory_order_release);
     }
     c.x[0] = 1;
 }
@@ -192,6 +231,8 @@ std::map<uint64_t, std::set<uint64_t>>& pool_textures() {
 // (NVNmemoryPool*, ptrdiff_t offset, size_t size)
 void MemoryPoolFlushMappedRange(CPU& c) {
     uint64_t pool = c.x[0], off = c.x[1], size = c.x[2];
+    if (auto* p = get<MemoryPool>(pool); p && p->memory && size)
+        static_buf_invalidate(p->memory + off, size);
     std::lock_guard lk(objects_lock());
     auto it = pool_textures().find(pool);
     if (it == pool_textures().end()) return;

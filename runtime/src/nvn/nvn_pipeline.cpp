@@ -523,11 +523,11 @@ const ProgramLayout& program_layout(const std::vector<const ShaderInfo*>& stages
             vb.stageFlags |= stage_bit(s->stage);
         }
     ProgramLayout pl;
-    // On by default on Android only (NX_DYNAMIC_UBO=0/1 overrides): on the Mac (MoltenVK) every frame came out
-    // black and the GPU hung a few thousand frames in (2026-10-01), cause not found yet.
+    // On by default everywhere except macOS/MoltenVK (NX_DYNAMIC_UBO=0/1 overrides): on the Mac (MoltenVK) every
+    // frame came out black and the GPU hung a few thousand frames in (2026-10-01), cause not found yet.
     static const uint32_t max_dynamic = [] {
         const char* e = std::getenv("NX_DYNAMIC_UBO");
-#if defined(__ANDROID__)
+#if !defined(__APPLE__)
         if (e && e[0] == '0') return 0u;
 #else
         if (!e || e[0] != '1') return 0u;
@@ -539,9 +539,14 @@ const ProgramLayout& program_layout(const std::vector<const ShaderInfo*>& stages
         return p.limits.maxDescriptorSetUniformBuffersDynamic;
     }();
     uint64_t dynamic = 0;
+    uint32_t dyn_count = 0;
     for (auto& [n, b] : sets[0])
-        if (b.descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b.descriptorCount == 1 && n < 64) dynamic |= 1ull << n;
-    if (dynamic && uint32_t(__builtin_popcountll(dynamic)) <= max_dynamic) {
+        if (b.descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b.descriptorCount == 1 && n < 64 &&
+            dyn_count < max_dynamic) {
+            dynamic |= 1ull << n;
+            dyn_count++;
+        }
+    if (dynamic) {
         for (auto& [n, b] : sets[0])
             if (n < 64 && dynamic >> n & 1) b.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
         pl.dynamic = dynamic;
@@ -1249,6 +1254,22 @@ void apply_texel_writes(VkCommandBuffer cb, Texture& t, GpuImage& img) {
     if (writes.empty()) return;
     img.texels = true;
     VkImageLayout back = img.layout;
+    // The upload or clear just recorded (ensure_contents) leaves the image in TRANSFER_DST, where transition() adds
+    // no barrier: the two copies were unordered, and the GPU could land the guest memory's zeros over the texels.
+    // On an RX 9070 XT it did in some sessions, at random: Wonder's 4x4 constant textures read black, the world-map
+    // grass drew dark and shadows showed acne (vfjoo888/SuperWonders#123). NX_TEXEL_WRITE_NO_BARRIER=1: as before.
+    static const bool no_barrier = std::getenv("NX_TEXEL_WRITE_NO_BARRIER") != nullptr;
+    if (img.layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && !no_barrier) {
+        VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.oldLayout = b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = img.image;
+        b.subresourceRange = {img.aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+        p_vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                               nullptr, 1, &b);
+    }
     transition(cb, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     bool is3d = img.view_type == VK_IMAGE_VIEW_TYPE_3D;
     for (const auto& w : writes) {
