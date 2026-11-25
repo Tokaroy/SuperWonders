@@ -746,9 +746,10 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         bool samples_powerup_icon = false;
         bool samples_stock_shadow = false;
         const uint32_t count = indexed ? uint32_t(c.i[0]) : uint32_t(c.i[1]);
-        if (count <= 6) for (const ResolvedTexture& r : g_textures.resolved) {
+        for (const ResolvedTexture& r : g_textures.resolved) {
             GpuImage* sampled = r.image;
             samples_wide |= sampled && sampled->uw;
+            if (count > 6) continue;
             // Wonder composites its HUD from this fixed-size layer. It is screen-anchored at 16:9
             // coordinates, so the usual centered safe-area squeeze moves it away from the real edge.
             Texture* source = r.object;
@@ -760,6 +761,13 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
                                     sampled->logical_height == 80 && source->format == 0x87;
             samples_stock_shadow |= sampled && source && sampled->logical_width == 29 &&
                                     sampled->logical_height == 29 && source->format == 0x01;
+        }
+        if (samples_wide && vs && fs &&
+            ((vs->hash == "42ea61385aa6a70c" && fs->hash == "5bbd5392666b3406") ||
+             (vs->hash == "1b11e4e08801f8aa" && fs->hash == "5da5be9b589e4a70"))) {
+            const Range& u = g_state.uniforms[0][0];
+            const float* f = u.address && u.size >= 96 ? reinterpret_cast<const float*>(guest_bytes(u.address)) : nullptr;
+            if (f && std::fabs(f[19]) > 100.0f) samples_wide = false;
         }
         if (!samples_wide) {
             key.uw_x = 1.0f / uw_factor();
