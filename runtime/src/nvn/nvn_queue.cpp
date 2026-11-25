@@ -436,7 +436,12 @@ uint64_t pace_present(int interval) {
             return 0;
         }
         const uint64_t wait_ns = custom_next - now;
-        constexpr uint64_t kSpinMarginNs = 1'200'000ull;
+        // High-res waitable timer wakes within ~0.5 ms (wider spin at >=120 FPS on Windows to absorb scheduler jitter).
+#ifdef _WIN32
+        const uint64_t kSpinMarginNs = custom_fps >= 120 ? 2'500'000ull : 500'000ull;
+#else
+        constexpr uint64_t kSpinMarginNs = 500'000ull;
+#endif
         if (wait_ns > kSpinMarginNs) plat::sleep_ns(int64_t(wait_ns - kSpinMarginNs));
         while (plat::monotonic_ns() < custom_next) plat::yield();
         const uint64_t done = plat::monotonic_ns();

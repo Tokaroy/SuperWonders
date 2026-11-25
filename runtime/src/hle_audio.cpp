@@ -473,6 +473,7 @@ void render_submit() {
 }
 
 void audio_render_thread(CPU& c) {
+    plat::set_thread_name("audio");
     log("audio: render thread running");
     uint64_t next = plat::monotonic_ns();
     for (;;) {

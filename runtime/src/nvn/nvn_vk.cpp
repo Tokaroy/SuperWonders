@@ -336,6 +336,7 @@ void* g_window = nullptr;
 uint64_t g_window_gen = 0;
 std::atomic<int> g_vsync_wanted{1};  // set_vsync; the swapchain is re-made when it differs from g_vsync_made
 int g_vsync_made = -1;
+bool g_high_cap_made = false;
 
 int vsync_mode() {
     static const int forced = [] {
@@ -465,7 +466,13 @@ bool make_swapchain() {
     // The player's VSync (set_vsync): On FIFO; Fast MAILBOX, else IMMEDIATE (the default, as before); Adaptive
     // FIFO_RELAXED, else FIFO; Off IMMEDIATE, else MAILBOX. Whatever is missing falls back to FIFO.
     const int vsync = vsync_mode();
+    const bool high_cap = frame_cap() >= 120;
     if (vsync == 1) {
+#ifdef _WIN32
+        if (high_cap && has(VK_PRESENT_MODE_IMMEDIATE_KHR))
+            ci.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        else
+#endif
         if (has(VK_PRESENT_MODE_MAILBOX_KHR))
             ci.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
         else if (has(VK_PRESENT_MODE_IMMEDIATE_KHR))
@@ -479,6 +486,7 @@ bool make_swapchain() {
             ci.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
     }
     g_vsync_made = vsync;
+    g_high_cap_made = high_cap;
     static const char* const mode_names[] = {"IMMEDIATE", "MAILBOX", "FIFO", "FIFO_RELAXED"};
     log("nvn/vk: present mode %s (%u modes offered)", ci.presentMode <= 3 ? mode_names[ci.presentMode] : "?", modes_n);
     ci.clipped = VK_TRUE;
@@ -926,7 +934,11 @@ void gpu_present(uint64_t texture, const int32_t* crop) {
         log("nvn/vk: new window: surface and swapchain re-made");
         if (!make_surface()) return;
     }
-    if (g_swapchain && vsync_mode() != g_vsync_made) {  // the player changed VSync: a swapchain with the new mode
+    if (g_swapchain && (vsync_mode() != g_vsync_made ||
+#ifdef _WIN32
+                        (vsync_mode() == 1 && (frame_cap() >= 120) != g_high_cap_made) ||
+#endif
+                        false)) {  // the player changed VSync: a swapchain with the new mode
         if (async_gpu()) frame_wait_all();
         p_vkDeviceWaitIdle(g_device);
         present_pass_release();
