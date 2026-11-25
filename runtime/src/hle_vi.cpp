@@ -52,6 +52,11 @@ void vsync_thread() {
     plat::set_thread_name("vsync");
     uint64_t next = plat::monotonic_ns();
     for (;;) {
+        if (plat::paused()) {
+            plat::sleep_ns(20'000'000);
+            next = plat::monotonic_ns();
+            continue;
+        }
         // On the display's own blank where its refresh is a multiple of 60 Hz: a timer of our own drifted against
         // it, and every few seconds MAILBOX showed a frame twice or dropped one (microstutter).
         if (plat::fast_forward()) {  // ticks as fast as the game takes them (500 Hz at most)

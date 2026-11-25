@@ -438,13 +438,14 @@ void set_theme_index(int index) {
 }
 
 void key_event(int raw, Key key, bool down) {
-    if (key == KeyF1 && down) {
+    if (key == KeyF1 && down && g_capture < 0) {
         toggle();
         return;
     }
     if (!taking_input() && key != KeyNone) return;
     push({Event::KeyEv, raw, key, down});
 }
+bool capturing_key() { return g_capture >= 0; }
 void mouse_move(float x, float y) {
     if (taking_input()) push({Event::Move, 0, KeyNone, false, x, y});
 }
@@ -637,7 +638,13 @@ ImDrawData* build_frame(uint32_t w, uint32_t h) {
         switch (e.kind) {
             case Event::KeyEv:
                 if (g_capture >= 0 && e.down) {  // the next key becomes the binding; Esc cancels
-                    if (e.key != KeyEscape) g_settings.keyboard_bindings[size_t(g_capture)] = e.raw, changed = true;
+                    if (e.key != KeyEscape) {
+                        if (g_capture < int(kControlCount))
+                            g_settings.keyboard_bindings[size_t(g_capture)] = e.raw;
+                        else if (g_capture < int(kControlCount + kHotkeyCount))
+                            g_settings.hotkey_bindings[size_t(g_capture) - kControlCount] = e.raw;
+                        changed = true;
+                    }
                     g_capture = -1;
                     break;
                 }

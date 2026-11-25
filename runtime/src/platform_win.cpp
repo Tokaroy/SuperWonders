@@ -339,11 +339,15 @@ static PcMenuState g_pc_settings;
 static std::array<std::atomic<int>, 4> g_player_devices{};
 static std::atomic<bool> g_keyboard_separate{false};
 static std::atomic<int> g_button_icons{0};
+static std::array<std::atomic<int>, 4> g_pad_left_deadzone{{{16}, {16}, {16}, {16}}};
+static std::array<std::atomic<int>, 4> g_pad_right_deadzone{{{16}, {16}, {16}, {16}}};
 static std::atomic<int> g_controller_preset{0};
 static std::array<std::array<std::atomic<int>, kPcControlCount>, 4> g_device_bindings{};
 static std::atomic<IXAudio2MasteringVoice*> g_master_voice{nullptr};
 static std::array<std::atomic<int>, kPcControlCount> g_keyboard_bindings{};
 static std::array<std::atomic<int>, kPcControlCount> g_controller_bindings{};
+static std::array<std::atomic<int>, kPcHotkeyCount> g_hotkey_bindings{{{VK_F1}, {VK_F2}, {VK_F11}, {VK_TAB}}};
+static std::atomic<bool> g_pause_in_background{false};
 static std::atomic<HWND> g_metrics_window{nullptr};
 static std::atomic<bool> g_metrics_enabled{false}, g_metric_fps{true}, g_metric_one_percent_low{true};
 static std::atomic<bool> g_metric_game_speed{true}, g_metric_frametime_graph{true};
@@ -370,7 +374,7 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.player_devices = s.player_devices, o.pad_bindings = s.pad_bindings, o.pad_custom_mask = s.pad_custom_mask, o.pad_presets = s.pad_presets;
     o.keyboard_separate = s.keyboard_separate;
     o.controller_preset = s.controller_preset, o.button_icons = s.button_icons, o.muted = s.muted,
-        o.mute_in_background = s.mute_in_background, o.fullscreen = s.fullscreen;
+        o.mute_in_background = s.mute_in_background, o.pause_in_background = s.pause_in_background, o.fullscreen = s.fullscreen;
     o.always_on_top = s.always_on_top, o.metrics_enabled = s.metrics_enabled, o.low_vram_profile = s.low_vram_profile, o.discord_rpc = s.discord_rpc;
     o.metric_fps = s.metric_fps, o.metric_one_percent_low = s.metric_one_percent_low;
     o.metric_game_speed = s.metric_game_speed, o.metric_frametime_graph = s.metric_frametime_graph;
@@ -379,13 +383,15 @@ static overlay::Settings to_overlay(const PcMenuState& s) {
     o.speedrun_timer_position = s.speedrun_timer_position, o.speedrun_timer_size = s.speedrun_timer_size;
     o.speedrun_timer_color = s.speedrun_timer_color;
     o.upscaler = s.upscaler, o.fsr_sharpness = s.fsr_sharpness, o.antialiasing = s.antialiasing;
-    o.anisotropy = s.anisotropy, o.shadow_scale = s.shadow_scale, o.rumble = s.rumble, o.vsync = s.vsync, o.frame_cap = s.frame_cap;
+    o.anisotropy = s.anisotropy, o.shadow_scale = s.shadow_scale, o.rumble = s.rumble,
+        o.pad_left_deadzones = s.pad_left_deadzones, o.pad_right_deadzones = s.pad_right_deadzones, o.vsync = s.vsync, o.frame_cap = s.frame_cap;
     o.hdr = s.hdr, o.hdr_peak = s.hdr_peak, o.hdr_paper_white = s.hdr_paper_white;
     o.hdr_highlights = s.hdr_highlights, o.hdr_highlight_start = s.hdr_highlight_start, o.hdr_sdr_eotf = s.hdr_sdr_eotf;
     o.hdr_exposure = s.hdr_exposure, o.hdr_contrast = s.hdr_contrast, o.hdr_shadows = s.hdr_shadows;
     o.hdr_saturation = s.hdr_saturation, o.hdr_highlight_saturation = s.hdr_highlight_saturation;
     for (size_t i = 0; i < kPcControlCount; ++i)
         o.keyboard_bindings[i] = s.keyboard_bindings[i], o.controller_bindings[i] = s.controller_bindings[i];
+    for (size_t i = 0; i < kPcHotkeyCount; ++i) o.hotkey_bindings[i] = s.hotkey_bindings[i];
     return o;
 }
 
@@ -397,7 +403,7 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.player_devices = o.player_devices, s.pad_bindings = o.pad_bindings, s.pad_custom_mask = o.pad_custom_mask, s.pad_presets = o.pad_presets;
     s.keyboard_separate = o.keyboard_separate;
     s.controller_preset = o.controller_preset, s.button_icons = o.button_icons, s.muted = o.muted,
-        s.mute_in_background = o.mute_in_background, s.fullscreen = o.fullscreen;
+        s.mute_in_background = o.mute_in_background, s.pause_in_background = o.pause_in_background, s.fullscreen = o.fullscreen;
     s.always_on_top = o.always_on_top, s.metrics_enabled = o.metrics_enabled, s.low_vram_profile = o.low_vram_profile, s.discord_rpc = o.discord_rpc;
     s.metric_fps = o.metric_fps, s.metric_one_percent_low = o.metric_one_percent_low;
     s.metric_game_speed = o.metric_game_speed, s.metric_frametime_graph = o.metric_frametime_graph;
@@ -406,13 +412,15 @@ static PcMenuState from_overlay(const overlay::Settings& o) {
     s.speedrun_timer_position = o.speedrun_timer_position, s.speedrun_timer_size = o.speedrun_timer_size;
     s.speedrun_timer_color = o.speedrun_timer_color;
     s.upscaler = o.upscaler, s.fsr_sharpness = o.fsr_sharpness, s.antialiasing = o.antialiasing;
-    s.anisotropy = o.anisotropy, s.shadow_scale = o.shadow_scale, s.rumble = o.rumble, s.vsync = o.vsync, s.frame_cap = o.frame_cap;
+    s.anisotropy = o.anisotropy, s.shadow_scale = o.shadow_scale, s.rumble = o.rumble,
+        s.pad_left_deadzones = o.pad_left_deadzones, s.pad_right_deadzones = o.pad_right_deadzones, s.vsync = o.vsync, s.frame_cap = o.frame_cap;
     s.hdr = o.hdr, s.hdr_peak = o.hdr_peak, s.hdr_paper_white = o.hdr_paper_white;
     s.hdr_highlights = o.hdr_highlights, s.hdr_highlight_start = o.hdr_highlight_start, s.hdr_sdr_eotf = o.hdr_sdr_eotf;
     s.hdr_exposure = o.hdr_exposure, s.hdr_contrast = o.hdr_contrast, s.hdr_shadows = o.hdr_shadows;
     s.hdr_saturation = o.hdr_saturation, s.hdr_highlight_saturation = o.hdr_highlight_saturation;
     for (size_t i = 0; i < kPcControlCount; ++i)
         s.keyboard_bindings[i] = o.keyboard_bindings[i], s.controller_bindings[i] = o.controller_bindings[i];
+    for (size_t i = 0; i < kPcHotkeyCount; ++i) s.hotkey_bindings[i] = o.hotkey_bindings[i];
     return s;
 }
 
@@ -482,6 +490,10 @@ static void apply_metrics_settings(const PcMenuState& state) {
 static void apply_input_bindings(const PcMenuState& state) {
     g_keyboard_separate.store(state.keyboard_separate);
     g_button_icons.store(std::clamp(state.button_icons, 0, 3));
+    for (size_t slot = 0; slot < 4; ++slot) {
+        g_pad_left_deadzone[slot].store(std::clamp(state.pad_left_deadzones[slot], 0, 34), std::memory_order_relaxed);
+        g_pad_right_deadzone[slot].store(std::clamp(state.pad_right_deadzones[slot], 0, 34), std::memory_order_relaxed);
+    }
     g_controller_preset.store(std::clamp(state.controller_preset, 0, 1));
     for (size_t slot = 0; slot < 4; ++slot) g_player_devices[slot].store(state.player_devices[slot]);
     for (size_t i = 0; i < kPcControlCount; ++i) {
@@ -497,6 +509,9 @@ static void apply_input_bindings(const PcMenuState& state) {
         g_controller_bindings[i].store(std::clamp(controller, 0, int(kPcControlCount) - 1),
                                        std::memory_order_relaxed);
     }
+    for (size_t i = 0; i < kPcHotkeyCount; ++i)
+        if (state.hotkey_bindings[i] > 0)
+            g_hotkey_bindings[i].store(std::clamp(state.hotkey_bindings[i], 0, 255), std::memory_order_relaxed);
 }
 
 static void save_pc_settings() {
@@ -506,7 +521,7 @@ static void save_pc_settings() {
          << "\naudio_mode=" << g_pc_settings.audio_mode << "\nstereo_separation=" << g_pc_settings.stereo_separation
          << "\naspect_ratio=" << std::max(0, g_pc_settings.aspect_ratio)
          << "\ninternal_resolution=" << g_pc_settings.internal_resolution << "\nmuted=" << g_pc_settings.muted
-         << "\nmute_in_background=" << g_pc_settings.mute_in_background << "\nfullscreen=" << g_pc_settings.fullscreen
+         << "\nmute_in_background=" << g_pc_settings.mute_in_background << "\npause_in_background=" << g_pc_settings.pause_in_background << "\nfullscreen=" << g_pc_settings.fullscreen
          << "\nalways_on_top=" << g_pc_settings.always_on_top << "\nlanguage=" << g_pc_settings.language
          << "\ntheme=" << g_pc_settings.theme
          << "\ngame_language=" << g_pc_settings.game_language
@@ -530,7 +545,8 @@ static void save_pc_settings() {
          << "\nupscaler=" << g_pc_settings.upscaler << "\nfsr_sharpness=" << g_pc_settings.fsr_sharpness
          << "\nantialiasing=" << g_pc_settings.antialiasing << "\nanisotropy=" << g_pc_settings.anisotropy
          << "\nshadow_scale=" << g_pc_settings.shadow_scale
-         << "\nrumble=" << g_pc_settings.rumble << "\nvsync=" << g_pc_settings.vsync
+         << "\nrumble=" << g_pc_settings.rumble
+         << "\nvsync=" << g_pc_settings.vsync
          << "\nframe_cap=" << g_pc_settings.frame_cap
          << "\nhdr=" << g_pc_settings.hdr << "\nhdr_peak=" << g_pc_settings.hdr_peak
          << "\nhdr_paper_white=" << g_pc_settings.hdr_paper_white
@@ -543,6 +559,8 @@ static void save_pc_settings() {
     file << "keyboard_separate=" << g_pc_settings.keyboard_separate << '\n';
     for (size_t slot = 0; slot < 4; ++slot) {
         file << "player_device_" << slot << '=' << g_pc_settings.player_devices[slot] << '\n';
+        file << "pad_deadzone_l_" << slot << '=' << std::clamp(g_pc_settings.pad_left_deadzones[slot], 0, 34) << '\n';
+        file << "pad_deadzone_r_" << slot << '=' << std::clamp(g_pc_settings.pad_right_deadzones[slot], 0, 34) << '\n';
         if (slot) {
             file << "pad_preset_" << slot << '=' << std::clamp(g_pc_settings.pad_presets[slot], 0, 1) << '\n';
             file << "pad_mask_" << slot << '=' << g_pc_settings.pad_custom_mask[slot] << '\n';
@@ -553,6 +571,8 @@ static void save_pc_settings() {
     for (size_t i = 0; i < kPcControlCount; ++i)
         file << "keyboard_" << i << '=' << g_pc_settings.keyboard_bindings[i] << '\n'
              << "controller_" << i << '=' << g_pc_settings.controller_bindings[i] << '\n';
+    for (size_t i = 0; i < kPcHotkeyCount; ++i)
+        file << "hotkey_" << i << '=' << g_pc_settings.hotkey_bindings[i] << '\n';
 }
 
 static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenuState& state) {
@@ -573,6 +593,8 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         else if (std::sscanf(line.c_str(), "muted=%d", &value) == 1) state.muted = value != 0;
         else if (std::sscanf(line.c_str(), "mute_in_background=%d", &value) == 1)
             state.mute_in_background = value != 0;
+        else if (std::sscanf(line.c_str(), "pause_in_background=%d", &value) == 1)
+            state.pause_in_background = value != 0;
         else if (std::sscanf(line.c_str(), "fullscreen=%d", &value) == 1) state.fullscreen = value != 0;
         else if (std::sscanf(line.c_str(), "always_on_top=%d", &value) == 1) state.always_on_top = value != 0;
         else if (std::sscanf(line.c_str(), "language=%d", &value) == 1) state.language = std::clamp(value, 0, 12);
@@ -622,6 +644,12 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         else if (std::sscanf(line.c_str(), "shadow_scale=%d", &value) == 1)
             state.shadow_scale = (value == 2 || value == 4) ? value : 1;
         else if (std::sscanf(line.c_str(), "rumble=%d", &value) == 1) state.rumble = std::clamp(value, 0, 100);
+        else if (std::sscanf(line.c_str(), "stick_deadzone=%d", &value) == 1)
+            state.pad_left_deadzones.fill(std::clamp(value, 0, 34)), state.pad_right_deadzones.fill(std::clamp(value, 0, 34));
+        else if (std::sscanf(line.c_str(), "left_stick_deadzone=%d", &value) == 1)
+            state.pad_left_deadzones.fill(std::clamp(value, 0, 34));
+        else if (std::sscanf(line.c_str(), "right_stick_deadzone=%d", &value) == 1)
+            state.pad_right_deadzones.fill(std::clamp(value, 0, 34));
         else if (std::sscanf(line.c_str(), "vsync=%d", &value) == 1) state.vsync = std::clamp(value, 0, 3);
         else if (std::sscanf(line.c_str(), "hdr=%d", &value) == 1) state.hdr = value != 0;
         else if (std::sscanf(line.c_str(), "hdr_peak=%d", &value) == 1) state.hdr_peak = std::clamp(value, 400, 10000);
@@ -650,6 +678,10 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
                 state.player_devices[size_t(index)] = binding;
             else if (std::sscanf(line.c_str(), "pad_preset_%d=%d", &slot, &binding) == 2 && slot > 0 && slot < 4)
                 state.pad_presets[size_t(slot)] = std::clamp(binding, 0, 1);
+            else if (std::sscanf(line.c_str(), "pad_deadzone_l_%d=%d", &slot, &binding) == 2 && slot >= 0 && slot < 4)
+                state.pad_left_deadzones[size_t(slot)] = std::clamp(binding, 0, 34);
+            else if (std::sscanf(line.c_str(), "pad_deadzone_r_%d=%d", &slot, &binding) == 2 && slot >= 0 && slot < 4)
+                state.pad_right_deadzones[size_t(slot)] = std::clamp(binding, 0, 34);
             else if (std::sscanf(line.c_str(), "pad_mask_%d=%u", &slot, &mask) == 2 && slot > 0 && slot < 4)
                 state.pad_custom_mask[size_t(slot)] = mask;
             else if (std::sscanf(line.c_str(), "pad_%d_%d=%d", &slot, &index, &binding) == 3 && slot > 0 && slot < 4 && index >= 0 && index < int(kPcControlCount) && binding >= 0 && binding < int(kPcControlCount))
@@ -660,6 +692,9 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
             else if (std::sscanf(line.c_str(), "controller_%d=%d", &index, &binding) == 2 &&
                      index >= 0 && index < int(kPcControlCount) && binding >= 0 && binding < int(kPcControlCount))
                 state.controller_bindings[size_t(index)] = binding;
+            else if (std::sscanf(line.c_str(), "hotkey_%d=%d", &index, &binding) == 2 &&
+                     index >= 0 && index < int(kPcHotkeyCount) && binding >= 0 && binding <= 255)
+                state.hotkey_bindings[size_t(index)] = binding;
         }
     }
     if (game_language_version < 2 && (state.game_language == 8 || state.game_language == 10))
@@ -706,6 +741,7 @@ static void apply_loaded_pc_settings(const PcMenuState& state) {
     nx::set_audio_output(state.audio_mode, state.stereo_separation);
     nx::set_game_language(state.game_language);
     apply_input_bindings(state);
+    g_pause_in_background.store(state.pause_in_background, std::memory_order_relaxed);
     set_memory_limit_gb(state.memory_limit_gb);
     _putenv_s("NX_LOW_VRAM_PROFILE", state.low_vram_profile ? "1" : "0");
     nx::nvn::set_fsr(state.upscaler == 1, float(state.fsr_sharpness) / 100.0f);
@@ -752,7 +788,7 @@ static std::atomic<bool> g_window_focused{true};
 static void set_game_volume() {
     if (IXAudio2MasteringVoice* voice = g_master_voice.load()) {
         const bool muted = g_pc_settings.muted ||
-                           (g_pc_settings.mute_in_background && !g_window_focused.load(std::memory_order_relaxed));
+                           (g_pc_settings.mute_in_background && !g_window_focused.load(std::memory_order_relaxed)) || paused();
         const int percent = std::clamp(g_pc_settings.volume, 0, 200);
         const float gain = percent <= 100 ? (float(percent) / 100.0f) * (float(percent) / 100.0f)
                                           : float(percent) / 100.0f;
@@ -965,6 +1001,8 @@ static void apply_pc_menu(const PcMenuState& state, bool persist) {
     g_pc_settings.button_icons = std::clamp(g_pc_settings.button_icons, 0, 3);
     g_pc_settings.overlay_position = std::clamp(g_pc_settings.overlay_position, 0, 3);
     apply_input_bindings(g_pc_settings);
+    g_pause_in_background.store(g_pc_settings.pause_in_background, std::memory_order_relaxed);
+    set_game_volume();
     nx::set_game_language(g_pc_settings.game_language);
     apply_metrics_settings(g_pc_settings);
     set_memory_limit_gb(g_pc_settings.memory_limit_gb);
@@ -1042,7 +1080,11 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         switch (msg) {
             case WM_KEYDOWN:
             case WM_KEYUP:
-                if (w == VK_F1 || w == VK_F2 || w == VK_F11) break;  // handled below
+                if (!overlay::capturing_key() &&
+                    (w == WPARAM(g_hotkey_bindings[0].load(std::memory_order_relaxed)) ||
+                     w == WPARAM(g_hotkey_bindings[1].load(std::memory_order_relaxed)) ||
+                     w == WPARAM(g_hotkey_bindings[2].load(std::memory_order_relaxed))))
+                    break;  // handled below
                 if (msg == WM_KEYUP || !(l & (1ll << 30))) overlay::key_event(int(w), overlay_key(w), msg == WM_KEYDOWN);
                 return 0;
             case WM_CHAR: {
@@ -1070,6 +1112,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         case WM_MOVE:
         case WM_SIZE:
             metrics_reposition();
+            set_game_volume();
             break;
         case WM_PAINT: {
             if (!g_shader_progress_visible.load(std::memory_order_acquire) || overlay::enabled())
@@ -1123,18 +1166,23 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             nx::nvn::flush_pipeline_cache();
             ExitProcess(0);
         case WM_KEYDOWN:
-            if (w == VK_F1 && !(l & (1ll << 30))) {
-                if (overlay::enabled())
-                    overlay::toggle();
-                else
-                    pc_menu_toggle();
-                return 0;
+            if (!overlay::capturing_key()) {
+                if (w == WPARAM(g_hotkey_bindings[0].load(std::memory_order_relaxed)) && !(l & (1ll << 30))) {
+                    if (overlay::enabled())
+                        overlay::toggle();
+                    else
+                        pc_menu_toggle();
+                    return 0;
+                }
+                if (w == WPARAM(g_hotkey_bindings[1].load(std::memory_order_relaxed)) && !(l & (1ll << 30))) {
+                    nx::nvn::request_screenshot();
+                    return 0;
+                }
+                if (w == WPARAM(g_hotkey_bindings[2].load(std::memory_order_relaxed)) && !(l & (1ll << 30))) {
+                    toggle_fullscreen(h);
+                    return 0;
+                }
             }
-            if (w == VK_F2 && !(l & (1ll << 30))) {
-                nx::nvn::request_screenshot();
-                return 0;
-            }
-            if (w == VK_F11) toggle_fullscreen(h);
             break;
         case WM_SYSKEYDOWN:
             if (w == VK_RETURN) {  // Alt+Enter
@@ -1191,6 +1239,7 @@ static void window_thread(std::atomic<bool>* ready) {
         host.apply = overlay_apply;
         host.key_name = overlay_key_name;
         host.default_keyboard_bindings = PcMenuState{}.keyboard_bindings;
+        host.default_hotkey_bindings = PcMenuState{}.hotkey_bindings;
         overlay::init(host, to_overlay(g_pc_settings));
     }
     metrics_init(g_window);
@@ -1294,6 +1343,9 @@ static void ensure_input_poller();
 bool fast_forward() {
     ensure_input_poller();
     return g_fast_forward_down.load(std::memory_order_relaxed);
+}
+bool paused() {
+    return g_pause_in_background.load(std::memory_order_relaxed) && (!g_window_focused.load(std::memory_order_relaxed) || window_minimized());
 }
 
 bool headless() {  // NX_HEADLESS (platform.h)
@@ -1437,9 +1489,13 @@ static RawPad read_raw(SDL_Gamepad* pad) {
     for (int i = 0; i < SDL_GAMEPAD_AXIS_COUNT; ++i) r.a[size_t(i)] = SDL_GetGamepadAxis(pad, SDL_GamepadAxis(i));
     return r;
 }
-static int stick_value(int value) {  // the dead zone, then -kStickMax..kStickMax (no inversion)
-    if (value > -7849 && value < 7849) return 0;
-    return std::clamp(value, -kStickMax, kStickMax);
+static int stick_value(int value, size_t slot, bool right) {  // the dead zone, then -kStickMax..kStickMax (no inversion)
+    const auto& atom = (right ? g_pad_right_deadzone : g_pad_left_deadzone)[slot];
+    const int dz = (std::clamp(atom.load(std::memory_order_relaxed), 0, 34) * kStickMax) / 100;
+    const int av = std::min(std::abs(value), kStickMax);
+    if (av <= dz) return 0;
+    const int mag = ((av - dz) * kStickMax) / (kStickMax - dz);
+    return value < 0 ? -mag : mag;
 }
 static bool trigger_down(int value) { return value > 12000; }
 // SL and SR (SDL's paddles for a Joy-Con: left SL / SR = left paddle 1 / 2, right SR / SL = right paddle 1 / 2)
@@ -1459,7 +1515,7 @@ struct ControllerInput {
     bool down[kPcControlCount]{};
     int lx = 0, ly = 0, rx = 0, ry = 0;
 };
-static void add_full(ControllerInput& c, const RawPad& r) {
+static void add_full(ControllerInput& c, const RawPad& r, size_t slot) {
     c.down[PcSouth] = r.b[SDL_GAMEPAD_BUTTON_SOUTH], c.down[PcEast] = r.b[SDL_GAMEPAD_BUTTON_EAST];
     c.down[PcWest] = r.b[SDL_GAMEPAD_BUTTON_WEST], c.down[PcNorth] = r.b[SDL_GAMEPAD_BUTTON_NORTH];
     c.down[PcShoulderL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_SHOULDER], c.down[PcShoulderR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER];
@@ -1469,31 +1525,31 @@ static void add_full(ControllerInput& c, const RawPad& r) {
     c.down[PcStickL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_STICK], c.down[PcStickR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
     c.down[PcLeft] = r.b[SDL_GAMEPAD_BUTTON_DPAD_LEFT], c.down[PcUp] = r.b[SDL_GAMEPAD_BUTTON_DPAD_UP];
     c.down[PcRight] = r.b[SDL_GAMEPAD_BUTTON_DPAD_RIGHT], c.down[PcDown] = r.b[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
-    c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX]), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY]);
-    c.rx = stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX]), c.ry = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY]);
+    c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX], slot, false), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY], slot, false);
+    c.rx = stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX], slot, true), c.ry = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY], slot, true);
 }
 // An upright Joy-Con: its half of a full controller
-static void add_upright(ControllerInput& c, const RawPad& r, JoyCon side) {
+static void add_upright(ControllerInput& c, const RawPad& r, JoyCon side, size_t slot) {
     if (side == JoyCon::Left) {
         c.down[PcShoulderL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_SHOULDER];
         c.down[PcTriggerL] = trigger_down(r.a[SDL_GAMEPAD_AXIS_LEFT_TRIGGER]);
         c.down[PcBack] = r.b[SDL_GAMEPAD_BUTTON_BACK], c.down[PcStickL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_STICK];
         c.down[PcLeft] = r.b[SDL_GAMEPAD_BUTTON_DPAD_LEFT], c.down[PcUp] = r.b[SDL_GAMEPAD_BUTTON_DPAD_UP];
         c.down[PcRight] = r.b[SDL_GAMEPAD_BUTTON_DPAD_RIGHT], c.down[PcDown] = r.b[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
-        c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX]), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY]);
+        c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX], slot, false), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY], slot, false);
     } else {
         c.down[PcSouth] = r.b[SDL_GAMEPAD_BUTTON_SOUTH], c.down[PcEast] = r.b[SDL_GAMEPAD_BUTTON_EAST];
         c.down[PcWest] = r.b[SDL_GAMEPAD_BUTTON_WEST], c.down[PcNorth] = r.b[SDL_GAMEPAD_BUTTON_NORTH];
         c.down[PcShoulderR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER];
         c.down[PcTriggerR] = trigger_down(r.a[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER]);
         c.down[PcStart] = r.b[SDL_GAMEPAD_BUTTON_START], c.down[PcStickR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
-        c.rx = stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX]), c.ry = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY]);
+        c.rx = stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX], slot, true), c.ry = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY], slot, true);
     }
 }
 // A Joy-Con held sideways (rail up, SL on the left): a small full controller, as a Switch plays it. The left one is
 // turned a quarter turn counter-clockwise from upright, the right one clockwise; its buttons are named by where they
 // are now (the bottom one is south), SL / SR are L / R, its stick is the left stick, Minus / Plus is Plus.
-static void add_sideways(ControllerInput& c, const RawPad& r, JoyCon side) {
+static void add_sideways(ControllerInput& c, const RawPad& r, JoyCon side, size_t slot) {
     if (side == JoyCon::Left) {
         c.down[PcSouth] = r.b[SDL_GAMEPAD_BUTTON_DPAD_LEFT], c.down[PcEast] = r.b[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
         c.down[PcWest] = r.b[SDL_GAMEPAD_BUTTON_DPAD_UP], c.down[PcNorth] = r.b[SDL_GAMEPAD_BUTTON_DPAD_RIGHT];
@@ -1501,7 +1557,7 @@ static void add_sideways(ControllerInput& c, const RawPad& r, JoyCon side) {
         c.down[PcShoulderR] = r.b[SDL_GAMEPAD_BUTTON_LEFT_PADDLE2];   // SR
         c.down[PcStart] = r.b[SDL_GAMEPAD_BUTTON_BACK], c.down[PcStickL] = r.b[SDL_GAMEPAD_BUTTON_LEFT_STICK];
         // upright x right / y up (SDL y down) turned: right is upright down, up is upright right
-        c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY]), c.ly = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX]);
+        c.lx = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTY], slot, false), c.ly = stick_value(r.a[SDL_GAMEPAD_AXIS_LEFTX], slot, false);
     } else {
         c.down[PcSouth] = r.b[SDL_GAMEPAD_BUTTON_EAST], c.down[PcEast] = r.b[SDL_GAMEPAD_BUTTON_NORTH];
         c.down[PcWest] = r.b[SDL_GAMEPAD_BUTTON_SOUTH], c.down[PcNorth] = r.b[SDL_GAMEPAD_BUTTON_WEST];
@@ -1509,7 +1565,7 @@ static void add_sideways(ControllerInput& c, const RawPad& r, JoyCon side) {
         c.down[PcShoulderR] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1];  // SR
         c.down[PcStart] = r.b[SDL_GAMEPAD_BUTTON_START], c.down[PcStickL] = r.b[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
         // right is upright up, up is upright left
-        c.lx = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY]), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX]);
+        c.lx = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTY], slot, true), c.ly = -stick_value(r.a[SDL_GAMEPAD_AXIS_RIGHTX], slot, true);
     }
 }
 
@@ -1616,24 +1672,24 @@ static PlayerInputs sample_players_uncached() {
             SlotMembers& m = members[slot];
             m.device[0] = int(i), m.id[0] = SDL_GetGamepadID(pad);
             if (d.side == JoyCon::None) {
-                add_full(in, raw[i]);
+                add_full(in, raw[i], slot);
                 result.names[slot] = device_name(pad);
                 result.styles[slot] = detect_gamepad_style(pad);
                 m.role[0] = 3;
             } else if (d.sideways) {
-                add_sideways(in, raw[i], d.side);
+                add_sideways(in, raw[i], d.side, slot);
                 result.names[slot] = device_name(pad) + " (sideways)";
                 result.styles[slot] = 1;
                 m.role[0] = 2;
             } else {
-                add_upright(in, raw[i], d.side);
+                add_upright(in, raw[i], d.side, slot);
                 result.names[slot] = device_name(pad);
                 result.styles[slot] = 1;
                 m.role[0] = d.side == JoyCon::Left ? 0 : 1;
                 if (d.partner >= 0 && g_gamepads[size_t(d.partner)]) {
                     const size_t p = size_t(d.partner);
                     ControllerInput other;
-                    add_upright(other, raw[p], g_devices[p].side);
+                    add_upright(other, raw[p], g_devices[p].side, slot);
                     for (size_t k = 0; k < kPcControlCount; ++k) in.down[k] = in.down[k] || other.down[k];
                     if (other.lx || other.ly) in.lx = other.lx, in.ly = other.ly;
                     if (other.rx || other.ry) in.rx = other.rx, in.ry = other.ry;
@@ -1667,7 +1723,7 @@ static PlayerInputs sample_players_uncached() {
     PadState keyboard{};
     const bool focused = g_window && GetForegroundWindow() == g_window;
     auto key_focused = [focused](int vk) { return focused && vk > 0 && (GetAsyncKeyState(vk) & 0x8000); };
-    g_fast_forward_down.store(key_focused(VK_TAB), std::memory_order_relaxed);
+    g_fast_forward_down.store(key_focused(g_hotkey_bindings[3].load(std::memory_order_relaxed)), std::memory_order_relaxed);
     if (focused && !overlay::wants_keyboard() && !pc_menu_open()) {
         for (size_t action = 0; action < kPcControlCount; ++action) {
             if (!key_focused(g_keyboard_bindings[action].load())) continue;

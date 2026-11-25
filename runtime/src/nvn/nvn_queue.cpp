@@ -408,6 +408,10 @@ uint64_t pace_present(int interval) {
     }();
     static uint64_t custom_next = 0;
     static int prev_fps = 0;
+    while (plat::paused()) {
+        plat::sleep_ns(20'000'000);
+        custom_next = 0;
+    }
     if (off || interval <= 0 || plat::fast_forward()) {
         custom_next = 0;
         return 0;

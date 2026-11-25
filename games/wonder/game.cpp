@@ -851,7 +851,12 @@ void game::frame_presented(uint64_t now_ns, int present_interval) {
 
     double seconds = double(std::max(1, present_interval)) / 60.0;
     wonder::seed_guard_tick(now_ns);
-    if (realtime && nvn::held_frame_cap() == 60) {
+    if (realtime && plat::fast_forward()) {
+        const double clamped_dt = std::clamp(dt, 1.0 / 500.0, 1.0 / 30.0);
+        seconds = std::min(clamped_dt * 4.0, 1.0 / 15.0);
+        prev_seconds = clamped_dt;
+        sample_count = sample_next = 0;
+    } else if (realtime && nvn::held_frame_cap() == 60) {
         // A moment the game needs at its own rate (seed_guard.cpp): presented at 60, a 60 Hz step each frame; the
         // average starts again when the hold ends.
         seconds = 1.0 / 60.0;

@@ -75,7 +75,22 @@ uint64_t heap_size() { return g_heap_size.load(std::memory_order_relaxed); }
 
 CPU& current_cpu() { return t_self->ctx; }
 
-uint64_t system_tick() { return plat::monotonic_ns() * 192 / 10000; }  // 19.2 MHz
+uint64_t system_tick() {  // 19.2 MHz (scaled during fast-forward so delta-time physics/animations speed up too)
+    static std::mutex mu;
+    static uint64_t last_real = 0;
+    static uint64_t scaled_ns = 0;
+    const uint64_t now = plat::monotonic_ns();
+    std::lock_guard lk(mu);
+    if (!last_real) {
+        last_real = now;
+        scaled_ns = now;
+    } else if (now > last_real) {
+        const uint64_t mult = plat::paused() ? 0 : (plat::fast_forward() ? 4 : 1);
+        scaled_ns += (now - last_real) * mult;
+        last_real = now;
+    }
+    return scaled_ns * 192 / 10000;
+}
 
 // The spin throttles below (a 0.5 ms nap for threads spinning on the tick or on yields) were made for Hades on phones.
 // Wonder's job system joins its workers by yielding in a loop: every join became >= 1 ms and the main thread spent

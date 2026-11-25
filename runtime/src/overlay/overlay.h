@@ -24,11 +24,13 @@ struct Host {
     // A short name for a keyboard binding (a platform key code), for the Controls tab.
     const char* (*key_name)(int key) = nullptr;
     std::array<int, kControlCount> default_keyboard_bindings{};
+    std::array<int, kHotkeyCount> default_hotkey_bindings{};
     bool can_always_on_top = true;  // the window system supports it (not Wayland)
     bool can_resize = true;         // the window can be given a size
 };
 
 bool enabled();  // NX_IMGUI_MENU, default on
+bool capturing_key();  // true while the Controls tab is waiting for a key press to bind
 int menu_language();  // selected launcher / in-game menu language, 0..12
 int game_language();  // selected game text language, 0..17
 void set_game_version(const std::string& version);

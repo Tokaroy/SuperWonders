@@ -382,7 +382,7 @@ enum LauncherText {
     LtOpenDataFolder, LtOpenSettings, LtFolder, LtOpenModsFolder, LtRefresh, LtQuitSuperWonders, LtFilesReady,
     LtNeedsRebuild, LtFilesNotSetUp, LtSelect, LtBack, LtPages, LtPlayHint, LtStart, LtSetUpFirst, LtVersion,
     LtChooseOutput, LtChooseExeFS, LtChooseRomFS, LtUseFolder, LtResetDefault, LtUpFolder, LtHomeFolder, LtDrives,
-    LtFoldersHere, LtOtherWays, LtSystemPicker, LtCancel, LtSetUpAgain, LtTextCount
+    LtFoldersHere, LtOtherWays, LtSystemPicker, LtCancel, LtSetUpAgain, LtOpenScreenshotsFolder, LtTextCount
 };
 
 // These short labels follow the language selected in F1 > System; the detailed tool output stays in its original language.
@@ -393,7 +393,7 @@ const char* const kLauncherText[10][LtTextCount] = {
      "Quit SuperWonders", "Game files ready", "Game code needs building again", "Game files not set up", "Select", "Back",
      "Pages", "Play", "Start", "Set up first", "Version", "Choose your output folder", "Choose your ExeFS folder",
      "Choose your RomFS folder", "Use this folder", "Use default folder", "Up one folder", "Home folder", "Drives",
-     "Folders here", "Other ways", "The system's folder picker", "Cancel", "Set up again"},
+     "Folders here", "Other ways", "The system's folder picker", "Cancel", "Set up again", "Open screenshots folder"},
     {"Gioca", "File di gioco", "Impostazioni", "Mod", "Aggiornamenti", "Esci", "SuperWonders", "Informazioni",
      "File del gioco", "Cartella di output", "Cartella ExeFS", "Cartella RomFS", "Versione gioco", "Scegli...",
      "Usa nella posizione", "Copia", "Configurazione", "Configura i file di gioco", "Apri cartella di output",
@@ -402,7 +402,7 @@ const char* const kLauncherText[10][LtTextCount] = {
      "Avvia", "Configura prima", "Versione", "Scegli cartella di output", "Scegli la cartella ExeFS",
      "Scegli la cartella RomFS", "Usa questa cartella", "Usa cartella predefinita", "Cartella superiore",
      "Cartella home", "Unità", "Cartelle qui", "Altri metodi", "Selettore cartelle di sistema", "Annulla",
-     "Configura di nuovo"},
+     "Configura di nuovo", "Apri cartella screenshot"},
     {"Spielen", "Spieldateien", "Einstellungen", "Mods", "Updates", "Beenden", "SuperWonders", "Info",
      "Deine Spieldateien", "Ausgabeordner", "ExeFS-Ordner", "RomFS-Ordner", "Spielversion", "Auswählen...",
      "Am Ort verwenden", "Kopieren", "Einrichten", "Spieldateien einrichten", "Ausgabeordner öffnen",
@@ -411,7 +411,7 @@ const char* const kLauncherText[10][LtTextCount] = {
      "Zurück", "Seiten", "Spielen", "Starten", "Zuerst einrichten", "Version", "Ausgabeordner auswählen",
      "ExeFS-Ordner auswählen", "RomFS-Ordner auswählen", "Diesen Ordner verwenden", "Standardordner verwenden",
      "Übergeordneter Ordner", "Benutzerordner", "Laufwerke", "Ordner hier", "Weitere Möglichkeiten",
-     "System-Dateiauswahl", "Abbrechen", "Erneut einrichten"},
+     "System-Dateiauswahl", "Abbrechen", "Erneut einrichten", "Screenshot-Ordner öffnen"},
     {"Jouer", "Fichiers du jeu", "Paramètres", "Mods", "Mises à jour", "Quitter", "SuperWonders", "À propos",
      "Fichiers du jeu", "Dossier de sortie", "Dossier ExeFS", "Dossier RomFS", "Version du jeu", "Choisir...",
      "Utiliser sur place", "Copier", "Configurer", "Configurer les fichiers du jeu", "Ouvrir le dossier de sortie",
@@ -420,7 +420,7 @@ const char* const kLauncherText[10][LtTextCount] = {
      "Retour", "Pages", "Jouer", "Démarrer", "Configurer d'abord", "Version", "Choisir le dossier de sortie",
      "Choisir le dossier ExeFS", "Choisir le dossier RomFS", "Utiliser ce dossier", "Dossier par défaut",
      "Dossier parent", "Dossier personnel", "Lecteurs", "Dossiers ici", "Autres méthodes",
-     "Sélecteur de dossiers système", "Annuler", "Reconfigurer"},
+     "Sélecteur de dossiers système", "Annuler", "Reconfigurer", "Ouvrir le dossier des captures"},
     {"Jugar", "Archivos del juego", "Ajustes", "Mods", "Actualizaciones", "Salir", "SuperWonders", "Acerca de",
      "Archivos del juego", "Carpeta de salida", "Carpeta ExeFS", "Carpeta RomFS", "Versión del juego", "Elegir...",
      "Usar en su ubicación", "Copiar", "Configurar", "Configurar archivos del juego", "Abrir carpeta de salida",
@@ -429,27 +429,27 @@ const char* const kLauncherText[10][LtTextCount] = {
      "Seleccionar", "Atrás", "Páginas", "Jugar", "Iniciar", "Configura primero", "Versión", "Elegir carpeta de salida",
      "Elegir carpeta ExeFS", "Elegir carpeta RomFS", "Usar esta carpeta", "Carpeta predeterminada", "Carpeta superior",
      "Carpeta de inicio", "Unidades", "Carpetas aquí", "Otras opciones", "Selector de carpetas del sistema",
-     "Cancelar", "Configurar de nuevo"},
+     "Cancelar", "Configurar de nuevo", "Abrir carpeta de capturas"},
     {"플레이", "게임 파일", "설정", "모드", "업데이트", "종료", "SuperWonders", "정보", "게임 파일", "출력 폴더",
      "ExeFS 폴더", "RomFS 폴더", "게임 버전", "선택...", "현재 위치에서 사용", "복사", "설정", "게임 파일 설정",
      "출력 폴더 열기", "설정 열기", "폴더", "모드 폴더 열기", "새로고침", "SuperWonders 종료", "게임 파일 준비 완료",
      "게임 코드를 다시 빌드해야 합니다", "게임 파일이 설정되지 않음", "선택", "뒤로", "페이지", "플레이", "시작",
      "먼저 설정", "버전", "출력 폴더 선택", "ExeFS 폴더 선택", "RomFS 폴더 선택", "이 폴더 사용", "기본 폴더 사용",
-     "상위 폴더", "홈 폴더", "드라이브", "현재 폴더", "다른 방법", "시스템 폴더 선택기", "취소", "다시 설정"},
+     "상위 폴더", "홈 폴더", "드라이브", "현재 폴더", "다른 방법", "시스템 폴더 선택기", "취소", "다시 설정", "스크린샷 폴더 열기"},
     {"プレイ", "ゲームファイル", "設定", "MOD", "更新", "終了", "SuperWonders", "概要", "ゲームファイル",
      "出力フォルダー", "ExeFS フォルダー", "RomFS フォルダー", "ゲームバージョン", "選択...", "この場所で使う", "コピー",
      "セットアップ", "ゲームファイルを設定", "出力フォルダーを開く", "設定を開く", "フォルダー", "MODフォルダーを開く",
      "更新", "SuperWondersを終了", "ゲームファイルの準備完了", "ゲームコードを再ビルドしてください", "ゲームファイル未設定",
      "選択", "戻る", "ページ", "プレイ", "開始", "先に設定", "バージョン", "出力フォルダーを選択", "ExeFSフォルダーを選択",
      "RomFSフォルダーを選択", "このフォルダーを使う", "標準フォルダーを使う", "上のフォルダー", "ホームフォルダー", "ドライブ",
-     "この場所のフォルダー", "その他の方法", "システムのフォルダー選択", "キャンセル", "再設定"},
+     "この場所のフォルダー", "その他の方法", "システムのフォルダー選択", "キャンセル", "再設定", "スクリーンショットフォルダーを開く"},
     {"تشغيل", "ملفات اللعبة", "الإعدادات", "التعديلات", "التحديثات", "خروج", "SuperWonders", "حول",
      "ملفات اللعبة", "مجلد الإخراج", "مجلد ExeFS", "مجلد RomFS", "إصدار اللعبة", "اختيار...", "استخدم في مكانه", "نسخ",
      "إعداد", "إعداد ملفات اللعبة", "فتح مجلد الإخراج", "فتح الإعدادات", "مجلد", "فتح مجلد التعديلات", "تحديث",
      "إنهاء SuperWonders", "ملفات اللعبة جاهزة", "يجب إعادة بناء كود اللعبة", "لم يتم إعداد ملفات اللعبة", "اختيار",
      "رجوع", "الصفحات", "تشغيل", "ابدأ", "أعد الإعداد أولاً", "الإصدار", "اختر مجلد الإخراج", "اختر مجلد ExeFS",
      "اختر مجلد RomFS", "استخدم هذا المجلد", "استخدام المجلد الافتراضي", "المجلد الأعلى", "المجلد الرئيسي",
-     "محركات الأقراص", "المجلدات هنا", "طرق أخرى", "منتقي مجلدات النظام", "إلغاء", "إعادة الإعداد"},
+     "محركات الأقراص", "المجلدات هنا", "طرق أخرى", "منتقي مجلدات النظام", "إلغاء", "إعادة الإعداد", "فتح مجلد لقطات الشاشة"},
     {"Играть", "Файлы игры", "Настройки", "Моды", "Обновления", "Выход", "SuperWonders", "О программе",
      "Файлы игры", "Папка вывода", "Папка ExeFS", "Папка RomFS", "Версия игры", "Выбрать...",
      "Использовать на месте", "Копировать", "Настройка", "Настроить файлы игры", "Открыть папку вывода",
@@ -457,7 +457,7 @@ const char* const kLauncherText[10][LtTextCount] = {
      "Файлы игры готовы", "Нужно пересобрать код игры", "Файлы игры не настроены", "Выбрать", "Назад", "Страницы",
      "Играть", "Запустить", "Сначала настройте", "Версия", "Выберите папку вывода", "Выберите папку ExeFS",
      "Выберите папку RomFS", "Использовать эту папку", "Папка по умолчанию", "На уровень выше", "Домашняя папка",
-     "Диски", "Папки здесь", "Другие способы", "Системный выбор папки", "Отмена", "Настроить снова"},
+     "Диски", "Папки здесь", "Другие способы", "Системный выбор папки", "Отмена", "Настроить снова", "Открыть папку скриншотов"},
     {"Oyna", "Oyun dosyaları", "Ayarlar", "Modlar", "Güncellemeler", "Çıkış", "SuperWonders", "Hakkında",
      "Oyun dosyalarınız", "Çıktı klasörü", "ExeFS klasörü", "RomFS klasörü", "Oyun sürümü", "Seç...", "Yerinde kullan",
      "Kopyala", "Kurulum", "Oyun dosyalarını kur", "Çıktı klasörünü aç", "Ayarları aç", "Klasör",
@@ -465,7 +465,7 @@ const char* const kLauncherText[10][LtTextCount] = {
      "Oyun dosyaları kurulmadı", "Seç", "Geri", "Sayfalar", "Oyna", "Başlat", "Önce kur", "Sürüm",
      "Çıktı klasörünü seç", "ExeFS klasörünü seç", "RomFS klasörünü seç", "Bu klasörü kullan", "Varsayılan klasör",
      "Üst klasör", "Ana klasör", "Sürücüler", "Buradaki klasörler", "Diğer yollar", "Sistem klasör seçicisi",
-     "İptal", "Yeniden kur"},
+     "İptal", "Yeniden kur", "Ekran görüntüsü klasörünü aç"},
 };
 
 const char* lt(LauncherText text) {
@@ -921,6 +921,12 @@ void page_files() {
     if (rows::action(lt(LtOpenDataFolder), "",
                      ("Open the active output folder in your file manager:\n" + cur_out).c_str(), true))
         plat::open_folder(cur_out);
+    if (rows::action(lt(LtOpenScreenshotsFolder), "",
+                     ("Open the folder where F2 PNG screenshots are saved:\n" + cur_out + "/screenshots").c_str(), true)) {
+        const std::string shots = cur_out + "/screenshots";
+        plat::make_dirs(shots);
+        plat::open_folder(shots);
+    }
     rows::end();
 }
 

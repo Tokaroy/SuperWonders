@@ -11,6 +11,7 @@
 namespace nx::overlay {
 
 constexpr size_t kControlCount = 16;
+constexpr size_t kHotkeyCount = 4;  // 0: Menu, 1: Screenshot, 2: Fullscreen, 3: Fast-forward
 
 // The 16 NX actions, in pad bit order of the bindings arrays.
 enum Control : size_t {
@@ -42,7 +43,7 @@ struct Settings {
     bool keyboard_separate = false;  // keyboard is player 1 and controllers start at player 2
     int controller_preset = 1;  // 1 Nintendo positions (the default, as on the Switch: A on the right), 0 Xbox / DualSense
     int button_icons = 0;       // 0 Auto, 1 Nintendo, 2 Xbox, 3 PlayStation (applies after a restart)
-    bool muted = false, mute_in_background = false, fullscreen = false, always_on_top = false;
+    bool muted = false, mute_in_background = false, pause_in_background = false, fullscreen = false, always_on_top = false;
     bool metrics_enabled = false, low_vram_profile = false;
     bool discord_rpc = true;
     bool metric_fps = true, metric_one_percent_low = true, metric_game_speed = true, metric_frametime_graph = true;
@@ -58,6 +59,8 @@ struct Settings {
     int anisotropy = 0;        // 0 the game's own, else 2, 4, 8, 16 (applies after a restart)
     int shadow_scale = 1;      // 1, 2, 4 (shadow map resolution multiplier; applies after a restart)
     int rumble = 100;          // controller rumble strength, percent (0: off)
+    std::array<int, 4> pad_left_deadzones{16, 16, 16, 16};   // per-pad left stick deadzone, percent (0..34)
+    std::array<int, 4> pad_right_deadzones{16, 16, 16, 16};  // per-pad right stick deadzone, percent (0..34)
     int vsync = 1;             // 0 On (FIFO), 1 Fast (MAILBOX, else IMMEDIATE: the default), 2 Adaptive (FIFO_RELAXED), 3 Off
     int frame_cap = 60;        // 30, 60, 90, 120, 144, or 240 FPS
     int hdr = 0;               // 1: HDR output (scRGB swapchain, applies after a restart; docs/HDR.md)
@@ -71,6 +74,7 @@ struct Settings {
     std::array<int, kControlCount> keyboard_bindings{};
     std::array<int, kControlCount> controller_bindings{};
     uint32_t controller_custom_mask = 0;  // bit per action: controller_bindings[action] instead of the preset
+    std::array<int, kHotkeyCount> hotkey_bindings{};  // 0: Menu, 1: Screenshot, 2: Fullscreen, 3: Fast-forward
 };
 
 // The physical button a preset gives an action.
