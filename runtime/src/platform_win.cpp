@@ -64,8 +64,6 @@ namespace nx::plat {
 // ---- memory ---------------------------------------------------------------------------------------------------
 
 bool reserve(uint64_t addr, uint64_t size) {
-    if (VirtualAlloc(reinterpret_cast<void*>(addr), size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS) != nullptr)
-        return true;
     return VirtualAlloc(reinterpret_cast<void*>(addr), size, MEM_RESERVE, PAGE_NOACCESS) != nullptr;
 }
 
@@ -102,15 +100,6 @@ void exit_process(int code) {
     ExitProcess(UINT(code));
 }
 void sleep_ns(int64_t ns) {
-    // Request 1 ms Windows timer resolution once so waitable timers and scheduler wakeups have minimal jitter.
-    static const bool timer_res_ok = [] {
-        if (HMODULE winmm = LoadLibraryW(L"winmm.dll")) {
-            using TimeBeginPeriodFn = UINT(WINAPI*)(UINT);
-            if (auto fn = reinterpret_cast<TimeBeginPeriodFn>(GetProcAddress(winmm, "timeBeginPeriod"))) fn(1);
-        }
-        return true;
-    }();
-    (void)timer_res_ok;
     // A high-resolution waitable timer (Windows 10 1803+): Sleep rounds to the system tick (1 to 15.6 ms), and the
     // 60 Hz pacing jittered by that much.
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
@@ -140,7 +129,7 @@ bool wait_vblank() {
     static HMONITOR monitor = nullptr;
     static Blank blank{};
     static int per_tick = 0;  // blanks per 1/60 s; 0: not paced on the display
-    if (timer || !open || !wait || !g_window) return false;
+    if (timer || !open || !wait || !g_window || nx::nvn::frame_cap() >= 120) return false;
     // shortcut: the adapter handle of a monitor the window left is not closed (moving monitors is rare).
     if (HMONITOR m = MonitorFromWindow(g_window, MONITOR_DEFAULTTOPRIMARY); m != monitor) {
         monitor = m, per_tick = 0;
@@ -168,7 +157,48 @@ bool wait_vblank() {
 void yield() { SwitchToThread(); }
 void set_thread_high_priority() { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL); }
 void set_thread_low_priority() { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL); }
-void set_thread_name(const char*) {}
+static void ensure_win_gaming_mode() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        if (HMODULE winmm = LoadLibraryW(L"winmm.dll")) {
+            using TimeBeginFn = UINT(WINAPI*)(UINT);
+            if (auto fn = reinterpret_cast<TimeBeginFn>(GetProcAddress(winmm, "timeBeginPeriod"))) fn(1);
+        }
+        SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+        if (HMODULE k32 = GetModuleHandleW(L"kernel32.dll")) {
+            using SetProcInfoFn = BOOL(WINAPI*)(HANDLE, PROCESS_INFORMATION_CLASS, LPVOID, DWORD);
+            if (auto fn = reinterpret_cast<SetProcInfoFn>(GetProcAddress(k32, "SetProcessInformation"))) {
+                PROCESS_POWER_THROTTLING_STATE ppts{PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                                                    PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 0};
+                fn(GetCurrentProcess(), ProcessPowerThrottling, &ppts, sizeof ppts);
+            }
+        }
+    });
+}
+void set_thread_name(const char* name) {
+    ensure_win_gaming_mode();
+    if (!name || !*name) return;
+    if (HMODULE k32 = GetModuleHandleW(L"kernel32.dll")) {
+        using SetDescFn = HRESULT(WINAPI*)(HANDLE, PCWSTR);
+        if (auto fn = reinterpret_cast<SetDescFn>(GetProcAddress(k32, "SetThreadDescription"))) {
+            wchar_t wname[64]{};
+            for (size_t i = 0; i + 1 < std::size(wname) && name[i]; ++i) wname[i] = wchar_t(uint8_t(name[i]));
+            fn(GetCurrentThread(), wname);
+        }
+    }
+    const bool critical = std::strcmp(name, "nvn replay") == 0 || std::strcmp(name, "vsync") == 0;
+    const bool gaming = critical || std::strcmp(name, "MainThread") == 0 || std::strcmp(name, "audio") == 0;
+    if (gaming) {
+        if (HMODULE avrt = LoadLibraryW(L"avrt.dll")) {
+            using AvSetFn = HANDLE(WINAPI*)(LPCWSTR, LPDWORD);
+            if (auto fn = reinterpret_cast<AvSetFn>(GetProcAddress(avrt, "AvSetMmThreadCharacteristicsW"))) {
+                DWORD task_idx = 0;
+                fn(L"Games", &task_idx);
+            }
+        }
+        SetThreadPriority(GetCurrentThread(), critical ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_ABOVE_NORMAL);
+    }
+}
 float default_render_scale() { return 1.0f; }
 void release_window(void*) {}
 uint64_t window_generation() { return 1; }
@@ -1733,15 +1763,10 @@ static PlayerInputs sample_players_uncached() {
             else if (action == PcDpadUp) keyboard.ly = kStickMax;
             else if (action == PcDpadDown) keyboard.ly = -kStickMax;
         }
-        auto is_bound = [](int vk) {
-            for (const auto& b : g_keyboard_bindings)
-                if (b.load() == vk) return true;
-            return false;
-        };
-        if (!is_bound('A') && key_focused('A')) keyboard.lx = -kStickMax;
-        if (!is_bound('D') && key_focused('D')) keyboard.lx = kStickMax;
-        if (!is_bound('W') && key_focused('W')) keyboard.ly = kStickMax;
-        if (!is_bound('S') && key_focused('S')) keyboard.ly = -kStickMax;
+        if (key_focused('A')) keyboard.lx = -kStickMax;
+        if (key_focused('D')) keyboard.lx = kStickMax;
+        if (key_focused('W')) keyboard.ly = kStickMax;
+        if (key_focused('S')) keyboard.ly = -kStickMax;
     }
     std::array<int, 4> assignment{};
     bool manual = false;
