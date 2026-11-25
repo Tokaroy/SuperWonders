@@ -13,8 +13,8 @@ import uuid
 import wonder_uw_map_hud
 import wonder_uw_screen_backgrounds
 
-PROFILES = (("21-9", "2.37037037037", "00-uw-map-hud-21-9", "00-uw-screen-test-21-9"),
-            ("32-9", "3.55555555556", "00-uw-map-hud-32-9", "00-uw-screen-test"))
+PROFILES = (("21-9", "2.37037037037", "2.4", "00-uw-map-hud-21-9", "00-uw-screen-test-21-9"),
+            ("32-9", "3.55555555556", "3.55555555556", "00-uw-map-hud-32-9", "00-uw-screen-test"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -59,7 +59,7 @@ def ensure(data):
     signature = digest.hexdigest()
     state = os.path.join(data, 'ultrawide-layouts.json')
     destinations = []
-    for _, aspect, map_name, screen_name in PROFILES:
+    for _, _, _, map_name, screen_name in PROFILES:
         for name in (map_name, screen_name):
             active, disabled = os.path.join(mods, name), os.path.join(mods, '-' + name)
             if os.path.exists(active) and os.path.exists(disabled):
@@ -78,11 +78,11 @@ def ensure(data):
     os.makedirs(mods, exist_ok=True)
     files = []
     with tempfile.TemporaryDirectory(prefix='uw-layouts-', dir=data) as work:
-        for index, (_, aspect, map_name, screen_name) in enumerate(PROFILES):
+        for index, (_, aspect, bg_aspect, map_name, screen_name) in enumerate(PROFILES):
             map_out, screen_out = os.path.join(work, map_name), os.path.join(work, screen_name)
-            wonder_uw_map_hud.main(['--romfs', rom, '--rstb', table, '--out', map_out, '--aspect', aspect])
+            wonder_uw_map_hud.main(['--romfs', rom, '--rstb', table, '--out', map_out, '--aspect', aspect, '--bg-aspect', bg_aspect])
             wonder_uw_screen_backgrounds.main([
-                '--romfs', rom, '--menu-mod', menu, '--out', screen_out, '--aspect', aspect,
+                '--romfs', rom, '--menu-mod', menu, '--out', screen_out, '--aspect', bg_aspect,
                 '--skip', *sorted(wonder_uw_map_hud.HUD_WRAPS),
             ])
             for subindex, source in enumerate((map_out, screen_out)):

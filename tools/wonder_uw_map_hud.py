@@ -108,11 +108,14 @@ def main(argv=None):
     ap.add_argument('--romfs', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--aspect', type=float, default=32 / 9)
+    ap.add_argument('--bg-aspect', type=float, default=0.0)
     ap.add_argument('--rstb', required=True)
     args = ap.parse_args(argv)
     if not 16 / 9 <= args.aspect <= 64 / 9:
         raise ValueError('unsupported aspect')
+    bg_aspect = args.bg_aspect if args.bg_aspect > 0 else args.aspect
     factor = args.aspect / (16 / 9)
+    bg_factor = bg_aspect / (16 / 9)
     shift = 960.0 * (factor - 1.0)
     dest = os.path.join(args.out, 'romfs', 'Layout')
     os.makedirs(dest, exist_ok=True)
@@ -124,7 +127,7 @@ def main(argv=None):
         entry_name = f'blyt/{layout_name}.bflyt'
         bflyt = sarc_get(archive, entry_name)
         if layout_name in PANES:
-            bflyt = patch_layout(layout_name, bflyt, factor)
+            bflyt = patch_layout(layout_name, bflyt, bg_factor)
         modified = wrap(bflyt, [(pane, sign * shift) for pane, sign in targets])
         new_archive = sarc_replace(archive, {entry_name: modified})
         with open(os.path.join(dest, arc_base + '.zs'), 'wb') as f:
