@@ -8,6 +8,7 @@
 namespace nx::plat {
 
 constexpr size_t kPcControlCount = 16;
+constexpr size_t kPcHotkeyCount = 4;
 
 enum PcControl : size_t {
     PcA, PcB, PcX, PcY, PcL, PcR, PcZL, PcZR, PcPlus, PcMinus, PcLStick, PcRStick,
@@ -79,12 +80,15 @@ struct PcMenuState {
     int anisotropy = 0;        // overlay menu: 0 the game's, else 2..16
     int shadow_scale = 1;      // overlay menu: 1, 2, 4
     int rumble = 100;          // overlay menu: rumble strength, percent
+    std::array<int, 4> pad_left_deadzones{16, 16, 16, 16};   // per-pad left stick deadzone, percent (0..34)
+    std::array<int, 4> pad_right_deadzones{16, 16, 16, 16};  // per-pad right stick deadzone, percent (0..34)
     std::array<int, kPcControlCount> keyboard_bindings = {
         VK_SPACE, VK_SHIFT, 'J', 'K', 'Q', 'E', 'Z', 'C', VK_RETURN, VK_ESCAPE, 'M', 'N',
         VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,
     };
     std::array<int, kPcControlCount> controller_bindings{};
     uint32_t controller_custom_mask = 0;
+    std::array<int, kPcHotkeyCount> hotkey_bindings = {VK_F1, VK_F2, VK_F11, VK_TAB};
 };
 
 using PcMenuApply = void (*)(const PcMenuState&, bool persist);

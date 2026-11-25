@@ -1221,10 +1221,23 @@ void video(MenuContext& c, const Labels& l) {
     if (rows::choice(kCommon[lang][6], &af, af_names, 5, 0, translated_desc(desc::anisotropy, lang)))
         s.anisotropy = af_levels[af], settings_changed(true), ui::notify(l.restart_note);
     {
-        const char* shadow_label = lang == 1 ? "Risoluzione ombre" : "Shadow resolution";
-        const char* shadow_desc = lang == 1
-            ? "Moltiplica la risoluzione delle shadow map (2x/4x elimina le seghettature delle ombre). Si applica al riavvio."
-            : "Multiplies shadow map resolution (2x/4x smooths jagged shadow edges). Applies after restarting the game.";
+        constexpr const char* kShadowText[13][2] = {
+            {"Shadow resolution", "Multiplies shadow map resolution (2x/4x smooths jagged shadow edges). Applies after restarting the game."},
+            {"Risoluzione ombre", "Moltiplica la risoluzione delle shadow map (2x/4x elimina le seghettature delle ombre). Si applica al riavvio."},
+            {"Schattenauflösung", "Multipliziert die Shadow-Map-Auflösung (2x/4x glättet ausgefranste Schattenkanten). Wird nach Neustart aktiv."},
+            {"Résolution des ombres", "Multiplie la résolution des ombres (2x/4x lisse les bords crénelés). S'applique après redémarrage."},
+            {"Resolución de sombras", "Multiplica la resolución de sombras (2x/4x suaviza los bordes dentados). Se aplica al reiniciar."},
+            {"그림자 해상도", "그림자 맵 해상도를 배율로 높입니다 (2x/4x는 계단 현상을 줄입니다). 재시작 후 적용됩니다."},
+            {"シャドウ解像度", "シャドウマップ解像度を倍率で上げます（2x/4xでジャギーを軽減）。再起動後に適用されます。"},
+            {"دقة الظلال", "يضاعف دقة خريطة الظلال (2x/4x ينعّم الحواف المتعرجة). يُطبّق بعد إعادة التشغيل."},
+            {"Разрешение теней", "Умножает разрешение карт теней (2x/4x сглаживает лесенки). Применяется после перезапуска."},
+            {"Gölge çözünürlüğü", "Gölge haritası çözünürlüğünü çarpar (2x/4x tırtıklı kenarları yumuşatır). Yeniden başlatınca uygulanır."},
+            {"Schaduwresolutie", "Vermenigvuldigt de schaduwresolutie (2x/4x maakt gekartelde randen gladder). Geldt na herstart."},
+            {"阴影分辨率", "倍增阴影贴图分辨率（2x/4x 可平滑锯齿边缘）。重启游戏后生效。"},
+            {"陰影解析度", "倍增陰影貼圖解析度（2x/4x 可平滑鋸齒邊緣）。重啟遊戲後生效。"},
+        };
+        const char* shadow_label = kShadowText[lang][0];
+        const char* shadow_desc = kShadowText[lang][1];
         const char* shadow_names[] = {"1x", "2x", "4x"};
         const int shadow_levels[] = {1, 2, 4};
         int sh = 0;
@@ -1278,10 +1291,23 @@ void audio(MenuContext& c, const Labels& l) {
     if (rows::integer(l.volume, &s.volume, 0, 200, 5, kDefaults.volume, "%d%%", translated_desc(desc::volume, lang))) settings_changed(true);
     if (rows::toggle(l.mute, &s.muted, kDefaults.muted, translated_desc(desc::mute, lang))) settings_changed(true);
     {
-        const char* bg_mute_label = lang == 1 ? "Silenzia in background" : "Mute in background";
-        const char* bg_mute_desc = lang == 1
-            ? "Silenzia automaticamente l'audio quando la finestra del gioco perde il focus."
-            : "Automatically mutes game audio when the window loses focus.";
+        constexpr const char* kBgMuteText[13][2] = {
+            {"Mute in background", "Automatically mutes game audio when the window loses focus."},
+            {"Silenzia in background", "Silenzia automaticamente l'audio quando la finestra del gioco perde il focus."},
+            {"Im Hintergrund stummschalten", "Schaltet das Spielaudio automatisch stumm, wenn das Fenster den Fokus verliert."},
+            {"Muet en arrière-plan", "Coupe automatiquement le son du jeu lorsque la fenêtre perd le focus."},
+            {"Silenciar en segundo plano", "Silencia automáticamente el audio del juego cuando la ventana pierde el foco."},
+            {"백그라운드 음소거", "창이 포커스를 잃으면 게임 오디오를 자동으로 음소거합니다."},
+            {"バックグラウンド時にミュート", "ウィンドウが非アクティブになると自動でミュートします。"},
+            {"كتم الصوت في الخلفية", "يكتم صوت اللعبة تلقائياً عندما تفقد النافذة التركيز."},
+            {"Без звука в фоне", "Автоматически отключает звук, когда окно теряет фокус."},
+            {"Arka planda sessize al", "Pencere odağı kaybettiğinde oyun sesini otomatik olarak kapatır."},
+            {"Dempen op achtergrond", "Dempt het spelgeluid automatisch wanneer het venster de focus verliest."},
+            {"后台静音", "窗口失去焦点时自动静音游戏音频。"},
+            {"背景靜音", "視窗失去焦點時自動靜音遊戲音訊。"},
+        };
+        const char* bg_mute_label = kBgMuteText[lang][0];
+        const char* bg_mute_desc = kBgMuteText[lang][1];
         if (rows::toggle(bg_mute_label, &s.mute_in_background, kDefaults.mute_in_background, bg_mute_desc))
             settings_changed(true);
     }
@@ -1453,6 +1479,46 @@ void controls(MenuContext& c, const Labels& l) {
     if (rows::choice(t.icons, &s.button_icons, icon_styles, 4, kDefaults.button_icons, t.icons_help))
         settings_changed(true), ui::notify(t.icons_restart);
     if (rows::integer(kCommon[lang][8], &s.rumble, 0, 100, 10, kDefaults.rumble, "%d%%", translated_desc(desc::rumble, lang))) settings_changed(true);
+    {
+        constexpr const char* kDeadzoneText[13][4] = {
+            {"Left stick deadzone", "Ignores small movements near the center of the left analog stick to prevent drift.",
+             "Right stick deadzone", "Ignores small movements near the center of the right analog stick to prevent drift."},
+            {"Zona morta stick L", "Ignora i piccoli movimenti al centro dello stick sinistro per evitare il drift.",
+             "Zona morta stick R", "Ignora i piccoli movimenti al centro dello stick destro per evitare il drift."},
+            {"Totzone linker Stick", "Ignoriert kleine Bewegungen in der Mitte des linken Sticks gegen Drift.",
+             "Totzone rechter Stick", "Ignoriert kleine Bewegungen in der Mitte des rechten Sticks gegen Drift."},
+            {"Zone morte stick G", "Ignore les petits mouvements au centre du stick gauche pour éviter le drift.",
+             "Zone morte stick D", "Ignore les petits mouvements au centre du stick droit pour éviter le drift."},
+            {"Zona muerta stick I", "Ignora pequeños movimientos en el centro del stick izquierdo para evitar drift.",
+             "Zona muerta stick D", "Ignora pequeños movimientos en el centro del stick derecho para evitar drift."},
+            {"왼쪽 스틱 데드존", "쏠림을 방지하기 위해 왼쪽 아날로그 스틱 중앙의 미세한 움직임을 무시합니다.",
+             "오른쪽 스틱 데드존", "쏠림을 방지하기 위해 오른쪽 아날로그 스틱 중앙의 미세한 움직임을 무시합니다."},
+            {"左スティックデッドゾーン", "ドリフトを防ぐため左スティック中央付近の微小な入力を無視します。",
+             "右スティックデッドゾーン", "ドリフトを防ぐため右スティック中央付近の微小な入力を無視します。"},
+            {"المنطقة الميتة للعصا اليسرى", "يتجاهل الحركات الطفيفة في منتصف العصا اليسرى لمنع الانحراف.",
+             "المنطقة الميتة للعصا اليمنى", "يتجاهل الحركات الطفيفة في منتصف العصا اليمنى لمنع الانحراف."},
+            {"Мёртвая зона левого стика", "Игнорирует мелкие отклонения в центре левого стика для защиты от дрифта.",
+             "Мёртвая зона правого стика", "Игнорирует мелкие отклонения в центре правого стика для защиты от дрифта."},
+            {"Sol çubuk ölü bölgesi", "Sapmayı önlemek için sol analog çubuğun merkezindeki küçük hareketleri yok sayar.",
+             "Sağ çubuk ölü bölgesi", "Sapmayı önlemek için sağ analog çubuğun merkezindeki küçük hareketleri yok sayar."},
+            {"Dode zone linkerstick", "Negeert kleine bewegingen rond het midden van de linkerstick tegen drift.",
+             "Dode zone rechterstick", "Negeert kleine bewegingen rond het midden van de rechterstick tegen drift."},
+            {"左摇杆死区", "忽略左摇杆中心附近的微小移动以防止漂移。",
+             "右摇杆死区", "忽略右摇杆中心附近的微小移动以防止漂移。"},
+            {"左搖桿死區", "忽略左搖桿中心附近的微小移動以防止飄移。",
+             "右搖桿死區", "忽略右搖桿中心附近的微小移動以防止飄移。"},
+        };
+        const char* dz_l_label = kDeadzoneText[lang][0];
+        const char* dz_l_desc = kDeadzoneText[lang][1];
+        if (rows::integer(dz_l_label, &s.pad_left_deadzones[size_t(edit_slot)], 0, 34, 1,
+                          kDefaults.pad_left_deadzones[size_t(edit_slot)], "%d%%", dz_l_desc))
+            settings_changed(true);
+        const char* dz_r_label = kDeadzoneText[lang][2];
+        const char* dz_r_desc = kDeadzoneText[lang][3];
+        if (rows::integer(dz_r_label, &s.pad_right_deadzones[size_t(edit_slot)], 0, 34, 1,
+                          kDefaults.pad_right_deadzones[size_t(edit_slot)], "%d%%", dz_r_desc))
+            settings_changed(true);
+    }
     std::array<std::string, 4> face_labels;
     const char* physical[kControlCount];
     for (size_t i = 0; i < kControlCount; ++i) physical[i] = kPhysical[i];
@@ -1488,6 +1554,45 @@ void controls(MenuContext& c, const Labels& l) {
         const char* name = waiting ? t.press_key : c.host.key_name ? c.host.key_name(s.keyboard_bindings[a]) : "?";
         if (rows::action(id, name, translated_desc(desc::key, lang), true, waiting)) c.capture_action = int(a);  // overlay.cpp takes the next key
     }
+    {
+        constexpr const char* kHotkeyText[13][6] = {
+            {"Hotkeys", "In-game menu", "Screenshot", "Fullscreen", "Fast-forward",
+             "Press to rebind this shortcut (Esc cancels)."},
+            {"Tasti rapidi", "Menu in-game", "Screenshot", "Schermo intero", "Avanzamento rapido",
+             "Premi per cambiare questo tasto rapido (Esc annulla)."},
+            {"Tastenkürzel", "Spielmenü", "Screenshot", "Vollbild", "Vorspulen",
+             "Drücken zum Neubelegen (Esc bricht ab)."},
+            {"Raccourcis", "Menu en jeu", "Capture d'écran", "Plein écran", "Avance rapide",
+             "Appuyez pour modifier ce raccourci (Échap annule)."},
+            {"Atajos", "Menú en juego", "Captura de pantalla", "Pantalla completa", "Avance rápido",
+             "Pulsa para reasignar este atajo (Esc cancela)."},
+            {"단축키", "게임 내 메뉴", "스크린샷", "전체 화면", "빨리 감기",
+             "이 단축키를 다시 지정하려면 누르세요 (Esc 취소)."},
+            {"ホットキー", "ゲーム内メニュー", "スクリーンショット", "全画面", "早送り",
+             "押してショートカットを変更します（Escでキャンセル）。"},
+            {"الاختصارات", "قائمة اللعبة", "لقطة شاشة", "ملء الشاشة", "تسريع",
+             "اضغط لإعادة تعيين الاختصار (Esc للإلغاء)."},
+            {"Горячие клавиши", "Меню в игре", "Скриншот", "Полный экран", "Ускорение",
+             "Нажмите, чтобы переназначить клавишу (Esc — отмена)."},
+            {"Kısayollar", "Oyun içi menü", "Ekran görüntüsü", "Tam ekran", "Hızlı ileri sar",
+             "Bu kısayolu değiştirmek için basın (Esc iptal eder)."},
+            {"Sneltoetsen", "Spelmenu", "Schermafbeelding", "Volledig scherm", "Vooruitspoelen",
+             "Druk om deze sneltoets opnieuw toe te wijzen (Esc annuleert)."},
+            {"快捷键", "游戏内菜单", "截图", "全屏", "快进",
+             "点击以重新绑定此快捷键（Esc 取消）。"},
+            {"快捷鍵", "遊戲內選單", "截圖", "全螢幕", "快轉",
+             "點擊以重新指定此快捷鍵（Esc 取消）。"},
+        };
+        rows::section(kHotkeyText[lang][0]);
+        for (size_t h = 0; h < kHotkeyCount; ++h) {
+            char id[128];
+            std::snprintf(id, sizeof id, "%s###hotkey%zu", kHotkeyText[lang][1 + h], h);
+            const bool waiting = c.capture_action == int(kControlCount + h);
+            const char* name = waiting ? t.press_key : c.host.key_name ? c.host.key_name(s.hotkey_bindings[h]) : "?";
+            if (rows::action(id, name, kHotkeyText[lang][5], true, waiting))
+                c.capture_action = int(kControlCount + h);
+        }
+    }
     rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
@@ -1499,12 +1604,16 @@ void controls(MenuContext& c, const Labels& l) {
             s.pad_presets = kDefaults.pad_presets;
             s.button_icons = kDefaults.button_icons;
             s.rumble = kDefaults.rumble;
+            s.pad_left_deadzones = kDefaults.pad_left_deadzones;
+            s.pad_right_deadzones = kDefaults.pad_right_deadzones;
             s.controller_custom_mask = 0;
             s.pad_custom_mask = {};
             s.controller_bindings = {};
             s.pad_bindings = {};
             for (size_t a = 0; a < kControlCount; ++a)
                 if (c.host.default_keyboard_bindings[a]) s.keyboard_bindings[a] = c.host.default_keyboard_bindings[a];
+            for (size_t h = 0; h < kHotkeyCount; ++h)
+                if (c.host.default_hotkey_bindings[h]) s.hotkey_bindings[h] = c.host.default_hotkey_bindings[h];
             c.capture_action = -1;
             settings_changed(true);
             ui::notify(kExtraUiText[lang].reset_tab_note);
@@ -1590,6 +1699,46 @@ void system_tab(MenuContext& c, const Labels& l) {
     };
     if (rows::toggle("Discord Rich Presence", &s.discord_rpc, kDefaults.discord_rpc, kDiscordDesc[lang]))
         settings_changed(true);
+    {
+        constexpr const char* kFolderActionsText[13][4] = {
+            {"Open data folder", "Opens the active data folder (saves, nx.log, mods) in your file manager.",
+             "Open screenshots folder", "Opens the folder where F2 PNG screenshots are saved."},
+            {"Apri cartella dati", "Apre la cartella dati attiva (salvataggi, log nx.log, mod).",
+             "Apri cartella screenshot", "Apre la cartella dove vengono salvati gli screenshot PNG (F2)."},
+            {"Datenordner öffnen", "Öffnet den aktiven Datenordner (Spielstände, nx.log, Mods) im Dateimanager.",
+             "Screenshot-Ordner öffnen", "Öffnet den Ordner, in dem F2-PNG-Screenshots gespeichert werden."},
+            {"Ouvrir le dossier de données", "Ouvre le dossier de données actif (sauvegardes, nx.log, mods).",
+             "Ouvrir le dossier des captures", "Ouvre le dossier où sont enregistrées les captures PNG (F2)."},
+            {"Abrir carpeta de datos", "Abre la carpeta de datos activa (partidas, nx.log, mods).",
+             "Abrir carpeta de capturas", "Abre la carpeta donde se guardan las capturas PNG (F2)."},
+            {"데이터 폴더 열기", "활성 데이터 폴더(저장 데이터, nx.log, 모드)를 엽니다.",
+             "스크린샷 폴더 열기", "F2 PNG 스크린샷이 저장되는 폴더를 엽니다."},
+            {"データフォルダーを開く", "現在のデータフォルダー（セーブ、nx.log、MOD）を開きます。",
+             "スクリーンショットフォルダーを開く", "F2で撮影したPNGスクリーンショットの保存先を開きます。"},
+            {"فتح مجلد البيانات", "يفتح مجلد البيانات النشط (ملفات الحفظ، nx.log، التعديلات).",
+             "فتح مجلد لقطات الشاشة", "يفتح المجلد الذي تُحفظ فيه لقطات شاشة PNG (F2)."},
+            {"Открыть папку данных", "Открывает активную папку данных (сохранения, nx.log, моды).",
+             "Открыть папку скриншотов", "Открывает папку, куда сохраняются PNG-скриншоты (F2)."},
+            {"Veri klasörünü aç", "Etkin veri klasörünü (kayıtlar, nx.log, modlar) açar.",
+             "Ekran görüntüsü klasörünü aç", "F2 PNG ekran görüntülerinin kaydedildiği klasörü açar."},
+            {"Gegevensmap openen", "Opent de actieve gegevensmap (opslag, nx.log, mods).",
+             "Schermafbeeldingenmap openen", "Opent de map waarin F2 PNG-schermafbeeldingen worden opgeslagen."},
+            {"打开数据文件夹", "在文件管理器中打开当前数据文件夹（存档、nx.log、Mod）。",
+             "打开截图文件夹", "打开保存 F2 PNG 截图的文件夹。"},
+            {"開啟資料夾", "在檔案總管中開啟目前資料夾（存檔、nx.log、Mod）。",
+             "開啟截圖資料夾", "開啟儲存 F2 PNG 截圖的資料夾。"},
+        };
+        const char* open_data_label = kFolderActionsText[lang][0];
+        const char* open_data_desc = kFolderActionsText[lang][1];
+        if (rows::action(open_data_label, "", open_data_desc)) plat::open_folder(plat::data_root());
+        const char* open_shots_label = kFolderActionsText[lang][2];
+        const char* open_shots_desc = kFolderActionsText[lang][3];
+        if (rows::action(open_shots_label, "", open_shots_desc)) {
+            const std::string dir = plat::data_root() + "/screenshots";
+            plat::make_dirs(dir);
+            plat::open_folder(dir);
+        }
+    }
     rows::section(kExtraUiText[lang].reset_sec);
     {
         char rlabel[64];
@@ -1612,6 +1761,8 @@ void system_tab(MenuContext& c, const Labels& l) {
             Settings fresh = kDefaults;
             for (size_t a = 0; a < kControlCount; ++a)
                 fresh.keyboard_bindings[a] = c.host.default_keyboard_bindings[a] ? c.host.default_keyboard_bindings[a] : s.keyboard_bindings[a];
+            for (size_t h = 0; h < kHotkeyCount; ++h)
+                fresh.hotkey_bindings[h] = c.host.default_hotkey_bindings[h] ? c.host.default_hotkey_bindings[h] : s.hotkey_bindings[h];
             s = fresh;
             c.capture_action = -1;
             ui::set_theme(s.theme);

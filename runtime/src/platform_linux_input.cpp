@@ -57,12 +57,15 @@ constexpr uint64_t kActionBits[overlay::kControlCount] = {
     kA, kB, kX, kY, kL, kR, kZL, kZR, kPlus, kMinus, kStickL, kStickR, kLeft, kUp, kRight, kDown,
 };
 
-std::atomic<bool> g_fast_forward{false};  // Tab held (sampled on the main thread)
+std::atomic<bool> g_fast_forward{false};  // fast-forward hotkey held (sampled on the main thread)
+std::array<std::atomic<int>, overlay::kHotkeyCount> g_hotkey_bindings{{{SDL_SCANCODE_F1}, {SDL_SCANCODE_F2}, {SDL_SCANCODE_F11}, {SDL_SCANCODE_TAB}}};
 // The open gamepad: sampled on the main thread, rumbled from the game's (both under g_gamepad_lock).
 std::mutex g_gamepad_lock;
 std::array<SDL_Gamepad*, 4> g_gamepads{};
 std::array<std::atomic<uint64_t>, 4> g_pending_rumble{};
 std::atomic<int> g_rumble_strength{100};  // percent
+std::array<std::atomic<int>, 4> g_pad_left_deadzone{{{16}, {16}, {16}, {16}}};
+std::array<std::atomic<int>, 4> g_pad_right_deadzone{{{16}, {16}, {16}, {16}}};
 std::atomic<bool> g_window_focused{true};
 
 void update_audio_gain(const overlay::Settings& s) {
@@ -116,9 +119,15 @@ void apply_settings(const overlay::Settings& s, bool persist) {
     nvn::set_hdr_sdr_eotf(s.hdr_sdr_eotf);
     nvn::set_hdr_grading(s.hdr_exposure, s.hdr_contrast, s.hdr_shadows, s.hdr_saturation, s.hdr_highlight_saturation);
     g_rumble_strength = std::clamp(s.rumble, 0, 100);
+    for (size_t slot = 0; slot < 4; ++slot) {
+        g_pad_left_deadzone[slot] = std::clamp(s.pad_left_deadzones[slot], 0, 34);
+        g_pad_right_deadzone[slot] = std::clamp(s.pad_right_deadzones[slot], 0, 34);
+    }
     g_keyboard_separate = s.keyboard_separate;
     g_button_icons = std::clamp(s.button_icons, 0, 3);
     g_controller_preset = std::clamp(s.controller_preset, 0, 1);
+    for (size_t h = 0; h < overlay::kHotkeyCount; ++h)
+        if (s.hotkey_bindings[h] > 0) g_hotkey_bindings[h] = s.hotkey_bindings[h];
     if (s.fullscreen != before.fullscreen || s.width != before.width || s.height != before.height ||
         s.always_on_top != before.always_on_top)
         post_to_main([s] {
@@ -154,7 +163,7 @@ overlay::Key menu_key(SDL_Keycode k) {
         case SDLK_SPACE: return overlay::KeySpace;
         case SDLK_LSHIFT: case SDLK_RSHIFT: return overlay::KeyShift;
         case SDLK_LCTRL: case SDLK_RCTRL: return overlay::KeyCtrl;
-        case SDLK_F1: return overlay::KeyF1;
+
         default: return overlay::KeyNone;
     }
 }
@@ -325,6 +334,7 @@ void load_player_settings() {
     host.apply = apply_settings;
     host.key_name = key_name;
     for (size_t a = 0; a < overlay::kControlCount; ++a) host.default_keyboard_bindings[a] = keys[a];
+    for (size_t h = 0; h < overlay::kHotkeyCount; ++h) host.default_hotkey_bindings[h] = hotkeys[h];
     // Wayland has no "always on top" for clients; X11 does.
     const char* driver = SDL_GetCurrentVideoDriver();
     host.can_always_on_top = !driver || std::strcmp(driver, "wayland") != 0;
@@ -392,16 +402,24 @@ bool handle_event(const SDL_Event& e) {
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP: {
             const bool down = e.type == SDL_EVENT_KEY_DOWN;
-            if (down && !e.key.repeat && e.key.scancode == SDL_SCANCODE_F2) {
-                nvn::request_screenshot();
-                return true;
-            }
-            if (down && e.key.scancode == SDL_SCANCODE_F11 && g_window) {
-                bool full = !(SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN);
-                SDL_SetWindowFullscreen(g_window, full);
-                std::lock_guard lk(g_settings_lock);
-                g_settings.fullscreen = full;
-                overlay::sync(g_settings);
+            if (!overlay::capturing_key() && down && !e.key.repeat) {
+                const int sc = int(e.key.scancode);
+                if (sc == g_hotkey_bindings[0].load(std::memory_order_relaxed)) {
+                    if (overlay::enabled()) overlay::toggle();
+                    return true;
+                }
+                if (sc == g_hotkey_bindings[1].load(std::memory_order_relaxed)) {
+                    nvn::request_screenshot();
+                    return true;
+                }
+                if (sc == g_hotkey_bindings[2].load(std::memory_order_relaxed) && g_window) {
+                    bool full = !(SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN);
+                    SDL_SetWindowFullscreen(g_window, full);
+                    std::lock_guard lk(g_settings_lock);
+                    g_settings.fullscreen = full;
+                    overlay::sync(g_settings);
+                    return true;
+                }
             }
             if (overlay::enabled() && !e.key.repeat) overlay::key_event(int(e.key.scancode), menu_key(e.key.key), down);
             return true;
@@ -483,16 +501,20 @@ void sample_input() {
         down[overlay::PhyTriggerR] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000;
         for (size_t a = 0; a < overlay::kControlCount; ++a)
             if (down[std::clamp(g_pad_binding[slot][a].load(), 0, int(overlay::kControlCount) - 1)]) q.buttons |= kActionBits[a];
-        auto axis = [&](SDL_GamepadAxis a, bool invert) {
-            int v = SDL_GetGamepadAxis(pad, a);
-            if (v > -7849 && v < 7849) return 0;
-            v = std::clamp(v, -kStickMax, kStickMax);
+        const int dz_l = (std::clamp(g_pad_left_deadzone[slot].load(std::memory_order_relaxed), 0, 34) * kStickMax) / 100;
+        const int dz_r = (std::clamp(g_pad_right_deadzone[slot].load(std::memory_order_relaxed), 0, 34) * kStickMax) / 100;
+        auto axis = [&](SDL_GamepadAxis a, bool invert, int dz) {
+            const int raw = SDL_GetGamepadAxis(pad, a);
+            const int av = std::min(std::abs(raw), kStickMax);
+            if (av <= dz) return 0;
+            const int mag = ((av - dz) * kStickMax) / (kStickMax - dz);
+            const int v = raw < 0 ? -mag : mag;
             return invert ? -v : v;
         };
-        q.lx = axis(SDL_GAMEPAD_AXIS_LEFTX, false);
-        q.ly = axis(SDL_GAMEPAD_AXIS_LEFTY, true);  // SDL: down is positive; Horizon: up is positive
-        q.rx = axis(SDL_GAMEPAD_AXIS_RIGHTX, false);
-        q.ry = axis(SDL_GAMEPAD_AXIS_RIGHTY, true);
+        q.lx = axis(SDL_GAMEPAD_AXIS_LEFTX, false, dz_l);
+        q.ly = axis(SDL_GAMEPAD_AXIS_LEFTY, true, dz_l);  // SDL: down is positive; Horizon: up is positive
+        q.rx = axis(SDL_GAMEPAD_AXIS_RIGHTX, false, dz_r);
+        q.ry = axis(SDL_GAMEPAD_AXIS_RIGHTY, true, dz_r);
     }
     }
     // Keyboard: WASD / arrows move the stick; the 16 actions follow their bindings (defaults: Space A, Shift B, J X,
@@ -501,7 +523,8 @@ void sample_input() {
     if (g_window && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS) && !overlay::wants_keyboard()) {
         int count = 0;
         const bool* k = SDL_GetKeyboardState(&count);
-        tab = k[SDL_SCANCODE_TAB];  // fast-forward (hle_vi.cpp)
+        const int ff_sc = g_hotkey_bindings[3].load(std::memory_order_relaxed);
+        tab = ff_sc > 0 && ff_sc < count && k[ff_sc];  // fast-forward (hle_vi.cpp)
         auto held = [&](int sc) { return sc > 0 && sc < count && k[sc]; };
         if (k[SDL_SCANCODE_A] || k[SDL_SCANCODE_LEFT]) p.lx = -kStickMax;
         if (k[SDL_SCANCODE_D] || k[SDL_SCANCODE_RIGHT]) p.lx = kStickMax;

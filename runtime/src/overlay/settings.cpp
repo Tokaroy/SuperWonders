@@ -85,6 +85,10 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "anisotropy=%d", &v) == 1) s.anisotropy = std::clamp(v, 0, 16);
         else if (std::sscanf(l, "shadow_scale=%d", &v) == 1) s.shadow_scale = (v == 2 || v == 4) ? v : 1;
         else if (std::sscanf(l, "rumble=%d", &v) == 1) s.rumble = std::clamp(v, 0, 100);
+        else if (std::sscanf(l, "stick_deadzone=%d", &v) == 1)
+            s.pad_left_deadzones.fill(std::clamp(v, 0, 34)), s.pad_right_deadzones.fill(std::clamp(v, 0, 34));
+        else if (std::sscanf(l, "left_stick_deadzone=%d", &v) == 1) s.pad_left_deadzones.fill(std::clamp(v, 0, 34));
+        else if (std::sscanf(l, "right_stick_deadzone=%d", &v) == 1) s.pad_right_deadzones.fill(std::clamp(v, 0, 34));
         else if (std::sscanf(l, "vsync=%d", &v) == 1) s.vsync = std::clamp(v, 0, 3);
         else if (std::sscanf(l, "frame_cap=%d", &v) == 1)
             s.frame_cap = v == 30 || v == 60 || v == 90 || v == 120 || v == 144 || v == 240 ? v : 60;
@@ -107,6 +111,10 @@ bool load_settings(const std::string& path, Settings& s) {
                 s.player_devices[size_t(index)] = binding;
             else if (std::sscanf(l, "pad_preset_%d=%d", &slot, &binding) == 2 && slot > 0 && slot < 4)
                 s.pad_presets[size_t(slot)] = std::clamp(binding, 0, 1);
+            else if (std::sscanf(l, "pad_deadzone_l_%d=%d", &slot, &binding) == 2 && slot >= 0 && slot < 4)
+                s.pad_left_deadzones[size_t(slot)] = std::clamp(binding, 0, 34);
+            else if (std::sscanf(l, "pad_deadzone_r_%d=%d", &slot, &binding) == 2 && slot >= 0 && slot < 4)
+                s.pad_right_deadzones[size_t(slot)] = std::clamp(binding, 0, 34);
             else if (std::sscanf(l, "pad_mask_%d=%u", &slot, &mask) == 2 && slot > 0 && slot < 4)
                 s.pad_custom_mask[size_t(slot)] = mask;
             else if (std::sscanf(l, "pad_%d_%d=%d", &slot, &index, &binding) == 3 && slot > 0 && slot < 4 && index >= 0 && index < int(kControlCount) && binding >= 0 && binding < int(kControlCount))
@@ -117,6 +125,9 @@ bool load_settings(const std::string& path, Settings& s) {
             else if (std::sscanf(l, "controller_%d=%d", &index, &binding) == 2 && index >= 0 &&
                      index < int(kControlCount) && binding >= 0 && binding < int(kControlCount))
                 s.controller_bindings[size_t(index)] = binding;
+            else if (std::sscanf(l, "hotkey_%d=%d", &index, &binding) == 2 && index >= 0 &&
+                     index < int(kHotkeyCount) && binding >= 0 && binding <= 511)
+                s.hotkey_bindings[size_t(index)] = binding;
         }
     }
     // Before version 2, IDs 8 and 10 were Arabic and Turkish. They are no
@@ -149,7 +160,8 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\nspeedrun_timer_color=" << s.speedrun_timer_color
       << "\ncontroller_custom_mask=" << s.controller_custom_mask
       << "\nupscaler=" << s.upscaler << "\nfsr_sharpness=" << s.fsr_sharpness << "\nantialiasing=" << s.antialiasing
-      << "\nanisotropy=" << s.anisotropy << "\nshadow_scale=" << s.shadow_scale << "\nrumble=" << s.rumble << "\nvsync=" << s.vsync
+      << "\nanisotropy=" << s.anisotropy << "\nshadow_scale=" << s.shadow_scale << "\nrumble=" << s.rumble
+      << "\nvsync=" << s.vsync
       << "\nframe_cap=" << s.frame_cap
       << "\nhdr=" << s.hdr << "\nhdr_peak=" << s.hdr_peak << "\nhdr_paper_white=" << s.hdr_paper_white
       << "\nhdr_highlights=" << s.hdr_highlights << "\nhdr_highlight_start=" << s.hdr_highlight_start
@@ -158,6 +170,8 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\nhdr_saturation=" << s.hdr_saturation << "\nhdr_highlight_saturation=" << s.hdr_highlight_saturation << '\n';
     for (size_t slot = 0; slot < 4; ++slot) {
         f << "player_device_" << slot << '=' << s.player_devices[slot] << '\n';
+        f << "pad_deadzone_l_" << slot << '=' << std::clamp(s.pad_left_deadzones[slot], 0, 34) << '\n';
+        f << "pad_deadzone_r_" << slot << '=' << std::clamp(s.pad_right_deadzones[slot], 0, 34) << '\n';
         if (slot) {
             f << "pad_preset_" << slot << '=' << std::clamp(s.pad_presets[slot], 0, 1) << '\n';
             f << "pad_mask_" << slot << '=' << s.pad_custom_mask[slot] << '\n';
@@ -168,6 +182,8 @@ void save_settings(const std::string& path, const Settings& s) {
     for (size_t i = 0; i < kControlCount; ++i)
         f << "keyboard_" << i << '=' << s.keyboard_bindings[i] << '\n'
           << "controller_" << i << '=' << s.controller_bindings[i] << '\n';
+    for (size_t i = 0; i < kHotkeyCount; ++i)
+        f << "hotkey_" << i << '=' << s.hotkey_bindings[i] << '\n';
 }
 
 }  // namespace nx::overlay

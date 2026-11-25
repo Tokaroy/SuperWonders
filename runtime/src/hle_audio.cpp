@@ -476,9 +476,14 @@ void audio_render_thread(CPU& c) {
     log("audio: render thread running");
     uint64_t next = plat::monotonic_ns();
     for (;;) {
-        next += 5'000'000;
-        int64_t wait = int64_t(next - plat::monotonic_ns());
-        if (wait > 0) plat::sleep_ns(wait);
+        if (plat::fast_forward()) {
+            plat::sleep_ns(1'000'000);
+            next = plat::monotonic_ns();
+        } else {
+            next += 5'000'000;
+            int64_t wait = int64_t(next - plat::monotonic_ns());
+            if (wait > 0) plat::sleep_ns(wait);
+        }
         std::vector<uint64_t> list;
         {
             std::lock_guard lk(g_renderers_lock);
