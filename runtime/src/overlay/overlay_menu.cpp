@@ -1719,6 +1719,25 @@ void system_tab(MenuContext& c, const Labels& l) {
             settings_changed(true);
     }
     {
+        constexpr const char* kBgPadText[13][2] = {
+            {"Ignore controller in background", "Ignores controller input while the game window is out of focus."},
+            {"Ignora controller in background", "Ignora gli input del controller quando la finestra di gioco non è in primo piano."},
+            {"Controller im Hintergrund ignorieren", "Ignoriert Controller-Eingaben, wenn das Spielfenster keinen Fokus hat."},
+            {"Ignorer la manette en arrière-plan", "Ignore les entrées de la manette lorsque la fenêtre du jeu n'est pas active."},
+            {"Ignorar mando en segundo plano", "Ignora las entradas del mando cuando la ventana del juego pierde el foco."},
+            {"백그라운드에서 컨트롤러 무시", "게임 창이 포커스를 잃으면 컨트롤러 입력을 무시합니다."},
+            {"バックグラウンド時にコントローラーを無効化", "ゲームウィンドウが非アクティブの間、コントローラー入力を無視します。"},
+            {"تجاهل وحدة التحكم في الخلفية", "يتجاهل إدخال وحدة التحكم عندما تفقد نافذة اللعبة التركيز."},
+            {"Игнорировать геймпад в фоне", "Игнорирует ввод с геймпада, когда окно игры не в фокусе."},
+            {"Arka planda kontrolcüyü yoksay", "Oyun penceresi odak dışındayken kontrolcü girişini yoksayar."},
+            {"Controller op achtergrond negeren", "Negeert controllerinvoer zolang het spelvenster geen focus heeft."},
+            {"后台忽略手柄输入", "游戏窗口失去焦点时忽略手柄输入。"},
+            {"背景忽略控制器輸入", "遊戲視窗失去焦點時忽略控制器輸入。"},
+        };
+        if (rows::toggle(kBgPadText[lang][0], &s.ignore_pad_in_background, kDefaults.ignore_pad_in_background, kBgPadText[lang][1]))
+            settings_changed(true);
+    }
+    {
         constexpr const char* kFolderActionsText[13][4] = {
             {"Open data folder", "Opens the active data folder (saves, nx.log, mods) in your file manager.",
              "Open screenshots folder", "Opens the folder where F2 PNG screenshots are saved."},
@@ -1766,6 +1785,7 @@ void system_tab(MenuContext& c, const Labels& l) {
             s.language = kDefaults.language, s.theme = kDefaults.theme;
             s.memory_limit_gb = kDefaults.memory_limit_gb, s.low_vram_profile = kDefaults.low_vram_profile;
             s.discord_rpc = kDefaults.discord_rpc, s.pause_in_background = kDefaults.pause_in_background;
+            s.ignore_pad_in_background = kDefaults.ignore_pad_in_background;
             ui::set_theme(s.theme);
             settings_changed(true);
             ui::notify(kExtraUiText[lang].reset_tab_note);

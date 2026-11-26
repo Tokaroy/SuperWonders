@@ -54,6 +54,7 @@ bool load_settings(const std::string& path, Settings& s) {
         else if (std::sscanf(l, "muted=%d", &v) == 1) s.muted = v != 0;
         else if (std::sscanf(l, "mute_in_background=%d", &v) == 1) s.mute_in_background = v != 0;
         else if (std::sscanf(l, "pause_in_background=%d", &v) == 1) s.pause_in_background = v != 0;
+        else if (std::sscanf(l, "ignore_pad_in_background=%d", &v) == 1) s.ignore_pad_in_background = v != 0;
         else if (std::sscanf(l, "fullscreen=%d", &v) == 1) s.fullscreen = v != 0;
         else if (std::sscanf(l, "always_on_top=%d", &v) == 1) s.always_on_top = v != 0;
         else if (std::sscanf(l, "language=%d", &v) == 1) s.language = std::clamp(v, 0, 12);
@@ -144,7 +145,8 @@ void save_settings(const std::string& path, const Settings& s) {
       << "\naudio_mode=" << s.audio_mode << "\nstereo_separation=" << s.stereo_separation
       << "\naspect_ratio=" << std::max(0, s.aspect_ratio)
       << "\ninternal_resolution=" << s.internal_resolution << "\nmuted=" << s.muted
-      << "\nmute_in_background=" << s.mute_in_background << "\npause_in_background=" << s.pause_in_background << "\nfullscreen=" << s.fullscreen
+      << "\nmute_in_background=" << s.mute_in_background << "\npause_in_background=" << s.pause_in_background
+      << "\nignore_pad_in_background=" << s.ignore_pad_in_background << "\nfullscreen=" << s.fullscreen
       << "\nalways_on_top=" << s.always_on_top << "\nlanguage=" << s.language << "\ntheme=" << s.theme << "\ngame_language=" << s.game_language
       << "\ngame_language_version=2"
       << "\nmemory_limit_gb=" << s.memory_limit_gb << "\nlow_vram_profile=" << s.low_vram_profile
