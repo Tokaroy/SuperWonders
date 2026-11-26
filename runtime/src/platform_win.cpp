@@ -618,7 +618,7 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         int value = 0;
         if (std::sscanf(line.c_str(), "width=%d", &value) == 1 && value >= 640 && value <= 7680) state.width = value;
         else if (std::sscanf(line.c_str(), "height=%d", &value) == 1 && value >= 360 && value <= 4320) state.height = value;
-        else if (std::sscanf(line.c_str(), "aspect_ratio=%d", &value) == 1) state.aspect_ratio = std::clamp(value, 0, 2);
+        else if (std::sscanf(line.c_str(), "aspect_ratio=%d", &value) == 1) state.aspect_ratio = std::clamp(value, 0, 3);
         else if (std::sscanf(line.c_str(), "internal_resolution=%d", &value) == 1) state.internal_resolution = std::clamp(value, 0, 9);
         else if (std::sscanf(line.c_str(), "volume=%d", &value) == 1) state.volume = std::clamp(value, 0, 200);
         else if (std::sscanf(line.c_str(), "audio_mode=%d", &value) == 1) state.audio_mode = std::clamp(value, 0, 2);
@@ -737,27 +737,27 @@ static bool parse_pc_settings_file(const std::filesystem::path& ini_path, PcMenu
         state.game_language = 0;
     if (state.aspect_ratio >= 0) {
         const int ratio = state.aspect_ratio;
-        const double target_aspect = ratio == 1 ? (64.0 / 27.0) : ratio == 2 ? (32.0 / 9.0) : (16.0 / 9.0);
+        const double target_aspect = ratio == 1 ? (64.0 / 27.0) : ratio == 2 ? (32.0 / 9.0) : ratio == 3 ? (16.0 / 10.0) : (16.0 / 9.0);
         const double current_aspect = state.height > 0 ? double(state.width) / double(state.height) : 0.0;
         if (state.width > 0 && std::fabs(current_aspect - target_aspect) / target_aspect > 0.03)
             state.height = std::max(360, ratio == 1 ? state.width * 27 / 64 :
-                                          ratio == 2 ? state.width * 9 / 32 :
+                                          ratio == 2 ? state.width * 9 / 32 : ratio == 3 ? state.width * 10 / 16 :
                                                        state.width * 9 / 16);
         const int disp_w = state.fullscreen ? GetSystemMetrics(SM_CXSCREEN) : state.width;
         const int disp_h = state.fullscreen ? GetSystemMetrics(SM_CYSCREEN) : state.height;
         const double disp_aspect = disp_h > 0 ? double(disp_w) / double(disp_h) : 0.0;
-        char uw_res[32];
-        if (ratio && disp_w > 0 && disp_h > 0 && std::fabs(disp_aspect - target_aspect) / target_aspect <= 0.10)
+        const bool uw = ratio == 1 || ratio == 2; char uw_res[32];
+        if (uw && disp_w > 0 && disp_h > 0 && std::fabs(disp_aspect - target_aspect) / target_aspect <= 0.10)
             std::snprintf(uw_res, sizeof uw_res, "%dx%d", disp_w, disp_h);
         else
             std::snprintf(uw_res, sizeof uw_res, "%s", ratio == 1 ? "2560x1080" : ratio == 2 ? "3840x1080" : "0");
         _putenv_s("NX_ASPECT_PROFILE", ratio == 1 ? "21:9" : ratio == 2 ? "32:9" : "16:9");
-        _putenv_s("NX_ULTRAWIDE", ratio ? uw_res : "0");
-        _putenv_s("NX_RESOLUTION", ratio ? uw_res : "1920x1080");
+        _putenv_s("NX_ULTRAWIDE", uw ? uw_res : "0");
+        _putenv_s("NX_RESOLUTION", uw ? uw_res : "1920x1080");
         const char* flags[] = {"NX_TERRAIN_MOD_ASPECT_TEST", "NX_UW_POWERUP_TEST", "NX_UW_FLOWER_TEST",
             "NX_UW_MAP_ALIGN_TEST", "NX_UW_MAP_COMPOSITE_TEST", "NX_UW_MAP_CARD_TEST",
             "NX_UW_MAP_MARKERS_TEST", "NX_UW_MAP_DETAIL_TEST", "NX_UW_SETTINGS_SCISSOR_TEST"};
-        for (const char* flag : flags) _putenv_s(flag, ratio ? "1" : "0");
+        for (const char* flag : flags) _putenv_s(flag, uw ? "1" : "0");
         _putenv_s("NX_UW_FLOWER_ALT_TEST", "0");
     }
     return true;
