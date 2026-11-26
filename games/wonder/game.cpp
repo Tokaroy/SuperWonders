@@ -20,7 +20,10 @@
 
 namespace nx {
 
-namespace nvn { void hold_scene_frame_cap(int fps); }
+namespace nvn {
+void hold_frame_cap(int fps);
+void hold_scene_frame_cap(int fps);
+}
 
 static std::atomic<bool> g_stage_load_ended{false};
 static std::atomic<bool> g_course_demo_active{false};
@@ -29,6 +32,24 @@ static std::atomic<bool> g_in_house_session{false};
 static std::atomic<bool> g_house_cap_held{false};
 static std::atomic<bool> g_player_died{false};
 static std::atomic<uint64_t> g_stage_ready_ns{0};
+static std::atomic<uint64_t> g_course_in_hold_ns{0};
+
+constexpr uint64_t kCourseInHoldMaxNs = 5'000'000'000ull;
+
+void hold_course_in_60(const char* why) {
+    const uint64_t now = plat::monotonic_ns();
+    if (!g_course_in_hold_ns.exchange(now, std::memory_order_relaxed)) {
+        nvn::hold_frame_cap(60);
+        log("wonder: course-in transition (%s): frame cap held at 60", why);
+    }
+}
+
+void release_course_in_60(const char* why) {
+    if (g_course_in_hold_ns.exchange(0, std::memory_order_relaxed)) {
+        nvn::hold_frame_cap(0);
+        log("wonder: course-in transition (%s): selected frame cap restored", why);
+    }
+}
 
 void game::file_opened(const char* path) {
     static std::mutex world_mu;
@@ -617,9 +638,45 @@ void game::after_init() {
                        [](CPU& c) {
                            if (!g_stage_load_ended.exchange(true, std::memory_order_relaxed))
                                log("speedrun: EndLoadStage");
+                           release_course_in_60("EndLoadStage");
                            end_load_orig(c);
                        },
                        end_load_orig);
+    // Course-in confirmation / wipe can softlock above 60 FPS (especially in multiplayer); hold 60 FPS briefly until
+    // the course loads or the window closes.
+    const auto hook_near_screen = [&](const char* screen_name, const uint32_t (&sig)[4], Fn repl, Fn& orig) {
+        const ModuleInfo* main = game_lib().main;
+        const LoadedModule* m = main ? module_at(main->base) : nullptr;
+        const uint64_t fn = find_ainb_node_fn(screen_name);
+        if (!main || !m || fn == UINT64_MAX) return;
+        const uint64_t limit = std::min(fn + 0x400, main->text + main->text_size);
+        for (uint64_t off = fn + 0x80; off + 16 <= limit; off += 4) {
+            if (ld<uint32_t>(main->base + off) == sig[0] && ld<uint32_t>(main->base + off + 4) == sig[1] &&
+                ld<uint32_t>(main->base + off + 8) == sig[2] && ld<uint32_t>(main->base + off + 12) == sig[3] &&
+                m->table[off / 4]) {
+                orig = m->table[off / 4];
+                m->table[off / 4] = repl;
+                log("wonder: hooked %s at main+%llx", screen_name, (unsigned long long)off);
+                return;
+            }
+        }
+    };
+    static Fn course_in_win_orig = nullptr;
+    static constexpr uint32_t kCourseInWinSig[4] = {0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4, 0x910003fd};
+    hook_near_screen("UICourseInWindowScreen", kCourseInWinSig,
+                     [](CPU& c) {
+                         hold_course_in_60("UICourseInWindowScreen");
+                         course_in_win_orig(c);
+                     },
+                     course_in_win_orig);
+    static Fn wipe_course_in_orig = nullptr;
+    static constexpr uint32_t kWipeCourseInSig[4] = {0xa9be7bfd, 0xf9000bf3, 0x910003fd, 0x3959a008};
+    hook_near_screen("UIWipeCourseInScreen", kWipeCourseInSig,
+                     [](CPU& c) {
+                         hold_course_in_60("UIWipeCourseInScreen");
+                         wipe_course_in_orig(c);
+                     },
+                     wipe_course_in_orig);
     install_ainb_enter("PlayerCourseInDemo", kEndLoadSig,
                        [](CPU& c) {
                            if (overlay::speedrun_is_armed()) {
@@ -851,6 +908,10 @@ void game::frame_presented(uint64_t now_ns, int present_interval) {
 
     double seconds = double(std::max(1, present_interval)) / 60.0;
     wonder::seed_guard_tick(now_ns);
+    if (const uint64_t since = g_course_in_hold_ns.load(std::memory_order_relaxed);
+        since && (!is_world_map_stage() || now_ns - since >= kCourseInHoldMaxNs)) {
+        release_course_in_60(!is_world_map_stage() ? "left world map" : "timeout");
+    }
     if (realtime && plat::fast_forward()) {
         const double clamped_dt = std::clamp(dt, 1.0 / 500.0, 1.0 / 30.0);
         seconds = std::min(clamped_dt * 4.0, 1.0 / 15.0);
