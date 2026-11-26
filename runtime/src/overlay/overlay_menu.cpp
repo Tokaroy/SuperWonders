@@ -17,6 +17,7 @@
 #include "overlay/overlay_internal.h"
 #include "overlay/overlay_ui.h"
 #include "nextendo_client.h"
+#include "platform.h"
 #include "svc_am.h"
 
 namespace nx::nvn {
@@ -187,7 +188,7 @@ constexpr const char* kPhysical[kControlCount] = {
     "A / Cross", "B / Circle", "X / Square", "Y / Triangle", "LB / L1", "RB / R1", "LT / L2", "RT / R2",
     "Start / +", "Back / -", "L3 / LS", "R3 / RS", "D-pad Left", "D-pad Up", "D-pad Right", "D-pad Down",
 };
-constexpr int kTabs = 7;
+constexpr int kTabs = 8;
 
 namespace desc {
 constexpr const char* language = "Language of this menu.";
@@ -223,8 +224,8 @@ constexpr const char* memory = "On desktop, passing this threshold asks Vulkan t
 constexpr const char* upscaler = "How the game's image is enlarged when it is smaller than the window (a lower internal "
                                  "resolution, or fullscreen above 1080p). FSR 1 (AMD FidelityFX Super Resolution) keeps "
                                  "edges sharp; Bilinear is a plain stretch.";
-constexpr const char* antialiasing = "Smooths jagged edges on the final image. FXAA is quick and can soften fine "
-                                     "detail a little; the game's own anti-aliasing stays as it is.";
+constexpr const char* antialiasing = "Smooths jagged edges on the final image. FXAA is fast but can soften fine detail; SMAA keeps textures and UI sharper.";
+
 constexpr const char* anisotropy = "Keeps textures sharp on surfaces seen at an angle. Game default uses the game's "
                                    "own setting; higher costs a little GPU time. Applies after restarting the game.";
 constexpr const char* sharpness = "FSR 1's sharpening: higher is sharper (more contrast on edges), lower is softer.";
@@ -577,7 +578,7 @@ const char* translated_desc(const char* text, int lang) {
     if (text == desc::position) return "Scegli l’angolo in cui mostrare il pannello.";
     if (text == desc::memory) return "Soglia oltre la quale Vulkan libera le immagini riutilizzabili non in uso. Non è un limite diretto della VRAM.";
     if (text == desc::upscaler) return "Scegli come ingrandire l’immagine. FSR 1 mantiene i contorni più nitidi.";
-    if (text == desc::antialiasing) return "Riduce le scalettature. FXAA può rendere meno nitidi i dettagli sottili.";
+    if (text == desc::antialiasing) return "Riduce le scalettature. FXAA è veloce ma può ammorbidire i dettagli; SMAA mantiene texture e interfaccia più nitide.";
     if (text == desc::anisotropy) return "Migliora la nitidezza delle texture viste di sbieco. Si applica al riavvio.";
     if (text == desc::sharpness) return "Regola la nitidezza di FSR 1.";
     if (text == desc::low_vram) return "Mantiene compresse le texture decodificate per ridurre la memoria video, con una lieve perdita di qualità. Si applica al riavvio.";
@@ -1210,8 +1211,8 @@ void video(MenuContext& c, const Labels& l) {
     if (rows::integer(kCommon[lang][4], &sharp, 0, 200, 5, 200 - kDefaults.fsr_sharpness, "%d%%", translated_desc(desc::sharpness, lang)))
         s.fsr_sharpness = 200 - sharp, settings_changed(true);
     rows::indent(-1);
-    const char* aa[] = {"Off", "FXAA"};
-    if (rows::choice(kCommon[lang][5], &s.antialiasing, aa, 2, kDefaults.antialiasing, translated_desc(desc::antialiasing, lang)))
+    const char* aa[] = {"Off", "FXAA", "SMAA"};
+    if (rows::choice(kCommon[lang][5], &s.antialiasing, aa, 3, kDefaults.antialiasing, translated_desc(desc::antialiasing, lang)))
         settings_changed(true);
     const char* af_names[] = {"Game default", "2x", "4x", "8x", "16x"};
     const int af_levels[] = {0, 2, 4, 8, 16};
@@ -2062,6 +2063,154 @@ void speedrun_tab(MenuContext& c) {
     rows::end();
 }
 
+struct DebugLabels {
+    const char* tab;
+    const char* sec_input;
+    const char* record_label;
+    const char* record_desc;
+    const char* sec_diag;
+    const char* trace_label;
+    const char* trace_desc;
+    const char* note;
+};
+
+constexpr DebugLabels kDebugLabels[13] = {
+    // 0: English
+    {"Debug",
+     "Input & Replay",
+     "Record controller inputs",
+     "Records all button presses and stick directions to <data folder>/input_record.txt (same as NX_INPUT_RECORD=1) for automated playback via NX_INPUT_SCRIPT. Toggling off flushes and closes the file.",
+     "Diagnostics",
+     "Verbose trace log (NX_TRACE)",
+     "Writes detailed filesystem, IPC, SVC, and HLE call traces to nx.log in real time (same as NX_TRACE=1). Useful for diagnosing hangs or bugs, with some performance overhead.",
+     "Debug toggles apply immediately. Input recording and trace toggles are session-only and reset on restart."},
+    // 1: Italiano
+    {"Debug",
+     "Input e Replay",
+     "Registra input controller",
+     "Registra in tempo reale tutti i tasti e le direzioni dello stick in <cartella dati>/input_record.txt (equivalente a NX_INPUT_RECORD=1) per il replay con NX_INPUT_SCRIPT. Disattivando salva e chiude il file.",
+     "Diagnostica",
+     "Log trace dettagliato (NX_TRACE)",
+     "Scrive in tempo reale i trace dettagliati di filesystem, IPC, SVC e HLE in nx.log (equivalente a NX_TRACE=1). Utile per diagnosticare blocchi o bug, con un leggero impatto sulle prestazioni.",
+     "Le opzioni di debug si applicano subito. Registrazione input e log trace valgono solo per la sessione corrente."},
+    // 2: Deutsch
+    {"Debug",
+     "Eingabe & Replay",
+     "Controller-Eingaben aufzeichnen",
+     "Zeichnet alle Tastendrucke und Stick-Richtungen in Echtzeit in <Datenordner>/input_record.txt auf (wie NX_INPUT_RECORD=1) fur die Wiedergabe mit NX_INPUT_SCRIPT. Ausschalten speichert und schliesst die Datei.",
+     "Diagnose",
+     "Ausfuhrliches Trace-Log (NX_TRACE)",
+     "Schreibt detaillierte Dateisystem-, IPC-, SVC- und HLE-Aufrufe in Echtzeit in nx.log (wie NX_TRACE=1). Hilfreich bei Fehlern oder Hangern, verursacht etwas Overhead.",
+     "Debug-Schalter wirken sofort. Eingabeaufzeichnung und Trace-Log gelten nur fur diese Sitzung."},
+    // 3: Français
+    {"Debug",
+     "Entrees et Replay",
+     "Enregistrer les entrees manette",
+     "Enregistre en temps reel tous les boutons et directions du stick dans <dossier donnees>/input_record.txt (comme NX_INPUT_RECORD=1) pour la lecture via NX_INPUT_SCRIPT. Desactiver enregistre et ferme le fichier.",
+     "Diagnostics",
+     "Journal trace detaille (NX_TRACE)",
+     "Ecrit les traces detaillees du systeme de fichiers, IPC, SVC et HLE dans nx.log en temps reel (comme NX_TRACE=1). Utile pour diagnostiquer les bugs, avec un leger cout en performances.",
+     "Les options de debug s'appliquent immediatement. L'enregistrement et les traces sont limites a la session."},
+    // 4: Español
+    {"Debug",
+     "Entrada y Replay",
+     "Grabar entradas del mando",
+     "Graba en tiempo real todos los botones y direcciones del stick en <carpeta de datos>/input_record.txt (igual que NX_INPUT_RECORD=1) para reproducirlo con NX_INPUT_SCRIPT. Desactivar guarda y cierra el archivo.",
+     "Diagnostico",
+     "Registro trace detallado (NX_TRACE)",
+     "Escribe trazas detalladas de archivos, IPC, SVC y HLE en nx.log en tiempo real (igual que NX_TRACE=1). Util para diagnosticar bloqueos o errores, con algo de sobrecarga.",
+     "Las opciones de depuracion se aplican al instante. La grabacion y el registro solo duran esta sesion."},
+    // 5: 한국어
+    {"디버그",
+     "입력 및 리플레이",
+     "컨트롤러 입력 기록",
+     "모든 버튼 입력과 스틱 방향을 <데이터 폴더>/input_record.txt에 실시간으로 기록합니다(NX_INPUT_RECORD=1과 동일). 끄면 파일이 저장되고 닫힙니다.",
+     "진단",
+     "상세 추적 로그 (NX_TRACE)",
+     "파일 시스템, IPC, SVC, HLE 호출 추적을 nx.log에 실시간으로 기록합니다(NX_TRACE=1과 동일). 오류 진단에 유용하지만 약간의 성능 부하가 있습니다.",
+     "디버그 설정은 즉시 적용됩니다. 입력 기록과 추적 로그는 현재 세션에만 유지됩니다."},
+    // 6: 日本語
+    {"デバッグ",
+     "入力とリプレイ",
+     "コントローラー入力を記録",
+     "すべてのボタン入力とスティック方向を <データフォルダ>/input_record.txt にリアルタイム記録します（NX_INPUT_RECORD=1 と同等）。オフにすると保存して閉じます。",
+     "診断",
+     "詳細トレースログ (NX_TRACE)",
+     "ファイルシステム、IPC、SVC、HLE 呼び出しの詳細トレースを nx.log にリアルタイム出力します（NX_TRACE=1 と同等）。不具合調査に有用ですが少し負荷がかかります。",
+     "デバッグ設定は即座に反映されます。入力記録とトレースログはこのセッション限り有効です。"},
+    // 7: Русский
+    {"Отладка",
+     "Ввод и повтор",
+     "Запись ввода геймпада",
+     "Записывает все нажатия кнопок и направления стика в <папка данных>/input_record.txt в реальном времени (как NX_INPUT_RECORD=1). Отключение сохраняет и закрывает файл.",
+     "Диагностика",
+     "Подробный лог трассировки (NX_TRACE)",
+     "Записывает подробную трассировку ФС, IPC, SVC и HLE в nx.log в реальном времени (как NX_TRACE=1). Полезно для поиска зависаний и ошибок, но немного снижает производительность.",
+     "Параметры отладки применяются сразу. Запись ввода и трассировка сбрасываются после перезапуска."},
+    // 8: العربية
+    {"تصحيح",
+     "الإدخال والإعادة",
+     "تسجيل إدخال وحدة التحكم",
+     "يسجل جميع الأزرار واتجاهات العصا في <مجلد البيانات>/input_record.txt في الوقت الفعلي (مثل NX_INPUT_RECORD=1). إيقاف التشغيل يحفظ الملف ويغلقه.",
+     "التشخيص",
+     "سجل تتبع مفصل (NX_TRACE)",
+     "يكتب تتبعات نظام الملفات وIPC وSVC وHLE في nx.log في الوقت الفعلي (مثل NX_TRACE=1). مفيد لتشخيص الأعطال مع بعض الحمل على الأداء.",
+     "تطبق خيارات التصحيح فورا. التسجيل وسجل التتبع يخصان الجلسة الحالية فقط."},
+    // 9: Türkçe
+    {"Hata Ayıklama",
+     "Girdi ve Tekrar",
+     "Kontrolcü girdilerini kaydet",
+     "Tüm düğme basışlarını ve çubuk yönlerini <veri klasörü>/input_record.txt dosyasına gerçek zamanlı kaydeder (NX_INPUT_RECORD=1 ile aynı). Kapatmak dosyayı kaydedip kapatır.",
+     "Tanılama",
+     "Ayrıntılı izleme günlüğü (NX_TRACE)",
+     "Dosya sistemi, IPC, SVC ve HLE çağrılarını gerçek zamanlı olarak nx.log dosyasına yazar (NX_TRACE=1 ile aynı). Hataları bulmak için faydalıdır, performansı bir miktar etkileyebilir.",
+     "Hata ayıklama seçenekleri anında uygulanır. Girdi kaydı ve izleme günlüğü yalnızca bu oturum içindir."},
+    // 10: Nederlands
+    {"Debug",
+     "Invoer & Replay",
+     "Controller-invoer opnemen",
+     "Neemt alle knoppen en stickrichtingen live op naar <datamap>/input_record.txt (hetzelfde als NX_INPUT_RECORD=1) voor herhaling via NX_INPUT_SCRIPT. Uitschakelen slaat het bestand op en sluit het.",
+     "Diagnose",
+     "Uitgebreide tracelog (NX_TRACE)",
+     "Schrijft gedetailleerde bestandssysteem-, IPC-, SVC- en HLE-aanroepen live naar nx.log (hetzelfde als NX_TRACE=1). Handig bij foutopsporing, met lichte prestatie-impact.",
+     "Debug-opties werken direct. Invoeropname en tracelog gelden alleen voor de huidige sessie."},
+    // 11: 简体中文
+    {"调试",
+     "输入与回放",
+     "录制手柄输入",
+     "实时将所有按键与摇杆方向记录到 <数据目录>/input_record.txt（等同于 NX_INPUT_RECORD=1），供 NX_INPUT_SCRIPT 回放使用。关闭后会保存并关闭文件。",
+     "诊断",
+     "详细跟踪日志 (NX_TRACE)",
+     "实时将文件系统、IPC、SVC 和 HLE 调用跟踪写入 nx.log（等同于 NX_TRACE=1）。有助于排查卡死或错误，会带来一定性能开销。",
+     "调试开关立即生效。输入录制与跟踪日志仅在当前会话有效，重启后重置。"},
+    // 12: 繁體中文
+    {"除錯",
+     "輸入與重播",
+     "錄製手把輸入",
+     "即時將所有按鍵與搖桿方向記錄到 <資料夾>/input_record.txt（等同於 NX_INPUT_RECORD=1），供 NX_INPUT_SCRIPT 重播使用。關閉後會儲存並關閉檔案。",
+     "診斷",
+     "詳細追蹤日誌 (NX_TRACE)",
+     "即時將檔案系統、IPC、SVC 與 HLE 呼叫追蹤寫入 nx.log（等同於 NX_TRACE=1）。有助於排查卡頓或錯誤，會帶來些許效能開銷。",
+     "除錯開關立即生效。輸入錄製與追蹤日誌僅於目前工作階段有效，重啟後重置。"},
+};
+
+void debug_tab(MenuContext& c) {
+    Settings& s = c.settings;
+    const int lang = std::clamp(s.language, 0, 12);
+    const DebugLabels& dl = kDebugLabels[lang];
+    rows::begin("debug", c.height);
+
+    rows::section(dl.sec_input);
+    bool rec = plat::input_recording();
+    if (rows::toggle(dl.record_label, &rec, false, dl.record_desc)) plat::set_input_recording(rec);
+
+    rows::section(dl.sec_diag);
+    rows::toggle(dl.trace_label, &nx::g_trace, false, dl.trace_desc);
+
+    rows::page_note(dl.note);
+    rows::end();
+}
+
 // The close X in the top-right corner (as Savage Wind's menu.mm: lit when hovered or selected).
 bool close_button(float k) {
     const float bx = 44 * k;
@@ -2127,7 +2276,8 @@ void draw_menu(MenuContext& c) {
     if (close_button(k)) c.open = false;
     ImGui::Dummy(ImVec2(0, 4 * k));
 
-    const char* names[kTabs] = {l.video, l.audio, l.controls, l.overlay, l.system, "Network", "Speedrun"};
+    const char* names[kTabs] = {l.video, l.audio, l.controls, l.overlay, l.system, "Network", "Speedrun",
+                                kDebugLabels[std::clamp(s.language, 0, 12)].tab};
     int current = -1;
     // Tabs follow the keyboard / controller focus: moving onto a tab with the arrows or the D-pad shows it (next
     // frame), with no Enter or A needed. The mouse still selects by clicking. Only a change of focus moves the tab: L / R
@@ -2179,7 +2329,8 @@ void draw_menu(MenuContext& c) {
                 case 3: overlay_tab(c); break;
                 case 4: system_tab(c, l); break;
                 case 5: network_tab(c); break;
-                default: speedrun_tab(c); break;
+                case 6: speedrun_tab(c); break;
+                default: debug_tab(c); break;
             }
             ImGui::EndChild();
             ImGui::PopStyleVar();

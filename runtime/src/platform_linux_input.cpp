@@ -114,7 +114,7 @@ void apply_settings(const overlay::Settings& s, bool persist) {
     set_memory_limit_gb(s.memory_limit_gb);
     setenv("NX_LOW_VRAM_PROFILE", s.low_vram_profile ? "1" : "0", 1);
     nvn::set_fsr(s.upscaler == 1, float(s.fsr_sharpness) / 100.0f);
-    nvn::set_fxaa(s.antialiasing == 1);
+    nvn::set_aa_mode(s.antialiasing);
     nvn::set_anisotropy(s.anisotropy);
     nvn::set_shadow_scale(s.shadow_scale);
     nvn::set_vsync(s.vsync);
@@ -255,7 +255,7 @@ bool player_connected(unsigned player) {
 void read_pad_player(unsigned player, PadState& p) {
     if (player == 0) { read_pad(p); return; }
     std::lock_guard lk(g_pad_lock);
-    if (player < g_players.size() && !overlay::wants_keyboard()) p = g_players[player];
+    if (player < g_players.size() && !overlay::is_open() && !overlay::wants_keyboard()) p = g_players[player];
 }
 ButtonPromptConfig button_prompt_config() {
     std::array<int, 4> styles{};
