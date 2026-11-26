@@ -780,12 +780,12 @@ uint32_t gather_textures(const std::vector<const ShaderInfo*>& shaders) {
         // Sampling one of the open pass's targets (a depth buffer read back by the character lighting) needs what
         // was rendered stored first: a fresh pass. SetRenderTargets used to end every pass, which did this by chance
         // (docs/nvn/DEBUG.md #35). Only when a draw of this pass wrote it (pass_wrote, nvn_draw.cpp).
-        if (pass_wrote(img)) out |= kNeedBreak;
-        if (b->image.depth && img) {  // a stale depth-compare twin is copied first (nvn_compare_twin.cpp)
-            GpuImage* sampled = latest_overlapping_shadow_image(texture, img);
-            if (sampled && compare_twin_wanted(*sampled) && !compare_twin_ready(*sampled)) out |= kNeedBreak;
+        GpuImage* sampled = (b->image.depth && img) ? latest_overlapping_shadow_image(texture, img) : img;
+        if (pass_wrote(sampled)) out |= kNeedBreak;
+        if (b->image.depth && sampled) {  // a stale depth-compare twin is copied first (nvn_compare_twin.cpp)
+            if (compare_twin_wanted(*sampled) && !compare_twin_ready(*sampled)) out |= kNeedBreak;
         }
-        if (clears_pending_image(img)) out |= kNeedBreak | kSampledPending;
+        if (clears_pending_image(sampled)) out |= kNeedBreak | kSampledPending;
     }
     return out;
 }

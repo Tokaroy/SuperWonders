@@ -128,6 +128,24 @@ struct StorageKey {
     }
 };
 std::map<StorageKey, std::weak_ptr<GpuImage>> g_live_images;
+std::vector<std::weak_ptr<GpuImage>> g_shadow_images;
+
+void track_shadow_image(const std::shared_ptr<GpuImage>& img) {
+    if (!img || img->nvn_format != 0x32 || img->logical_width != img->logical_height || img->logical_width < 1360)
+        return;
+    bool present = false;
+    for (size_t i = 0; i < g_shadow_images.size();) {
+        auto s = g_shadow_images[i].lock();
+        if (!s || !s->image) {
+            g_shadow_images[i] = std::move(g_shadow_images.back());
+            g_shadow_images.pop_back();
+            continue;
+        }
+        if (s.get() == img.get()) present = true;
+        ++i;
+    }
+    if (!present) g_shadow_images.push_back(img);
+}
 
 GpuImage* image_of(uint64_t guest) {
     Texture* t = get<Texture>(guest);
@@ -180,6 +198,7 @@ GpuImage* image_of(uint64_t guest) {
     if ((t->image = reuse_image(*t)); t->image && t->image->render_scale == image_scale && t->image->uw == t->uw) {
         t->alloc_failed = false;
         t->image->pool = t->pool, t->image->pool_offset = t->offset, t->image->pool_size = t->storage_size;
+        track_shadow_image(t->image);
         return t->image.get();
     }
     t->image.reset();
@@ -423,6 +442,7 @@ GpuImage* image_of(uint64_t guest) {
             img->width, img->height, img->layers, img->levels, t->target, t->format, int(img->format));
     t->image = img;
     if (t->memory) g_live_images[key] = img;
+    track_shadow_image(img);
     return img.get();
 }
 
@@ -431,20 +451,26 @@ void set_shadow_scale(int mult) {
 }
 
 GpuImage* latest_overlapping_shadow_image(uint64_t guest, GpuImage* image) {
-    static const bool enabled = std::getenv("NX_SHADOW_OVERLAP_ALIAS") != nullptr;
+    static const bool enabled = std::getenv("NX_NO_SHADOW_OVERLAP_ALIAS") == nullptr;
     static const bool trace_cross_size = std::getenv("NX_TRACE_SHADOW_OVERLAP_CROSS") != nullptr;
     if ((!enabled && !trace_cross_size) || !image) return image;
     Texture* t = get<Texture>(guest);
     if (!t || t->format != 0x32 || t->width != t->height || t->width < 1360 || !t->pool || !t->storage_size)
         return image;
-    const bool can_alias = enabled && t->width == 2048;
+    const bool can_alias = enabled;
     const uint64_t end = t->offset + t->storage_size;
     GpuImage* newest = image;
     static std::set<std::array<uint64_t, 8>> logged_cross_overlaps;
     static unsigned cross_overlap_logs = 0;
-    for (auto& entry : g_live_images) {
-        auto candidate = entry.second.lock();
-        if (!candidate || candidate.get() == image || !candidate->image || !candidate->rendered ||
+    for (size_t i = 0; i < g_shadow_images.size();) {
+        auto candidate = g_shadow_images[i].lock();
+        if (!candidate || !candidate->image) {
+            g_shadow_images[i] = std::move(g_shadow_images.back());
+            g_shadow_images.pop_back();
+            continue;
+        }
+        ++i;
+        if (candidate.get() == image || !candidate->rendered ||
             candidate->pool != t->pool || candidate->nvn_format != t->format ||
             candidate->logical_width != candidate->logical_height || candidate->logical_width < 1360 ||
             !candidate->pool_size)
@@ -466,7 +492,7 @@ GpuImage* latest_overlapping_shadow_image(uint64_t guest, GpuImage* image) {
                     (unsigned long long)candidate->rendered_at);
             }
         }
-        if (can_alias && candidate->logical_width == t->width && candidate->rendered_at > newest->rendered_at)
+        if (can_alias && (!newest->rendered || candidate->rendered_at > newest->rendered_at))
             newest = candidate.get();
     }
     if (newest == image) return image;
