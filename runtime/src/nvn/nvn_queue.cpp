@@ -443,7 +443,7 @@ uint64_t pace_present(int interval) {
         constexpr uint64_t kSpinMarginNs = 500'000ull;
 #endif
         if (wait_ns > kSpinMarginNs) plat::sleep_ns(int64_t(wait_ns - kSpinMarginNs));
-        while (plat::monotonic_ns() < custom_next) plat::cpu_pause();
+        while (plat::monotonic_ns() < custom_next) plat::yield();
         const uint64_t done = plat::monotonic_ns();
         return done > now ? done - now : 0;
     }
