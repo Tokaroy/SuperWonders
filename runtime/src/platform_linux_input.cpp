@@ -68,6 +68,7 @@ std::array<std::atomic<int>, 4> g_pad_left_deadzone{{{16}, {16}, {16}, {16}}};
 std::array<std::atomic<int>, 4> g_pad_right_deadzone{{{16}, {16}, {16}, {16}}};
 std::atomic<bool> g_window_focused{true};
 std::atomic<bool> g_pause_in_background{false};
+std::atomic<bool> g_ignore_pad_in_background{false};
 
 void update_audio_gain(const overlay::Settings& s) {
     if (!g_stream) return;
@@ -101,6 +102,7 @@ void apply_settings(const overlay::Settings& s, bool persist) {
     }
     for (size_t i = 0; i < 4; ++i) g_assignments[i] = s.player_devices[i];
     g_pause_in_background.store(s.pause_in_background, std::memory_order_relaxed);
+    g_ignore_pad_in_background.store(s.ignore_pad_in_background, std::memory_order_relaxed);
     update_audio_gain(s);
     nx::set_audio_output(s.audio_mode, s.stereo_separation);
     nx::set_internal_resolution_preset(s.internal_resolution);  // read at the next boot
@@ -481,12 +483,15 @@ void sample_input() {
             SDL_RumbleGamepad(g_gamepads[slot], Uint16((req >> 16) & 0xFFFFu), Uint16(req & 0xFFFFu), 250);
         }
     }
+    const bool ignore_pad = g_ignore_pad_in_background.load(std::memory_order_relaxed) &&
+                            !g_window_focused.load(std::memory_order_relaxed);
     for (unsigned slot = 0; slot < g_gamepads.size(); ++slot) {
         SDL_Gamepad* pad = g_gamepads[slot];
         if (!pad) continue;
         PadState& q = physical_pads[slot];
         pad_connected[slot] = true;
         pad_styles[slot] = detect_gamepad_style(pad);
+        if (ignore_pad) continue;
         // Physical buttons by position (overlay::Physical order), then each action takes its bound button
         // (the menu's preset or remapping; the default preset puts A at the bottom, as on Windows).
         static const SDL_GamepadButton physical[] = {

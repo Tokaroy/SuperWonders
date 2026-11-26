@@ -54,6 +54,7 @@ struct PcMenuState {
     bool muted = false;
     bool mute_in_background = false;
     bool pause_in_background = false;
+    bool ignore_pad_in_background = false;
     bool fullscreen = false;
     bool always_on_top = false;
     bool metrics_enabled = false;
